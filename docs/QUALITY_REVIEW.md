@@ -159,14 +159,24 @@ scarce-node counts round to a whole share per seat, so four seats see 20 gold, n
 
 ### 6. Invoices in the export
 
-`rawUsage` stores the provider's usage object verbatim into every turn record, so
-`cost`, `is_byok` and `upstream_inference_completions_cost` ride along. Across the seven
-samples that publishes **$94.62** of someone's account spend in 2836 turns. README's
-claim is literally true — the files are key-free and endpoint-free — and a reader will
-still not expect a per-turn bill. Not fixed here: scrubbing `rawUsage` invalidates the
-token-budget arithmetic that reads those numbers, and the seven shipped samples would
-have to be regenerated. One-line fix, but it wants the author's call on what belongs in
-a transcript.
+`rawUsage` stored the provider's usage object verbatim into every turn record, so `cost`,
+`is_byok` and `cost_details.upstream_inference_*` rode along. Across the seven shipped
+samples that published **$94.62** of the operator's account spend over 2836 priced turns.
+README's claim is literally true — the files are key-free and endpoint-free — and a reader
+still does not expect a per-turn bill when they are handed a "safe to share" example.
+
+Fixed at the source: `rawUsage` copies the usage block minus a named set of pricing and
+account fields, and the seven samples were scrubbed of exactly those members (3389 lines
+before and after, 2836 changed, nothing else moved, verified by parsing both versions and
+comparing every record outside `usageRaw`). A test asserts both the filter and the artefact,
+so a future priced sample fails the suite.
+
+An earlier note here said the fix would invalidate "the token-budget arithmetic that reads
+those numbers". It would not: `grep -rn usageRaw js/` shows exactly one write site and no
+reader — the field exists for whoever downloads the transcript, which is the second reason
+what is in it matters. Note too what this does **not** undo: the figures are in git history,
+and only a history rewrite removes them from a public remote. That is the author's call and
+not mine to take.
 
 ### 7. Sim duties living in the render loop
 
@@ -260,12 +270,16 @@ it is not optional.
 | `js/ui.js` `pct`, results card, markdown export | unknown renders `—` / `n/a`; a measured zero still prints `0%`; the export prints the denominator beside format fidelity | `n/a (0 answered)` vs `0%` for the two failure kinds |
 | `js/ui.js` `computeBehaviorTags` | an unjudged success rate no longer tags a seat as failing | the counter-party case (a measured 20%) still earns the tag |
 | `js/game.js` `canAffordAnyMilitary` + new `trainOptionsFor` | survival reads the game's training tables instead of a hand-copied map, so the temple and civ-unique units count | `tests/elimination-predicate.test.cjs` (5); its two bug-defining tests fail against the old map |
+| `js/openai-ai.js` `rawUsage` | copies the usage block without pricing/account fields (`cost`, `cost_details`, `total_cost`, `is_byok`, `native_statistics`), leaving the token detail that is the field's whole purpose | `tests/usage-redaction.test.cjs` |
+| `samples/*.jsonl` | 8508 pricing members removed from 2836 turns; every other byte identical | both versions parsed and compared record by record; the new test fails against the old files |
+| `.gitignore` | `results_*.md`, `match-*.jsonl`, `screenshots/` — a run's own output cannot be published by one `git add -A` | — |
+| `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
 | `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
 | `js/i18n.js` `sum.legend` ×4 | the legend says terms can be dropped and the rest share the score | rendered text in the summary |
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **282/282 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination); the visual suite and the trust-boundary suite each
+Suite state: **285/285 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -281,39 +295,38 @@ GPUs; the direction is the part that holds.
 1. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
 2. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
    targets never re-check it.
-3. **S2 — `usageRaw` publishes spend** (§6).
-4. **S3 — CI covers the unit suite only.** `.github/workflows/ci.yml` runs
-   `node --check` over every shipped file, parses `game-state-schema.json` and
-   `samples/index.json`, and runs `node --test`. It deliberately does **not** run the two
-   Playwright suites: the runner would have to fetch a browser per job, and a job that is
-   red for network reasons trains people to ignore it. Those suites are the only regression
-   guard for the escaping fixes, so wiring them is the next thing to settle. Also
-   unenforced: the `?v=`-must-move-with-the-change rule (`tests/shipped-files.test.cjs`
-   checks every tag *exists* and every file is *loaded*, not that a touched file got a new
-   tag — that needs git history, which is a CI job, not a unit test).
-5. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
+3. **S3 — the browser job has never run on a runner.** `.github/workflows/ci.yml` now has
+   two jobs: the push job (`node --check` over every shipped file, both JSON contracts,
+   `node --test`) and a nightly `workflow_dispatch` job for the two Playwright suites, with
+   the screenshots kept as an artefact. They are off push because each downloads a browser
+   and a check that is red for network reasons trains people to ignore it — but the commands
+   are verified locally and the runner is not. Watch the first scheduled run.
+   Still unenforced: the `?v=`-must-move-with-the-change rule
+   (`tests/shipped-files.test.cjs` checks every tag *exists* and every file is *loaded*, not
+   that a touched file got a new tag — that needs git history, which is a CI step).
+4. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
    targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
    `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
    seeded from the map seed closes it.
-6. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
+5. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
    its effect, which block 1 now covers) is still unguarded, and `js/analyzer.js:11` shares
    the shape.
-7. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
+6. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
     `git mv` into one file per concern keeps all 268 tests green — that is the whole
     migration.
-8. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
+7. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). `.gitignore` does not yet cover `results_*.md` or `match-*.jsonl`, the
     two things this app writes into its own folder.
-9. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
+8. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-10. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
+9. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
     old set**, while every other texture owner in that file does delete.
-11. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
+10. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
     is never called: either wire it or delete the comment that leans on it.
-12. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+11. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`
@@ -342,7 +355,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 282 unit tests, ~77 s, needs only Node
+npm test                      # 285 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \

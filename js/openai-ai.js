@@ -1987,10 +1987,19 @@ class OpenAIAIManager {
         return /^(length|max_tokens)$/i.test(String(finishReason || ''));
     }
 
-    // The provider's OWN usage object, verbatim. extractUsage reduces it to a
-    // prompt/completion pair, which drops reasoning-token accounting and anything
-    // provider-specific — exactly the fields wanted when a reply stops far short of
-    // the cap that was asked for.
+    // The provider's OWN usage object, minus the parts that describe the ACCOUNT rather
+    // than the request. extractUsage reduces it to a prompt/completion pair, which drops
+    // reasoning-token accounting and anything provider-specific — exactly the fields wanted
+    // when a reply stops far short of the cap that was asked for.
+    //
+    // Not verbatim any more, deliberately. An OpenRouter `usage` block carries `cost`,
+    // `cost_details` and `is_byok` beside the token counts, and this object is copied into
+    // EVERY turn of the match transcript — the artefact this project hands to other people.
+    // samples/ ships seven transcripts whose 2,836 priced turns published what the
+    // operator's key cost, turn by turn, under a README that calls those samples safe to
+    // hand on. The token accounting is what a reader needs from usageRaw; the price is
+    // derived from those same counts and says nothing about the reply.
+    static PRICING_FIELDS = ['cost', 'total_cost', 'cost_details', 'costdetails', 'is_byok', 'native_statistics'];
     static rawUsage(provider, data) {
         if (!data) return null;
         if (provider === 'ollama') {
@@ -1998,7 +2007,16 @@ class OpenAIAIManager {
             return (prompt_eval_count != null || eval_count != null)
                 ? { prompt_eval_count, eval_count, done_reason } : null;
         }
-        return data.usage || data.usageMetadata || null;
+        const usage = data.usage || data.usageMetadata;
+        if (!usage) return null;
+        // Copied, not filtered in place: this object belongs to the parsed response, and a
+        // transcript that shared it would be editing the provider's payload.
+        const clean = {};
+        for (const key of Object.keys(usage)) {
+            if (OpenAIAIManager.PRICING_FIELDS.includes(String(key).toLowerCase())) continue;
+            clean[key] = usage[key];
+        }
+        return clean;
     }
 
     // Pull token usage out of a provider response (field names differ everywhere).

@@ -27,3 +27,10 @@ llm-colosseum-models.json
 when-agents-rule-models.json
 arenaConfig*.json
 *.secrets.json
+
+# What a run leaves behind: match transcripts, exported results, QA screenshots.
+# Untracked is not enough here — these carry real opponent spend and full match data, and
+# an untracked file is one `git add -A` away from being published on a public remote.
+results_*.md
+match-*.jsonl
+screenshots/
