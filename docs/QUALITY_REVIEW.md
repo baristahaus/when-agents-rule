@@ -517,6 +517,37 @@ GPUs; the direction is the part that holds.
    re-scoped: it had been excluding civ uniques, and Persia's uniques *are* `archer` and `cavalry`
    — which is how this was found at all.)
 
+10. **S2 — the rule that decides every battle is in the README and in nobody's game.**
+    `combatMultiplier` (game.js:1084) is a clean, symmetric, fully implemented triangle: cavalry
+    beats ranged 1.5×, ranged beats infantry 1.5×, infantry beats cavalry 1.5×, each reversed at
+    0.75×, and against buildings infantry 1.5×, cavalry 1.0×, ranged 0.5×. `README.md` states it in
+    one line. No text a *player* of either kind reads states it, and for a model it is worse than
+    unstated — it is **underivable from the payload**:
+
+    * a full emitted state contains **zero** occurrences of `infantry`, `cavalry`, `ranged` or
+      `support` (measured over `samples/2026-08-26_deepseek-v4-glm5.3-qwen3.8-gpt5.6_103min.jsonl`);
+    * `friendlyUnits[]` and `enemyUnits[]` carry `type`, which is the unit **id** (`"hoplite"`,
+      `"elite_archer"`), while the multiplier reads the unit **class** (`attacker.unitType`);
+    * the class does exist in the shipped app, but — in the words of the comment that uses it —
+      "the class exists only as this grouping" (`ui.js:3804`): a tooltip heading and a chip label,
+      localised into four languages, never emitted as data.
+
+    So a human clicking through the training panel at least sees "Infantry — melee" over the unit
+    it is about to buy, and a model sees `{"id":"hoplite","cost":{…}}` and must already know that a
+    hoplite is infantry. On the shared roster the names usually give it away; on the civ uniques
+    (`horse_carriage`? `archer_ship` — is that ranged or a ship for these purposes?) they do not,
+    and the answer is that `combatMultiplier` reads whatever `type` the def carries and nothing
+    special-cases ships.
+
+    Not fixed, because the only available repairs change what the participant knows and therefore
+    what every published score means — the same boundary as item 9, and this one is larger, since
+    the triangle decides combat rather than one free stat bump. If the maintainer wants disclosure
+    in scope, the cheap and balanced option is one derived field next to the id
+    (`friendlyUnits[].class = getUnitDef(id).type`, same for `enemyUnits[]`), which makes an
+    existing rule usable without teaching anyone the multipliers; the loud option is a line in the
+    system prompt naming the triangle. Either way the README sentence should stop being the only
+    place the rule is written down outside the code.
+
 ## Not verified
 
 Claims from the delegated reviews that I did not confirm, and therefore do not assert

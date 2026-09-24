@@ -269,8 +269,8 @@ The engine validates it against the **advancement chain** (advance → research 
 
 ## ⚔️ Game rules in a nutshell
 
-- **Win** by eliminating every rival, **or** building a **Wonder** and holding it for **600 s**. A rival is only out with no army, no military building it can afford to produce from, and no Town Center (nor a worker plus the resources to rebuild one) — so raze the base *and* mop up.
-- **Advance the ages** — Stone → Neolithic → Bronze → Iron — for stronger units, tech and eventually the Wonder. Buildings take an epoch-appropriate look and +50% HP per age.
+- **Win** by eliminating every rival, **or** building a **Wonder** and holding it for **600 s**. A rival is only out with no army, no military building it can both afford to produce from *and* have population room to stand the unit in, and no Town Center (nor a worker plus the resources to rebuild one) — so raze the base *and* mop up. Owning no Town Center and no house means no room, which is why housing is a supply line and not only a cap.
+- **Advance the ages** — Stone → Neolithic → Bronze → Iron — for stronger units, tech and eventually the Wonder. Buildings take an epoch-appropriate look and +50% HP per age. **Units already on the field are re-typed for free** as their owner's age rises — a Bronze-age warrior walks into the Iron Age a champion, unbilled — though this happens for the shared roster and for Persia's signature units, not for the other three civilizations'; see `docs/QUALITY_REVIEW.md`.
 - **Economy first, but not forever.** Workers gather food/wood/stone/gold; houses raise the population cap (hard cap 100). **Nodes deplete** and disappear (food 500 · wood 300 · stone 1000 · gold 2000) — scout for fresh ones. Only farms regenerate, and only while manned.
 - **Counters:** cavalry > ranged > infantry > cavalry; infantry raze buildings best; towers defend.
 - **Fog of war:** a model can't harvest or attack what it hasn't discovered.
