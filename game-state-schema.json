@@ -346,6 +346,55 @@
         }
       }
     },
+    "ordersInProgress": {
+      "type": "array",
+      "description": "Orders you have already given whose effect has not finished arriving — a column marching, workers assigned, a standing order holding a route. Absent when nothing is in flight. This is the harness telling a seat what it already ordered, so that repeating the order is the seat's mistake rather than ours; entries are the command spelled as it was issued, so one can be matched back to the turn that made it. Two shapes occur: a one-off order carries `units` (a count), a standing order carries `unitIds` (handles) and `mode`. `secondsRemaining` is an ETA in game seconds and is missing when the wait is on a fight rather than a clock.",
+      "items": {
+        "type": "object",
+        "required": ["order", "to"],
+        "properties": {
+          "order": {
+            "type": "string",
+            "description": "The action id that produced it: move_units, attack_target, assign_workers."
+          },
+          "mode": {
+            "type": "string",
+            "description": "Standing orders only: march, scout, guard, patrol."
+          },
+          "to": {
+            "type": "array",
+            "description": "[x, z] destination, averaged over the group for a one-off order.",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "from": {
+            "type": "array",
+            "description": "[x, z] patrol origin, patrol mode only.",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "units": {
+            "type": "integer",
+            "description": "How many units the order covers. One-off orders only."
+          },
+          "unitIds": {
+            "type": "array",
+            "description": "The handles it covers — the same ids friendlyUnits publishes. Standing orders only.",
+            "items": { "type": "integer" }
+          },
+          "targets": {
+            "type": "string",
+            "description": "'military' when an attack order was given the class filter rather than a fixed destination."
+          },
+          "secondsRemaining": {
+            "type": "number",
+            "description": "ETA in game seconds, counted down every turn. Absent when there is no clock to read."
+          }
+        }
+      }
+    },
     "battles": {
       "type": "array",
       "description": "Fighting you could not watch, one entry per ENGAGEMENT (clustered by location), CUMULATIVE since it began — a fight outlasts several turns. Absent entirely when nothing is happening. Only engagements you took part in. Numbers only: 'their 2 heavy_cavalry dealt 1800 to my 3 archers' is the counter lesson, drawing it is your job.",

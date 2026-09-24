@@ -232,7 +232,32 @@ against the contract shipped beside them.
 
 The rewrite was verified mechanically rather than by eye: `required` vs a real record
 (now zero missing, zero undeclared), the three regrouped properties checked key by key,
-and all six `$ref` targets confirmed to resolve.
+and the `$ref` targets confirmed to resolve.
+
+**That verification was weaker than it read, in two ways, and the second left a live drift.**
+"All six `$ref` targets" miscounted: there are twenty, in two styles — the shared vocabulary under
+`$defs`, and sub-schemas pointing straight at another property
+(`threats.enemyWonders.items` → `properties.enemyBuildings.items`), plus a draft-04 local
+`definitions/side` inside `battles`. A resolver that understands only `#/$defs/…` reports three valid
+refs as dangling, which the first version of the new test did, loudly, until the resolver walked
+real JSON pointers. And "zero undeclared" was measured against one of the older recordings: the two
+newest emit **`ordersInProgress` on every turn** — 1,918 entries in the 2026-09-09 match — and the
+schema never mentioned it. That is the field telling a seat what it already ordered, which makes it
+the last thing in the payload to leave undocumented. It is declared now, both entry shapes, with the
+missing `secondsRemaining` explained.
+
+The section is no longer verified by a script anyone has to remember. `tests/state-contract.test.cjs`
+checks the schema against the newest sample on every `npm test`: every `required` field present, no
+emitted field undeclared, every `$ref` resolved as a real pointer, and the nested promises —
+`battles[]` keys, the four integer costs on every trainable unit and buildable structure — read *from
+the schema* rather than restated in the test, so a promise tightened in the schema becomes a claim
+about real records. 18,461 cost-shaped objects in that one file, none non-integer, which is why
+`integer` is asserted as an integer. Five schema mutations were tried — un-declare
+`ordersInProgress`, require a never-emitted field, point a `$ref` at nothing, promise a `battles` key
+the records lack, add a fifth resource to `cost` — each failed exactly the test owning it. Older
+samples are deliberately not held to today's schema: `2026-08-26` genuinely lacks `population` and
+`nodes` and carries the renamed-away `discoveredNodesOnMap`, and pinning history to the present makes
+a fixture that can never change.
 
 ### 5. Documentation is a live dependency
 
@@ -455,6 +480,7 @@ it is not optional.
 | `tests/gl-identity.test.cjs` (new) | the four deployment shapes: no context, no debug extension, unmasked exposed, extension/getParameter throwing | 4 tests; dropping the fallback, the null-normalisation or either catch each fails one |
 | `js/openai-ai.js` `takeTurnAnswer` (extracted) + staleness recorded | the turn-based acceptance rule is now exercitable, and rounds-crossed is written to the turn and the seat without discarding anything | `tests/late-answer.test.cjs` (5); six mutations of the rule, five caught by the test that owns that rule |
 | `docs/QUALITY_REVIEW.md` item 6 | the `makeMesh` claim corrected — no such function exists, and shader/link failures already throw with the driver's log | whole-tree search; `glcore.js:35,44` |
+| `game-state-schema.json` + `tests/state-contract.test.cjs` (new) | `ordersInProgress` declared at last — the field is emitted on every turn of the two newest matches and was in no reader's contract — and the schema is now checked against a real record by the suite instead of by a remembered script | 5 tests over 727 turns / 1,918 order rows / 18,461 cost objects; five schema mutations, each caught by the test that owns it |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
@@ -463,7 +489,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **328/328 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests); the visual suite and the trust-boundary suite each
+Suite state: **333/333 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -699,7 +725,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 328 unit tests, ~77 s, needs only Node
+npm test                      # 333 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
