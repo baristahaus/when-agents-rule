@@ -6272,10 +6272,13 @@ class UIManager {
             });
             // A node it has found was seen, whatever the tile grid rounds to.
             sc.nodes.forEach(n => fow.reveal(n.x, n.z, 10));
-            // ...and what it owns now is in sight now.
+            // ...and what it owns now is in sight now — at the radius the game actually
+            // gives it, from the same two functions the live match uses. These called for
+            // fogofwar's retired local constants (15 / 12), which drew the replay with a
+            // shorter tower and building sweep than the match ever had.
             (sc.seats || []).forEach(s => {
-                s.units.forEach(u => fow.reveal(u.x, u.z, fow.unitVisionRange));
-                s.buildings.forEach(b => fow.reveal(b.x, b.z, fow.buildingVisionRange));
+                s.units.forEach(u => fow.reveal(u.x, u.z, this.game.unitVision(u)));
+                s.buildings.forEach(b => fow.reveal(b.x, b.z, this.game.buildingVision(b)));
             });
             // So is anything it can currently SEE of somebody else's — but not a
             // remembered one, whose whole point is that it sits in the dark.

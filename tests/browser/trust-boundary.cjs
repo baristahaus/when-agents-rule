@@ -37,7 +37,9 @@ const HOSTILE_ID=`q" onmouseover="${H}" data-x="`;
 const HOSTILE_ROW=`1" onmouseover="${H}" x="`;
 const launch=()=>chromium.launch({headless:true,
  ...(process.env.WAR_CHROME_PATH?{executablePath:process.env.WAR_CHROME_PATH}:{}),
- args:['--enable-unsafe-swiftshader']});
+ // WAR_CHROME_ARGS: run against a real GPU (`--use-gl=angle --use-angle=vulkan`) instead of
+ // software rasterisation. Defaults unchanged.
+ args:['--enable-unsafe-swiftshader',...(process.env.WAR_CHROME_ARGS?process.env.WAR_CHROME_ARGS.split(' '):[])]});
 // Works on a Browser or a BrowserContext — both expose newPage, and a scenario that
 // intercepts requests needs the context one.
 const newPage=async(scope)=>{const page=await scope.newPage({viewport:{width:1400,height:900}});

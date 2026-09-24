@@ -17,7 +17,10 @@ const server=http.createServer((req,res)=>{
  const out=process.env.WAR_QA_DIR||fs.mkdtempSync(path.join(os.tmpdir(),'war-shared-qa-'));
  fs.mkdirSync(out,{recursive:true});let browser;
  try{
-  browser=await chromium.launch({headless:true,...(process.env.WAR_CHROME_PATH?{executablePath:process.env.WAR_CHROME_PATH}:{}),args:['--enable-unsafe-swiftshader']});
+  // WAR_CHROME_ARGS lets this run on real hardware (`--use-gl=angle --use-angle=vulkan`
+  // here reaches the Radeon and gives a true 60Hz rAF cadence instead of software's ~21).
+  // The defaults are unchanged; the app never sees any of this.
+  browser=await chromium.launch({headless:true,...(process.env.WAR_CHROME_PATH?{executablePath:process.env.WAR_CHROME_PATH}:{}),args:['--enable-unsafe-swiftshader',...(process.env.WAR_CHROME_ARGS?process.env.WAR_CHROME_ARGS.split(' '):[])]});
   const page=await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{localStorage.setItem('warGraphicsQuality','low');localStorage.setItem('warUiLang','en');});

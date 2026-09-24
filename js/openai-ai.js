@@ -3570,15 +3570,15 @@ class OpenAIAIManager {
         const halfSize = mapSize / 2;
         const grid = new Uint8Array(numTiles * numTiles); // 0=hidden, 1=explored, 2=visible
 
-        // Vision ranges
-        const unitVisionRange = 15;
-        const buildingVisionRange = 12;
-        const towerVisionRange = 60;
-
+        // The same authority the rest of the visibility code uses — see
+        // isPositionVisibleToAI below, which already reads game.unitVision. This carried its
+        // own numbers (15, cavalry ×1.2 = 18, buildings 12, towers 60) against a rule of
+        // 15 / 22.5 / 20 / 80, and the spectator's per-seat overlay is exactly the tool
+        // someone uses to ask "what could this model see", so it has to be the real radius.
         // Reveal around AI's units
         ai.units.forEach(unit => {
-            const range = unit.unitType === 'cavalry' ? unitVisionRange * 1.2 : unitVisionRange;
-            this.revealGridArea(grid, numTiles, unit.x, unit.z, range, halfSize, gridSize, 2);
+            if (!(unit.health > 0)) return;
+            this.revealGridArea(grid, numTiles, unit.x, unit.z, game.unitVision(unit), halfSize, gridSize, 2);
         });
 
         // Reveal around AI's buildings — FINISHED ones only. A construction plot
@@ -3617,12 +3617,13 @@ class OpenAIAIManager {
     // 5. Helper: Check if position is visible to AI
     // ----------------------------------------------------------------
     isPositionVisibleToAI(ai, x, z, game) {
-        const buildingVisionRange = 12;
-        const towerVisionRange = 60;
-
-        // Check against AI units
+        // Check against AI units. Living ones only, as aiManager.isVisibleTo and
+        // Game.canOwnerSee already insist: a unit in its death animation is not a scout,
+        // and this predicate gates the enemy list a model is shown, so the two answers had
+        // to be the same or a model is handed a foe its own auto-defence denies seeing.
         for (const unit of ai.units) {
-            const range = game.unitVision(unit); // cavalry sees 50% farther
+            if (!(unit.health > 0)) continue;
+            const range = game.unitVision(unit); // cavalry sees 50% farther, +vision techs
             const dx = unit.x - x;
             const dz = unit.z - z;
             if (Math.sqrt(dx * dx + dz * dz) <= range) return 'visible';

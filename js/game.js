@@ -1231,6 +1231,16 @@ class Game {
                 unit._acquireTimer = (unit._acquireTimer == null) ? 150 : unit._acquireTimer + deltaTime;
                 if (unit._acquireTimer >= 150) {
                     unit._acquireTimer = 0;
+                    // What this radius now MEANS, since the scan requires sight: measured
+                    // across the roster, every unit's aggro exceeds its own sight (militia
+                    // 24 vs 15, elite archer 35 vs 15, cavalry 24 vs 22.5), so in open
+                    // ground sight is what actually decides reaction distance and this
+                    // number never binds on its own. It still earns its place as the CAP on
+                    // knowledge a building lends: an archer standing next to its own town
+                    // center (sight 40) or under a tower (80) could otherwise be told about
+                    // something across the map and run for it — which is the "wandering off
+                    // and leaving the group" failure the comment above describes. So the rule
+                    // is: react to what you can see, within this far at most.
                     const aggro = (unit.range > 1 ? unit.range + 20 : 24);
                     const found = this.findNearestEnemyInRange(unit, aggro, true, true);
                     if (found) {
@@ -5409,10 +5419,13 @@ class Game {
     // It takes TWO sources, because neither one alone is what a seat has found:
     //
     //   tier 2 — computeAIFogGrid, which sweeps vision around living units and
-    //     FINISHED buildings. That is all it does: measured on a running match it
-    //     writes 713 twos and, by construction, not one single 1. Drawn from it
-    //     alone the map goes black the instant a scout walks on, which is the
-    //     opposite of "what this model has found".
+    //     FINISHED buildings. That is all it does: it writes 2s and, by construction,
+    //     not one single 1. Drawn from it alone the map goes black the instant a scout
+    //     walks on, which is the opposite of "what this model has found". Its radii come
+    //     from game.unitVision / game.buildingVision, so the overlay cannot disagree
+    //     with what the seat could actually see — it used to carry local copies
+    //     (15 / 12 / 60, cavalry ×1.2) that understated buildings, towers, cavalry and
+    //     the Farsight tech alike.
     //
     //   tier 1 — FogOfWarManager.seatExplored(seat), "ground this seat has ever
     //     seen", accumulated by the very same 500ms sweep that builds the union

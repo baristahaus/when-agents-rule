@@ -125,6 +125,27 @@ on which building it happened to own rather than on the rules. Fixed: the predic
 the same resolution order as the training panel and the model-facing vocabulary, and a test
 asserts the two sets cannot drift apart.
 
+The shape reappeared in a place I had already audited, which is the lesson worth keeping.
+Sight — "can this seat see that spot?" — had **four** implementations: the authority
+(`game.unitVision` / `game.buildingVision`: 15 infantry, 22.5 cavalry, ×vision techs; 20
+buildings, 40 town centers, 80 towers, 0 under construction), the rule AI's targeting test, the
+predicate that gates what a model is told about enemies and nodes, and the seat overlay on the
+minimap. The last two had drifted to their own numbers — 12 for buildings, 60 for towers,
+cavalry ×1.2 instead of 1.5, and no Farsight bonus at all. Reading the call graph rather than
+the function names decided the severity: the drifted copies feed *presentation* (the per-seat
+overlay, the analyzer's replayed fog, the starting grace radius), not the simulation, so no
+match was ever played on the wrong numbers — but the overlay is precisely the tool a reader
+uses to ask "what could this model have known?", and it was drawing a smaller world than the
+seat actually saw. The transcript viewer states the same promise in its own header — a single
+seat is "the honest reconstruction of what that model could see" (`analyzer.js:330`) — and its
+per-seat filtering is sound (`scene()` drops every seat but the one being replayed); only the
+radii were wrong. That was checked rather than assumed: read alone, `ui.js`'s fog pass looked like
+it was leaking all four seats' vision into one seat's view, and it is not.
+All four now read the two authority functions, and
+`tests/sight-authority.test.cjs` probes the same points through every path and refuses any
+disagreement, with anchors (cavalry at 20, Farsight at −76, a tower at 121) chosen so the
+retired numbers would each fail.
+
 What is left of it is a nit, not a ranking item: the defensive fallback at
 `openai-ai.js:8886` (reached only if the game object somehow lacks the predicate) states a
 *laxer* rule — no units and no buildings — so it is the last second definition, in a branch
@@ -211,7 +232,16 @@ pile measured `minSep 0.000 → 0.000` over seven seconds of a running game, fra
 Both directions are now derived from the index rather than random, so replays and background
 tabs referee identically.
 
-Two consequences worth knowing, both intended. Pause really pauses now: with the budget at 0
+Three consequences worth knowing, all intended. The first is a side effect nobody asked for
+and everyone benefits from: `keepUnitsAshore()` runs after the sub-step loop, so with the pushes
+now inside it, the shore clamp gets the **last** word on where a unit may stand — where before,
+separation ran after the whole tick and could drop a unit into the sea, to sit there until the
+next frame (and in a background tab, indefinitely, since there was no next frame). Measured after
+the change: parking a friendly stack on the coastline so separation has work to do exactly there,
+then sampling every live unit against `terrain.landLimit` — 24 samples across a visible and a
+hidden tab, **zero** units outside the land limit, worst overshoot 0.000.
+
+Pause really pauses now: with the budget at 0
 no sub-step runs, so nothing is pushed apart any more while the match is stopped, where
 before the render loop kept refereeing a frozen game. And the `sepK` cap (three times the
 60 Hz-normalised push, so one long step cannot fling anyone) means a Worker tick applies
@@ -321,6 +351,7 @@ it is not optional.
 | `js/engine/gamerenderer.js` `simulateStep`, `js/game.js` | the two positional passes left the render loop and run per simulation sub-step; `animate()` only draws | pinned pile, backgrounded tab: `minSep 0.042 → 0.042` before, `→ 1.2` after, same run as the visible tab |
 | `js/game.js` `findNearestEnemyInRange` + `canOwnerSee`/`visionSources` | auto-acquisition requires the seat to see the target; ordered attacks and retaliation do not | placed board: 8 would-acquire, 8 blind → 0 acquisitions; base defence unchanged |
 | `tests/fog-acquisition.test.cjs` (new) | the sight/aggro band, town-center sight, ruins and corpses, enemy buildings, the per-step cache and the no-cache-outside-a-step case | 8 tests |
+| `js/fogofwar.js`, `js/openai-ai.js`, `js/ui.js` | four implementations of "can this seat see X" collapsed onto `game.unitVision`/`game.buildingVision`; local copies (15/12/60, cavalry ×1.2) deleted, and a dying unit no longer scouts in the model-facing path | `tests/sight-authority.test.cjs` (4); two of them fail against HEAD |
 | `js/engine/gamerenderer.js` coincident cases | separation now reaches units on the identical point, and the dead-centre building escape fans by index instead of `+x` | welded stack `0.000 → 0.000` over 7 s before; `→ 1.2` after |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
@@ -330,7 +361,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **299/299 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **303/303 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -362,7 +393,7 @@ GPUs; the direction is the part that holds.
    seeded from the map seed closes it.
 4. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
-    `git mv` into one file per concern keeps all 299 tests green — that is the whole
+    `git mv` into one file per concern keeps all 303 tests green — that is the whole
     migration.
 5. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). The two things this app writes into its own folder, `results_*.md` and
@@ -410,12 +441,38 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 299 unit tests, ~77 s, needs only Node
+npm test                      # 303 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
                               #   node tests/browser/trust-boundary.cjs
 ```
+
+**Which GPU a browser run is really using.** Nothing in this section's frame-rate claims means
+anything until that is answered, and the obvious answers are all wrong: headless Chromium picks
+software rasterisation and keeps picking it whether or not a card is installed. Measured here on
+a machine with a Radeon AI PRO R9700 bound to `amdgpu` with a Mesa Vulkan ICD present:
+
+| launch flags | `UNMASKED_RENDERER_WEBGL` | rAF fps | rebuild of the 39-texture set |
+|---|---|---|---|
+| (none) | ANGLE … SwiftShader Device (Subzero) | 20.7 | 518 ms |
+| `--enable-unsafe-swiftshader` (what the suites pass) | ANGLE … SwiftShader Device | 21.8 | 512 ms |
+| `--use-gl=egl` | ANGLE … SwiftShader Device | 21.2 | 513 ms |
+| `--use-gl=glx` | ANGLE … SwiftShader Device | 21.2 | 540 ms |
+| `--use-gl=angle --use-angle=vulkan` | **ANGLE (AMD, Vulkan 1.4.354 (AMD Radeon AI PRO R9700 (RADV GFX1201)), radv)** | **60.0** | **281 ms** |
+
+`MAX_TEXTURE_SIZE` differs too — 8192 under software against 16384 on the card — so a texture
+that fits on one may not fit on the other. The suites take `WAR_CHROME_ARGS` for exactly this:
+
+```bash
+WAR_CHROME_ARGS="--use-gl=angle --use-angle=vulkan" npm run test:browser
+```
+
+Why it is a correctness note and not a speed note: `requestAnimationFrame` cadence is the whole
+subject of §7, and a 21 fps tab takes ~46 ms ticks while a real one takes ~16 ms — so the
+sub-step counts differ, and with them anything measured in frames. Claims here that depend on
+frame timing were re-run on the card; the earlier software numbers stay in the text where they
+were first recorded, labelled as such.
 
 **What this pass changes in published numbers.** Scores move. A seat the harness silenced is
 now ranked on the play the game can see rather than on a manufactured zero, so comparing a

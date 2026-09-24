@@ -26,10 +26,13 @@ class FogOfWarManager {
         this.mapSize = game.terrain.size;
         this.numTiles = this.mapSize / this.gridSize;
 
-        // Visibility range
-        this.unitVisionRange = 15;
-        this.buildingVisionRange = 12;
-        this.towerVisionRange = 60; // tripled — towers are long-range sentinels
+        // Sight is game.unitVision() / game.buildingVision(), the two functions the live
+        // sweep below, the model's own visibility test and the minimap's seat overlay all
+        // read. This used to carry its own numbers (15 / 12 / 60), which drifted from the
+        // rule they mirrored (15 for infantry, 22.5 for cavalry, plus vision techs; 20 for
+        // buildings, 80 for towers) — so a tower's sweep was drawn at three quarters of the
+        // radius it actually has, and a scout whose seat had researched Farsight was shown
+        // seeing less than the game let it see. No local copies here any more.
 
         // Fog grid: 0 = unexplored (black), 1 = explored (dark), 2 = visible (clear)
         this.fogGrid = new Float32Array(this.numTiles * this.numTiles);
@@ -178,9 +181,9 @@ class FogOfWarManager {
         });
         
         // Reveal fog around player buildings. Construction plots grant NOTHING —
-        // scaffolding doesn't see; the tower's 60-radius sweep switches on only
-        // when the build completes (the builders' own unit vision covers the
-        // site while they work).
+        // scaffolding doesn't see; a tower's 80-radius sweep (game.buildingVision)
+        // switches on only when the build completes, and the builders' own unit vision
+        // covers the site while they work.
         this.game.player.buildings.forEach(building => {
             if (building.underConstruction) return;
             this.reveal(building.x, building.z, this.game.buildingVision(building));
@@ -398,9 +401,12 @@ class FogOfWarManager {
             this.reveal(townCenter.x, townCenter.z, this.game.buildingVision(townCenter) * 1.5);
         }
         
-        // Reveal around player's units
+        // The same 1.5 grace the town center above gets, off the same authority — so a
+        // cavalry scout (22.5) starts with a wider ring than an infantry unit (15) instead
+        // of both getting a flat 22.5. Starting units are workers, so today's opening view
+        // is unchanged; this is about the rule reading as one rule.
         this.game.player.units.forEach(unit => {
-            this.reveal(unit.x, unit.z, this.unitVisionRange * 1.5);
+            this.reveal(unit.x, unit.z, this.game.unitVision(unit) * 1.5);
         });
     }
 
