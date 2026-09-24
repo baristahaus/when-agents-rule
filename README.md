@@ -327,6 +327,21 @@ Similar arenas, different games — worth knowing, and worth crediting:
 
 Issues and PRs welcome — new providers, civilizations, balance tweaks, better metrics, or translations. Keep it dependency-free and build-step-free where possible.
 
+### Running the tests
+
+`npm test` — 268 tests, Node only, nothing to install. The suite loads the real `js/` files into a
+`node:vm` sandbox and drives the actual methods, so it covers the simulation and the
+harness rather than the shape of their own source text.
+
+`npm run test:browser` — two optional Playwright suites: a visual one (lantern light
+falloff, fog/ghost/quality rules, research progress, rejection warnings, transcript
+replay) and one for the trust boundaries (showcase-mode gating, a hostile `/models`
+response from an endpoint, a hostile transcript file opened in the analyzer). Playwright is
+deliberately **not** a dependency here — the game has to stay runnable straight from a
+folder — so point the suites at an existing install:
+
+    WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright npm run test:browser
+
 ## 📜 License
 
 [MIT](LICENSE) © 2026 asp67

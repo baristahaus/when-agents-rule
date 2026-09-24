@@ -25,6 +25,8 @@
   "scripts": {
     "start": "npx http-server . -p 8080 -o",
     "dev": "npx http-server . -p 8080 -c-1 -o",
-    "test": "node --test tests/*.test.cjs"
-  }
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node tests/browser/shared-updates.cjs && node tests/browser/trust-boundary.cjs"
+  },
+  "_comment": "The app itself stays dependency-free. tests/browser/*.cjs are optional and reach Playwright through WAR_PLAYWRIGHT_PATH (or a local install) precisely so that no node_modules is ever required to run the game; see the header of each file."
 }
