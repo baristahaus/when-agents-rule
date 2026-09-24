@@ -1,12 +1,20 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 function setup(){
- const scope={console:{log(){}},getBuildingDef:()=>({cost:{stone:100}}),
-  getUnitDefFor:(_,id)=>id==='scout_cavalry'?{tier:'neolithic',cost:{food:100,gold:50}}:null,
-  getCivilization:()=>({name:'Yamato',color:1})};
+ // The training tables are the subject here, so they are loaded rather than stubbed:
+ // canAffordAnyMilitary reads BUILDING_TRAIN_TIERS through getTrainOptionsForBuilding now,
+ // exactly as the training panel and the model-facing vocabulary do. A stub of
+ // getBuildingDef/getUnitDefFor used to be enough while the predicate carried its own copy
+ // of that list — which is precisely the copy that was wrong.
+ const scope={console:{log(){}},performance:{now:()=>Date.now()},
+  localStorage:{getItem:()=>null,setItem(){},removeItem(){}}};
  vm.createContext(scope);
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/game.js'),'utf8').split('\nconst WAR_PRIVATE_HOST')[0],scope);
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/openai-ai.js'),'utf8'),scope);
+ for(const f of ['js/civilizations.js','js/units.js','js/buildings.js','js/resources.js','js/i18n.js'])
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'..',f),'utf8'),scope,{filename:f});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/game.js'),'utf8').split('\nconst WAR_PRIVATE_HOST')[0],scope,{filename:'js/game.js'});
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../js/openai-ai.js'),'utf8'),scope,{filename:'js/openai-ai.js'});
  const game=Object.create(vm.runInContext('Game.prototype',scope));
+ // Food for one scout cavalry (100f/30g) twice over and the gold for it, but no wood and no
+ // stone — so a rebuilt town center is never what keeps this seat alive.
  const funds={food:200,gold:100,stone:0};
  const ai={id:'a',civilization:'yamato',age:'iron',units:[],buildings:[],resources:{hasResources:cost=>Object.entries(cost).every(([k,v])=>(funds[k]||0)>=v)}};
  const stable={owner:'a',type:'stable',health:50,underConstruction:true};

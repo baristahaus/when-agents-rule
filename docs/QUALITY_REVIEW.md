@@ -107,10 +107,28 @@ No such test existed. It does now — it reads the dispatcher's own source via
 `executeAction.toString()` rather than re-parsing the file, and it pins the README list
 too, so the third copy cannot drift silently.
 
-The same shape exists in the elimination rules: the sim's `isPlayerEliminated` and the
-harness's `isControllerDefeated` answer "is this seat out?" from two different definitions
-in two files. Those were **not** merged here — the merge changes who survives a match,
-which is a balance decision, not a cleanup. It is the top item under *Still open*.
+The same shape exists in the elimination rules — and the first version of this document got
+it wrong in a way worth keeping as an example. It claimed `isPlayerEliminated` (sim) and
+`isControllerDefeated` (harness) answered "is this seat out?" from **two different
+definitions**. They do not: `openai-ai.js:8883` delegates straight to the sim's predicate, so
+there is one rule, deliberately shared (campaign and arena were unified at `game.js:5629` for
+the same reason). Reading the delegation instead of trusting the function names is what
+turned a plausible "two predicates" story into the defect that was actually there:
+
+the one predicate asked "can this seat still train a unit?" from a **hand-copied map of
+three buildings and their units**, while the game keeps that table in `BUILDING_TRAIN_TIERS`
+plus each building's own `trainOptions`. The copy missed the temple — whose priest lives in
+the building def, not in the tier table — and every civ-unique unit. A seat whose last
+trainer was a temple was deleted from a match while its own controller was still being told
+priests were available, and whether a seat that could field Egypt's chariot survived depended
+on which building it happened to own rather than on the rules. Fixed: the predicate now uses
+the same resolution order as the training panel and the model-facing vocabulary, and a test
+asserts the two sets cannot drift apart.
+
+What is left of it is a nit, not a ranking item: the defensive fallback at
+`openai-ai.js:8886` (reached only if the game object somehow lacks the predicate) states a
+*laxer* rule — no units and no buildings — so it is the last second definition, in a branch
+that never runs.
 
 ### 4. The published contract had drifted from the payload
 
@@ -241,11 +259,13 @@ it is not optional.
 | `js/ui.js` metrics block | `successRate`/`formatOk`/`reliability`/`reasonRate` are `null` when the denominator is empty; `computeSoundness` re-normalises over judged terms | `tests/soundness-scoring.test.cjs` (6) + a live render check |
 | `js/ui.js` `pct`, results card, markdown export | unknown renders `—` / `n/a`; a measured zero still prints `0%`; the export prints the denominator beside format fidelity | `n/a (0 answered)` vs `0%` for the two failure kinds |
 | `js/ui.js` `computeBehaviorTags` | an unjudged success rate no longer tags a seat as failing | the counter-party case (a measured 20%) still earns the tag |
+| `js/game.js` `canAffordAnyMilitary` + new `trainOptionsFor` | survival reads the game's training tables instead of a hand-copied map, so the temple and civ-unique units count | `tests/elimination-predicate.test.cjs` (5); its two bug-defining tests fail against the old map |
+| `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
 | `js/i18n.js` `sum.legend` ×4 | the legend says terms can be dropped and the rest share the score | rendered text in the summary |
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **277/277 unit tests** (259 before the pass; +3 for the engine guard, +6 for the scoring); the visual suite and the trust-boundary suite each
+Suite state: **282/282 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -258,14 +278,11 @@ GPUs; the direction is the part that holds.
 
 ## Still open, ranked
 
-1. **S1 — elimination has two definitions.** The sim can delete a seat the harness still
-   considers alive. A seat that dies to the wrong predicate is a data point removed for a
-   reason the transcript does not record.
-2. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
-3. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
+1. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
+2. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
    targets never re-check it.
-4. **S2 — `usageRaw` publishes spend** (§6).
-5. **S3 — CI covers the unit suite only.** `.github/workflows/ci.yml` runs
+3. **S2 — `usageRaw` publishes spend** (§6).
+4. **S3 — CI covers the unit suite only.** `.github/workflows/ci.yml` runs
    `node --check` over every shipped file, parses `game-state-schema.json` and
    `samples/index.json`, and runs `node --test`. It deliberately does **not** run the two
    Playwright suites: the runner would have to fetch a browser per job, and a job that is
@@ -274,29 +291,29 @@ GPUs; the direction is the part that holds.
    unenforced: the `?v=`-must-move-with-the-change rule (`tests/shipped-files.test.cjs`
    checks every tag *exists* and every file is *loaded*, not that a touched file got a new
    tag — that needs git history, which is a CI job, not a unit test).
-6. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
+5. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
    targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
    `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
    seeded from the map seed closes it.
-7. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
+6. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
    its effect, which block 1 now covers) is still unguarded, and `js/analyzer.js:11` shares
    the shape.
-8. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
+7. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
     `git mv` into one file per concern keeps all 268 tests green — that is the whole
     migration.
-9. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
+8. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). `.gitignore` does not yet cover `results_*.md` or `match-*.jsonl`, the
     two things this app writes into its own folder.
-10. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
+9. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-11. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
+10. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
     old set**, while every other texture owner in that file does delete.
-12. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
+11. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
     is never called: either wire it or delete the comment that leans on it.
-13. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+12. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`
@@ -325,7 +342,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 268 unit tests, ~77 s, needs only Node
+npm test                      # 282 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
@@ -338,3 +355,9 @@ results file written after this change against one written before it is comparin
 different statistics. The `match-*.jsonl` ranking export likewise carries `null` where it
 carried a `0`; a downstream reader doing arithmetic on those fields sees the absence now,
 which is the point, but it is a visible change in the artefact's meaning.
+
+Elimination changes too, and that one is not cosmetic: seats that can still train a priest or
+a civ-unique unit are no longer deleted. Matches run longer, `defeated` in the model-facing
+state appears later, and a ranking produced by an older build may have condemned a seat the
+current one keeps alive — every score published before this change came from a different
+elimination rule.

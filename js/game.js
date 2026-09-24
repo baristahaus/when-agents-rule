@@ -5673,18 +5673,13 @@ class Game {
         if (!ai || !ai.buildings || !ai.resources) return false;
         const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
         const aIdx = ageOrder.indexOf(ai.age);
-        const trains = {
-            barracks: ['militia', 'warrior', 'champion'],
-            archery_range: ['archer', 'crossbowman', 'elite_archer'],
-            stable: ['scout_cavalry', 'cavalry', 'heavy_cavalry']
-        };
         for (const b of ai.buildings) {
             if (!(b.health > 0)) continue;
             if (!b.underConstruction && b.isProducing && b.productionType && b.productionType !== 'worker') return true;
-            if (!trains[b.type]) continue;
             if (b.underConstruction && !(ai.units || []).some(u =>
                 u.health > 0 && u.type === 'worker' && u.task === 'building' && u.buildTarget === b)) continue;
-            for (const uid of trains[b.type]) {
+            for (const uid of this.trainOptionsFor(ai, b)) {
+                if (uid === 'worker') continue; // a villager is not a reason to spare a seat
                 const def = (typeof getUnitDefFor === 'function') ? getUnitDefFor(ai.civilization, uid) : null;
                 if (!def) continue;
                 if (ageOrder.indexOf(def.tier || 'stone') > aIdx) continue; // not available at this age
@@ -5692,6 +5687,27 @@ class Game {
             }
         }
         return false;
+    }
+
+    // What this building can train for this owner right now, read from the game's own
+    // tables: the age- and civ-resolved tier list where one exists (barracks, stable,
+    // archery_range), otherwise the building's own options — which is where the temple's
+    // priest lives, since BUILDING_TRAIN_TIERS only covers the three military hosts. That
+    // is the same resolution order the training panel (ui.js) and the model-facing
+    // trainableUnitsFor (openai-ai.js) use, and it replaces a hand-copied map of three
+    // hosts here. The copy had consequences: a seat whose only remaining trainer was a
+    // temple was reported unable to ever field a unit again and deleted from the match,
+    // while its own controller was still being told priests were available; and every
+    // civ-unique unit (Egypt's chariot) was invisible to it, so a seat that COULD train
+    // one was spared or condemned by which building it happened to own, not by the rules.
+    trainOptionsFor(owner, building) {
+        if (typeof getTrainOptionsForBuilding === 'function') {
+            const tiered = getTrainOptionsForBuilding(building.type, owner.age, owner.civilization);
+            if (tiered && tiered.length) return tiered;
+        }
+        if (building.trainOptions && building.trainOptions.length) return building.trainOptions;
+        const def = (typeof getBuildingDef === 'function') ? getBuildingDef(building.type) : null;
+        return (def && def.canTrain && def.trainOptions) || [];
     }
 
     // Decide the arena: a held wonder, last player standing, or wipeout.
