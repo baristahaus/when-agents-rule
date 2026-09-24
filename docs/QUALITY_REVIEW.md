@@ -223,34 +223,38 @@ it is not optional.
 | `package.json` | `npm run test:browser`, and a note on why Playwright stays undeclared | — |
 | `README.md` | a *Running the tests* section — the suite existed and nothing pointed at it | — |
 | `tests/shipped-files.test.cjs` (new) | the hand-maintained script graph: every referenced file exists, every file on disk is referenced exactly once, every tag is a positive integer | 5 tests |
-| `index.html` | `?v=` bumped to 908 for all seven changed scripts | repo convention held |
+| `js/engine/gamerenderer.js` | `handleContextLost()`: `preventDefault()`, flag, and the draw loop stops instead of paying full frame cost into a dead context | forced with `WEBGL_lose_context`: frames 3→0 per 1.5 s while ticks went 3→90 |
+| `js/game.js`, `css/styles.css`, `js/i18n.js` | dismissable bottom banner in four languages — deliberately *not* the boot-failure overlay, because the match carries on and the leaderboard/decision log/results are DOM | same run: `.ctx-lost` present, `body.boot-failed` absent, `gameScreen` still active, no pageerror |
+| `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
 Suite state: **268/268 unit tests**; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
-only worth what its red run was worth.
+only worth what its red run was worth. The context-loss path was proven the same way, by
+forcing a loss in Chromium rather than trusting that the handler would be reached: 12
+checks, and the interesting number is that the simulation ran **thirty times faster** once
+the dead draw loop stopped (3 ticks per 1.2 s before, 90 per 1.5 s after, under software
+GL) — the loop was not merely wasting power, it was starving the match it could no longer
+draw. That gap is an artefact of this environment's swiftshader, not a claim about real
+GPUs; the direction is the part that holds.
 
 ## Still open, ranked
 
-1. **S1 — no WebGL context-loss handling anywhere** (`grep -rn webglcontextlost js/` → 0).
-   A GPU reset is a permanent black canvas while the rAF loop keeps paying full price in a
-   hidden tab. Small and self-contained: `preventDefault()` on lost, stop the loop, rebuild
-   on restored.
-2. **S1 — elimination has two definitions.** The sim can delete a seat the harness still
+1. **S1 — elimination has two definitions.** The sim can delete a seat the harness still
    considers alive. A seat that dies to the wrong predicate is a data point removed for a
    reason the transcript does not record.
-3. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
-4. **S2 — scoring zero denominators.** `reliability`/`formatOk` return `0` when the base is
+2. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
+3. **S2 — scoring zero denominators.** `reliability`/`formatOk` return `0` when the base is
    empty (`ui.js:4135-4136`), so a seat whose every turn was lost to a context overflow
    *loses* 15-33 points for the harness's failure; and the mirror: a seat that answered 1
    round in 40 with the other 39 excluded reads 100% reliability. Proven: an otherwise
    healthy seat scores 96, or 54, for the same play. Needs "not applicable + n", never a
    0 or a 1. **Also: this code lives in `ui.js`**, presentation, and has no test.
-5. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
+4. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
    targets never re-check it.
-6. **S2 — `usageRaw` publishes spend** (§6).
-7. **S3 — CI covers the unit suite only.** `.github/workflows/ci.yml` runs
+5. **S2 — `usageRaw` publishes spend** (§6).
+6. **S3 — CI covers the unit suite only.** `.github/workflows/ci.yml` runs
    `node --check` over every shipped file, parses `game-state-schema.json` and
    `samples/index.json`, and runs `node --test`. It deliberately does **not** run the two
    Playwright suites: the runner would have to fetch a browser per job, and a job that is
@@ -259,29 +263,29 @@ only worth what its red run was worth.
    unenforced: the `?v=`-must-move-with-the-change rule (`tests/shipped-files.test.cjs`
    checks every tag *exists* and every file is *loaded*, not that a touched file got a new
    tag — that needs git history, which is a CI job, not a unit test).
-8. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
+7. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
    targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
    `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
    seeded from the map seed closes it.
-9. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
+8. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
    its effect, which block 1 now covers) is still unguarded, and `js/analyzer.js:11` shares
    the shape.
-10. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
+9. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
     `git mv` into one file per concern keeps all 268 tests green — that is the whole
     migration.
-11. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
+10. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). `.gitignore` does not yet cover `results_*.md` or `match-*.jsonl`, the
     two things this app writes into its own folder.
-12. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
+11. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-13. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
+12. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
     old set**, while every other texture owner in that file does delete.
-14. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
+13. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
     is never called: either wire it or delete the comment that leans on it.
-15. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+14. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`

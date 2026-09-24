@@ -61,6 +61,21 @@ class Game {
         const container = document.getElementById('gameCanvas');
         this.renderer = new EngineRenderer(container); // the in-house engine (M6: only renderer)
         this.renderer.game = this; // back-reference (used for civ-aware placement/preview)
+        // A lost GPU context stops the renderer (see EngineRenderer.handleContextLost).
+        // The banner is wired here rather than in the engine because it needs t(), and
+        // because the engine has no business knowing that a match is in progress: what it
+        // owes the game is a stopped draw loop, nothing more.
+        if (this.renderer.canvas) {
+            this.renderer.canvas.addEventListener('webglcontextlost', (e) => {
+                if (this.renderer.handleContextLost(e)) warContextLost();
+            });
+            this.renderer.canvas.addEventListener('webglcontextrestored', () => {
+                // The browser gave the context back, but every program, buffer and texture
+                // that was in the old one is gone and the engine does not rebuild them.
+                // The banner already said as much; this is for whoever reads the console.
+                console.error('[boot] WebGL context restored — the engine cannot rebuild; reload to watch the board again');
+            });
+        }
         this.terrain = new TerrainManager(this.renderer.scene, 800); // Quadrupled map size
         this.renderer.setTerrain(this.terrain);
         this.inputManager = new InputManager(this.renderer, this);
@@ -5892,6 +5907,29 @@ function warNoWebGL(e) {
     box.appendChild(p1); box.appendChild(p2);
     document.body.appendChild(box);
     document.body.classList.add('boot-failed');
+}
+
+// The GPU went away mid-session. Deliberately NOT the full-screen treatment warNoWebGL
+// gets: that one is a boot failure with nothing behind it, while here the simulation keeps
+// running on its own clock (and on the Worker when the tab is hidden), so the leaderboard,
+// the decision log, the advice box and the results screen are all still live DOM. Covering
+// them would turn a lost picture into a lost match. Dismissable for the same reason.
+function warContextLost() {
+    if (document.querySelector('.ctx-lost')) return;
+    const box = document.createElement('div');
+    box.className = 'ctx-lost';
+    box.setAttribute('role', 'status');
+    const head = document.createElement('p');
+    head.textContent = t('boot.gpuLost');
+    const why = document.createElement('p');
+    why.className = 'boot-why';
+    why.textContent = t('boot.gpuLostWhy');
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.textContent = t('help.close');
+    close.addEventListener('click', () => box.remove());
+    box.appendChild(head); box.appendChild(why); box.appendChild(close);
+    document.body.appendChild(box);
 }
 
 window.addEventListener('load', () => {

@@ -2779,6 +2779,20 @@ body.demo-only .an-src:hover { background:var(--gold); color:#1a1205; }
     background:var(--bg-0, #0b1017); color:#dfe6f5; font-size:1.05rem; line-height:1.5; }
 .boot-error .boot-why { max-width:560px; font-size:0.86rem; color:#8fa3bb; }
 
+/* The GPU was taken away mid-session. Unlike .boot-error this must NOT cover the page:
+   the simulation carries on, and the leaderboard, decision log and advice box are all DOM,
+   so the only thing actually missing is the picture. Covering the rest would turn a lost
+   view into a lost match. Bottom-centre, dismissable. */
+.ctx-lost { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:99000;
+    display:flex; flex-direction:column; align-items:flex-start; gap:6px;
+    max-width:min(560px,88vw); padding:14px 18px; border:1px solid rgba(255,255,255,.22);
+    border-radius:12px; background:var(--bg-0, #0b1017); color:#dfe6f5; font-size:0.92rem;
+    line-height:1.45; box-shadow:0 12px 32px rgba(0,0,0,.5); }
+.ctx-lost .boot-why { font-size:0.82rem; color:#8fa3bb; }
+.ctx-lost button { align-self:flex-end; padding:3px 12px; border-radius:8px;
+    border:1px solid rgba(255,255,255,.22); background:transparent; color:#dfe6f5;
+    font-size:0.8rem; cursor:pointer; }
+
 .small-screen { display:none; }
 /* This used to cover everything, with a link to the video as the way out, and it fired
    on `pointer: coarse` at ANY width -- so a 1317px tablet that renders the analyzer

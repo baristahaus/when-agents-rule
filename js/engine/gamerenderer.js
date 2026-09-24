@@ -1935,7 +1935,32 @@
             }
         }
 
+        // A GPU reset — driver update, a second heavy tab, a crash, routine backgrounding
+        // on some mobile drivers — invalidates every program, buffer and texture this
+        // renderer owns, then fires webglcontextlost. Nothing listened, so every draw
+        // after it was a silent no-op: a black canvas for the rest of the page's life
+        // while the loop below kept paying full frame cost, in a hidden tab, during a
+        // match the models were still playing.
+        //
+        // preventDefault() is what tells the browser we mean to handle the loss at all.
+        // A transparent rebuild is deliberately NOT attempted: everything allocated died
+        // with the context, terrain/fog/game hold this renderer through the M4 shims, and
+        // re-initialising underneath those references is a bigger change than a crash
+        // handler gets to smuggle in. The simulation is NOT stopped — game.tick() runs on
+        // its own clock (and from the Worker when the tab is hidden), so the match
+        // finishes. Only the picture is lost, and the notice says precisely that.
+        handleContextLost(e) {
+            if (e && e.preventDefault) e.preventDefault();
+            if (this._contextLost) return false;
+            this._contextLost = true;
+            console.error('[engine] WebGL context lost — render loop stopped; the match keeps running');
+            return true;
+        }
+
         animate() {
+            // Stopped for good once the context is gone: drawing into a dead one is cost
+            // with no product at the end of it.
+            if (this._contextLost) return;
             requestAnimationFrame(() => this.animate());
             const now = performance.now();
             const deltaTime = Math.min(0.1, (now - this._lastTime) / 1000);
