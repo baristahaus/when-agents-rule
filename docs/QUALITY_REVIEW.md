@@ -198,6 +198,29 @@ seat at 10/10 with an army is one house or one battle from room, the state it is
 one that is merely early. The asymmetry that mattered was "harness says alive, engine says no", and
 that is one condition in one place now.
 
+One copy that stays, deliberately: **the age ladder is spelled out 26 times.**
+`['stone', 'neolithic', 'bronze', 'iron']` appears 25 times across `ai.js` (4), `openai-ai.js` (9),
+`game.js` (6), `ui.js` (3), `buildings.js` (2) and `showcase.js` (1, as `Game.SHOWCASE_AGES`),
+while `units.js:238` already defines `BUILDING_AGE_ORDER` — so the obvious repair is "just use the
+constant", and the obvious repair is wrong. These are classic scripts with no module system, and
+16 of the 22 test harnesses that load any of those files load no `units.js` at all (audited, not
+assumed — one apparent 17th turned out to be my grep reading a comment); a shared reference
+becomes a `ReferenceError` the first time one of those subsets runs. The alternative — a new
+`js/constants.js` loaded ahead of everything, with every loader updated, in a repo where
+`tests/shipped-files.test.cjs` exists precisely to police that graph — is a bigger risk than the
+duplication it removes.
+
+Nor is this a number anyone is meant to tune: the ladder is a **wire format**. The published
+schema pins it and every transcript and ranking file this project has shipped stores those four
+strings, so the realistic failure is not "a copy drifts" but "a fifth age is added in one place".
+`tests/age-ladder.test.cjs` pins that from five directions that share no source — the declared
+ladder, the rule AI's own step function (including that iron is terminal), what the shipped
+content actually requires of buildings and unit tiers, the schema's enum, and the pair of
+invariants that every age must be reachable by something and nothing may require an unreachable
+one. Mutation-checked in both directions: a building gated on `steel` and a unit tier spelled
+`bronce` fail the content test; a fifth age in `units.js` and a fifth age in the schema each fail
+the first.
+
 ### 4. The published contract had drifted from the payload
 
 `game-state-schema.json` is the file README points model-tool authors at. It still
@@ -433,7 +456,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **310/310 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **315/315 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -594,7 +617,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 310 unit tests, ~77 s, needs only Node
+npm test                      # 315 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
