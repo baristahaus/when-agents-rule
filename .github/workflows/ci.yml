@@ -1,6 +1,6 @@
 name: ci
 
-# Nothing in this repo ran automatically before this file: 309 unit tests and two browser
+# Nothing in this repo ran automatically before this file: 310 unit tests and two browser
 # suites existed, and all of it depended on someone remembering. Every command below was
 # executed locally before being written here. The one thing that cannot be is the GitHub
 # runner itself, so the first scheduled run of the browser job is that job's real test.

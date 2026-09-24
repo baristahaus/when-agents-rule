@@ -329,7 +329,7 @@ Issues and PRs welcome — new providers, civilizations, balance tweaks, better 
 
 ### Running the tests
 
-`npm test` — 309 tests, Node only, nothing to install. The suite loads the real `js/` files into a
+`npm test` — 310 tests, Node only, nothing to install. The suite loads the real `js/` files into a
 `node:vm` sandbox and drives the actual methods, so it covers the simulation and the
 harness rather than the shape of their own source text.
 

@@ -24,6 +24,14 @@ vm.createContext(scope);
 for (const f of ['js/civilizations.js', 'js/units.js', 'js/buildings.js'])
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), scope, { filename: f });
 
+// The executor's own lookup, loaded for the reachability question at the bottom of this file.
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'resources.js'), 'utf8'), scope, { filename: 'js/resources.js' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'i18n.js'), 'utf8'), scope, { filename: 'js/i18n.js' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'game.js'), 'utf8')
+  .split('\nconst WAR_PRIVATE_HOST')[0], scope, { filename: 'js/game.js' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'openai-ai.js'), 'utf8'), scope, { filename: 'js/openai-ai.js' });
+const requiredBuildingForUnit = vm.runInContext('OpenAIAIManager', scope).prototype.requiredBuildingForUnit;
+
 const CIVS = [...vm.runInContext('Object.keys(CIVILIZATIONS)', scope)];
 const AGES = ['stone', 'neolithic', 'bronze', 'iron'];
 const HOSTS = ['town_center', 'barracks', 'archery_range', 'stable', 'temple'];
@@ -134,3 +142,24 @@ test('no upgrade walks a unit backwards, or fires before its target can exist', 
     assert.deepEqual(wrong, [], wrong.join('; '));
 });
 
+test('every unit a civilization declares as unique can actually be trained', () => {
+    // Reachability, judged the way the executor judges it: `requiredBuildingForUnit`
+    // (openai-ai.js:547) answers from the shared tier table, then the civ's own trainAt,
+    // then a building's static trainOptions. Null means no host claims the unit, and
+    // executeTrainUnit then refuses with "no finished building can train it" — a path whose
+    // comment says outright it "is only reached for unique units with no tier mapping".
+    //
+    // One unit in the shipped roster lands there: Yamato's archer_ship. Nothing in the
+    // codebase references it except the civilizations.js entry that declares it (no dock
+    // building exists), so it is unreachable content rather than a live bug — nothing can be
+    // charged for it and nothing can order it, but a civ card that ever renders
+    // uniqueUnits would promise a unit no building can produce. Naming it here is the point:
+    // give it a host, drop it from the roster, or add it to this list with a reason.
+    const unreachable = [];
+    for (const civ of CIVS) {
+        const ids = vm.runInContext(`(CIVILIZATIONS[${JSON.stringify(civ)}].uniqueUnits || []).map(u => u.id)`, scope);
+        for (const id of ids) if (!requiredBuildingForUnit.call(null, id, civ)) unreachable.push(civ + '/' + id);
+    }
+    assert.deepEqual(unreachable, ['yamato/archer_ship'],
+        'a civ declares a unique unit no host can produce: ' + unreachable.join(', '));
+});

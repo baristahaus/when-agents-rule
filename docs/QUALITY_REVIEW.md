@@ -374,6 +374,18 @@ capacity constants that do not exist, and a Google token bug in a codebase whose
 explicitly warn against the mistake that bug would be. One report's line numbers were
 shifted by ~300 and it contradicted itself about its own finding's reachability.
 
+Three of this pass's candidate findings died at the caller, which is why the section exists. Each
+looked like a real defect from inside one function and each was wrong once the delegation was
+read: the elimination predicate looked double-defined until `isControllerDefeated` was found
+calling it; the replay viewer looked like it leaked four seats' fog into one seat's view until
+`analyzer.scene()` was found filtering seats before the fog code runs; and a state field reporting
+`simSpeed` rather than `effectiveSimSpeed` looked like telling models the world ran 4× when a
+Wonder had frozen it to 1× — until the surrounding call turned out to be `TranscriptRecorder.begin`,
+the *match header* recording the conditions the run started under, where the operator's setting is
+the correct value and no wonder can yet be standing. Writing the fix first would have introduced a
+regression while "improving" a correct line, and the wrongness of the first two is invisible in a
+diff: they are only wrong in context.
+
 Nothing in this document survived that filter unchallenged: the two reports whose claims
 were confirmed (the escaping boundary, the `$94.62`) were confirmed by running them, not
 by reading them. A `git grep` for the exact symbol is the cheapest control there is, and
@@ -421,7 +433,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **309/309 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **310/310 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -548,6 +560,24 @@ GPUs; the direction is the part that holds.
     system prompt naming the triangle. Either way the README sentence should stop being the only
     place the rule is written down outside the code.
 
+11. **S4 — one unit in the roster cannot be built by anything.** Yamato's second `uniqueUnits`
+    entry, `archer_ship`, has no `trainAt`, and no dock or naval building exists
+    (`grep -c dock js/buildings.js` → 0). Counted across the codebase, `archer_ship` appears on
+    exactly one line: the civilizations.js entry that declares it. `requiredBuildingForUnit`
+    answers `null` for it, and `executeTrainUnit` then refuses with "no finished building can
+    train it" — a branch whose own comment says it "is only reached for unique units with no tier
+    mapping" — before any resource is spent, and `trainableUnitsFor` never offers it, so no model
+    is ever charged for the attempt and none is ever promised the unit either.
+
+    Which makes it dead data, not a bug, and the reason it is listed rather than deleted: the fix
+    is a content decision with three defensible answers (give it a dock, which is a feature; drop
+    it from Yamato's roster, which changes what the civilization is advertised to be; or leave it
+    for later). What was not acceptable was having no record at all, so
+    `tests/roster-advancement.test.cjs` asserts reachability through the executor's own lookup and
+    names `yamato/archer_ship` as the *only* exemption — a second unreachable unique, or the
+    removal of this one, fails the test. (Checked by mutation: taking `trainAt` off Egypt's
+    slinger makes the test report both.)
+
 ## Not verified
 
 Claims from the delegated reviews that I did not confirm, and therefore do not assert
@@ -564,7 +594,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 309 unit tests, ~77 s, needs only Node
+npm test                      # 310 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
