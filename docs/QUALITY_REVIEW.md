@@ -151,6 +151,53 @@ What is left of it is a nit, not a ranking item: the defensive fallback at
 *laxer* rule — no units and no buildings — so it is the last second definition, in a branch
 that never runs.
 
+The same shape, one rule over: **"can this seat field a unit?"** is answered in four places —
+`trainUnit` and the model-facing executor both refuse at `population >= maxPopulation`,
+`canAffordAnyMilitary` decides whether the seat is still in the match, and `trainableUnitsFor`
+tells the model what it may order. Three of them read cost, age and host; none read the population
+cap. The cap comes entirely from buildings (`recomputeMaxPopulation` sums `popBonus` — 10 per Town
+Center, 5 per house, ceiling 100), so a seat whose Town Center and houses are all razed has a cap
+of **zero**, and if a temple survived the wrecking the predicate swore that seat could still field
+a priest. It could not field anything, and *everything else knew so*: the state a seat is shown
+marks every unit `blockedBy: ["pop"]` at the cap (openai-ai.js:3263 — that gate went in after one
+match showed a seat spending 227 of its 474 turns being told "Population limit reached", which is
+also why the same list warns about `age`, `host` and `cost`), and the executor refuses. The
+survival rule was the one implementation that never learned about the cap, so the seat stayed in
+the match, correctly informed that it could do nothing, forever.
+
+Which is a smaller and stranger bug than it first looked. I wrote the first version of this
+paragraph claiming the harness was telling such a seat "a priest is available" every turn; it is
+not — `trainableUnits` gates on population and has since that 227-turn match. The defect is
+between the sim's own two answers to one question, not between the sim and the model.
+
+The state is reachable, and this pass made it more so: widening `canAffordAnyMilitary` to see
+temples and civ-unique units (last round, correctly) enlarged the set of seats the predicate is
+willing to spare, and the cap was never part of the question. It is closed by one clause reading
+the condition the executor already reads. A seat with a living worker is still spared by the
+pre-existing "can rebuild a Town Center" branch, so what this condemns is a seat holding no units
+at all — one that cannot build, gather or train, and was therefore already out by the rule as the
+code states it in its own comment above the predicate.
+
+Every site that answers it, enumerated rather than sampled, because "I fixed the one I found" is
+how this class of bug survives: `trainUnit` and `executeTrainUnit` (the two refusals),
+`trainableUnitsFor` → `blockedBy: ["pop"]` (the disclosure), `canAffordAnyMilitary` (survival, the
+one that was missing it), and the rule AI's own train gate at `ai.js:685` — which had the
+condition right all along, and had a house-building heuristic beside it (`ai.js:165`) that builds
+houses precisely because the cap is real. Everything else that reads `maxPopulation` displays it:
+the HUD counter, the leaderboard row, the analyzer header. The cap itself is computed in exactly
+one place, `recomputeMaxPopulation`, whose ceiling is `MAX_POPULATION_CAP` (buildings.js:3, 100).
+That constant is copied three times in openai-ai.js as `typeof … !== 'undefined' ? … : 100`
+fallbacks at 2523, 6031 and 6158; they cannot fire, since buildings.js is loaded first by
+`index.html` and `tests/shipped-files.test.cjs` enforces that graph, so they are left as the
+paranoid guards they are — same shape as the fallback nit above, and noted rather than churned for
+the same reason.
+
+Deliberately unchanged: `trainableUnitsFor` still lists units a seat has no room for right now. A
+seat at 10/10 with an army is one house or one battle from room, the state it is shown carries
+`population.capacityNow`, and an option list that goes quiet on a playable seat is a worse lie than
+one that is merely early. The asymmetry that mattered was "harness says alive, engine says no", and
+that is one condition in one place now.
+
 ### 4. The published contract had drifted from the payload
 
 `game-state-schema.json` is the file README points model-tool authors at. It still
@@ -364,6 +411,8 @@ it is not optional.
 | `tests/fog-acquisition.test.cjs` (new) | the sight/aggro band, town-center sight, ruins and corpses, enemy buildings, the per-step cache and the no-cache-outside-a-step case | 8 tests |
 | `js/fogofwar.js`, `js/openai-ai.js`, `js/ui.js` | four implementations of "can this seat see X" collapsed onto `game.unitVision`/`game.buildingVision`; local copies (15/12/60, cavalry ×1.2) deleted, and a dying unit no longer scouts in the model-facing path | `tests/sight-authority.test.cjs` (4); two of them fail against HEAD |
 | `js/engine/gamerenderer.js` coincident cases | separation now reaches units on the identical point, and the dead-centre building escape fans by index instead of `+x` | welded stack `0.000 → 0.000` over 7 s before; `→ 1.2` after |
+| `js/game.js` `canAffordAnyMilitary` | "can this seat field a unit?" now includes having a population slot — the condition the executor *and the model-facing state* already applied, and the survival rule alone did not | `tests/elimination-predicate.test.cjs` (6); fails with the clause removed |
+| `tests/roster-advancement.test.cjs` (new) | the shared roster closes on itself; the per-civ free-upgrade table recorded verbatim | 5 tests; deleting `archer:`'s path, retargeting at `ghost_unit`, `slinger -> elite_archer` at neolithic and giving hoplite a path each fail it (the first escaped an earlier version of this test) |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
@@ -372,7 +421,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **308/308 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **309/309 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -484,7 +533,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 308 unit tests, ~77 s, needs only Node
+npm test                      # 309 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \

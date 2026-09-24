@@ -5734,7 +5734,10 @@ class Game {
     // defeated model's LLM pipeline, so the two never disagree:
     //   - still in if it has any military unit;
     //   - still in with paid military production, or an affordable trainer that
-    //     is finished or being completed by a living assigned worker;
+    //     is finished or being completed by a living assigned worker — and room
+    //     on the field to stand the unit in (a population cap of 0 means the seat
+    //     owns no Town Center and no house, so it can afford everything and field
+    //     nothing);
     //   - otherwise still in only if it can (re)start the chain — it has a Town
     //     Center, OR a worker plus the resources to build a new Town Center.
     isPlayerEliminated(ai) {
@@ -5753,6 +5756,20 @@ class Game {
     // also counts if the owner can afford military production when it finishes.
     canAffordAnyMilitary(ai) {
         if (!ai || !ai.buildings || !ai.resources) return false;
+        // A slot to put it in is part of being able to field it. trainUnit and the
+        // model-facing executor both refuse at `population >= maxPopulation`, and the cap is
+        // derived purely from buildings (recomputeMaxPopulation) — a seat with no Town Center
+        // and no house has a cap of ZERO, so it cannot train anything however rich it is.
+        // Without this clause such a seat was kept in the match by its own temple: the state
+        // it was shown correctly reported every unit blockedBy ["pop"] (openai-ai.js:3263 —
+        // that gate was added after one seat spent 227 of 474 turns hitting it), the executor
+        // correctly refused, and only the survival rule disagreed, so the match would not end.
+        // A seat that still has a living worker is spared by the
+        // rebuild-a-TC clause in isPlayerEliminated, so this only ever condemns a seat holding
+        // no units at all — one that cannot build, gather, or train, and is therefore out by
+        // the rule stated above. Missing figures leave it alone (undefined >= undefined is
+        // false), so a bare seat is still judged on cost and age alone.
+        if (ai.resources.population >= ai.resources.maxPopulation) return false;
         const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
         const aIdx = ageOrder.indexOf(ai.age);
         for (const b of ai.buildings) {

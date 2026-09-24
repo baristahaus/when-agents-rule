@@ -104,3 +104,34 @@ test('what the predicate considers trainable is what the model is told is traina
     }
   }
 });
+
+test('a seat with nowhere to stand its army is out, however rich', () => {
+  // recomputeMaxPopulation derives the cap from buildings alone, so a seat with no Town Center
+  // and no house has a cap of 0 — and both trainUnit and the model-facing executor refuse at
+  // that line with "[ERROR] No available population slots.". Before this clause the seat was
+  // spared by its own temple, kept being offered a priest, and could never field one: three
+  // answers to one question. The fixtures set population explicitly; everywhere else in this
+  // file the fields are absent, which is exactly the case the gate is written to ignore.
+  const withCap = (max, over) => seat(Object.assign({
+    resources: Object.assign(RES({}), { population: 0, maxPopulation: max }),
+  }, over));
+
+  assert.equal(eliminated(withCap(0, { buildings: [building('temple')] })), true,
+    'a temple, 5000 of every resource, and no population slot is not a seat that can field a unit');
+  assert.equal(game.canAffordAnyMilitary.call(game, withCap(0, { buildings: [building('barracks')] })), false,
+    'the cap has to stop the predicate, not just the executor');
+
+  // It is the cap that decides, not the money: one house is five slots and the seat is back in.
+  assert.equal(eliminated(withCap(5, { buildings: [building('temple')] })), false,
+    'the same board with a house standing is playable');
+  assert.equal(eliminated(withCap(0, { buildings: [building('temple')], age: 'stone' })), true,
+    'and being unable to afford anything still reads as out');
+
+  // A living worker is the escape hatch the rule already promises — it can raise a Town Center,
+  // which restores the cap. That seat must not be condemned by this clause.
+  assert.equal(eliminated(seat({
+    buildings: [building('temple')],
+    units: [{ type: 'worker', health: 40, task: 'idle', buildTarget: null }],
+    resources: Object.assign(RES({}), { population: 1, maxPopulation: 0 }),
+  })), false, 'a worker plus the cost of a Town Center is still a way back');
+});
