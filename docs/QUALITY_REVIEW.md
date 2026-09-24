@@ -178,6 +178,17 @@ three translations, plus two comments that repeated the old number and two more 
 asserted rules the code contradicts (a farm *can* be staffed by `assign_workers "farm"`;
 scarce-node counts round to a whole share per seat, so four seats see 20 gold, not 18).
 
+What that costs is measurable here, which is unusual. A line in the *last* message of every
+turn read "choose the single best action for THIS turn" long after the harness had raised the
+turn budget from one command to three (`MAX_COMMANDS_PER_TURN`, openai-ai.js:1570) — and the
+last message outranks the system prompt by position alone. Measured over one match: the two
+large seats ignored it and averaged 2.5 commands a turn; the two small ones obeyed and sent
+exactly one on 80% and 89% of their turns. Same rule text, four seats, two different games —
+which is also why the fix had to be to the *sentence*, not to a constant. Where a number is
+worth changing, this repo mostly does interpolate it: all nine mentions of the turn budget read
+`OpenAIAIManager.MAX_COMMANDS_PER_TURN`, none hard-codes 3, and the audited constants that were
+found to be duplicated by hand (sight radii, §3) are now single-sourced too.
+
 ### 6. Invoices in the export
 
 `rawUsage` stored the provider's usage object verbatim into every turn record, so `cost`,
@@ -361,7 +372,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **303/303 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **308/308 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -425,6 +436,38 @@ GPUs; the direction is the part that holds.
     strict one: if a text-position-only escape is ever genuinely needed, add a second helper
     rather than loosening this one.
 
+9. **S2 — a free upgrade the participant is never told about, and it is not free for every
+   seat.** When a player researches an age, `upgradeFieldUnits` (game.js:3124) walks its army and
+   silently re-types each veteran using `UNIT_UPGRADE_PATHS` (buildings.js:198): a bronze warrior
+   becomes a champion at iron, at no cost, with no order given. Two things are wrong-looking about
+   that, and the tables make them *exactly* true rather than approximately:
+
+   * Nothing model-facing mentions it. The only "upgrade" in the vocabulary is the `upgrade_age`
+     **action**; no prompt or state field says what taking it then does to the army. A model whose
+     previous state read "4 warriors" sees "4 champions" in the next and is given no reason, and
+     the stat jump is worth real combat — it is a free effect of a decision it made for other
+     reasons.
+   * It applies unevenly across seats. Persia's `uniqueUnits` are the **standard** ids
+     `archer`/`cavalry`/`heavy_cavalry`, so a Persian veteran inherits those paths and does
+     advance; the other three civs own distinct types — Egyptian slinger and horse carriage,
+     Greek hoplite and phalanx, Yamato samurai — and **none** of them appears in
+     `UNIT_UPGRADE_PATHS`, so on one island at one age-up one seat's army is upgraded for free
+     and three seats' are untouched. Persia's are also the only "signature" units that are not
+     actually distinct units.
+
+   Not fixed, because both repairs are balance decisions: adding paths for the five uniques hands
+   three civs a free stat jump they have been silently paying for, and advertising the rule in the
+   prompt changes how models value `upgrade_age` (which is itself measured in every score this
+   project has published). What is fixed is the ability to see it: the whole per-civ table is
+   asserted in `tests/roster-advancement.test.cjs`, along with three invariants that do hold and
+   would break on a careless edit — every shared-roster unit fieldable before the last age has a
+   path, no path targets a unit no host produces, and no morph fires at an age before its target
+   is trainable. Deleting `archer:` fails the first; retargeting a path at `ghost_unit` fails the
+   second; `slinger -> elite_archer` at neolithic fails the third; giving hoplite a path fails the
+   civ table. (The first of those tests passed with `archer`'s path deleted until it was
+   re-scoped: it had been excluding civ uniques, and Persia's uniques *are* `archer` and `cavalry`
+   — which is how this was found at all.)
+
 ## Not verified
 
 Claims from the delegated reviews that I did not confirm, and therefore do not assert
@@ -441,7 +484,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 303 unit tests, ~77 s, needs only Node
+npm test                      # 308 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
