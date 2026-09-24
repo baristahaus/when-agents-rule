@@ -2313,6 +2313,14 @@ class OpenAIAIManager {
                 roundTimeoutMs: this.turnBased ? this.roundTimeoutMs() : null,
                 simSpeed: this.game.simSpeed || 1,
                 wonderRequired: this.game.wonderRequired || null,
+                // …and the machine is one of those conditions, not a detail: the renderer decides
+                // the frame cadence, the cadence decides how many simulation steps a seat's turn
+                // contains, and a 3x cadence difference between a software rasteriser and a real
+                // card has been measured on this build (docs/QUALITY_REVIEW.md). A result from one
+                // is not the same experiment as a result from the other, and until now nothing in
+                // the file said which it was.
+                renderer: (this.game.renderer && this.game.renderer.glInfo) ? this.game.renderer.glInfo.renderer : null,
+                maxTextureSize: (this.game.renderer && this.game.renderer.glInfo) ? this.game.renderer.glInfo.maxTextureSize : null,
                 promptVersion: (this.game.ui && this.game.ui.ARENA_PROMPT_VERSION) || null
             });
         }
@@ -4536,6 +4544,15 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                             ? { lane: controller.laneNo, lanes: controller.lanes.length,
                                 askedInRound: controller.askedInRound }
                             : {}),
+                        // Only when the answer applied here was asked in an EARLIER round: how many
+                        // it crossed. Recorded, never acted on — the move still lands, because
+                        // takeTurnAnswer accepts a mid-pipeline answer deliberately rather than
+                        // punishing a seat for its provider's latency. But `askedInRound` above has
+                        // always been written and never compared, so no match could say how often a
+                        // seat moved on a board it had never been shown, and that frequency is the
+                        // only evidence a rejection rule could be decided on.
+                        ...(controller.answerContext && controller.answerContext._lateByRounds
+                            ? { lateByRounds: controller.answerContext._lateByRounds } : {}),
                         // Only when the reply came back empty although tokens were
                         // BILLED. Then the tokens existed and something between the
                         // server and us dropped them -- a model cannot write 940 tokens
@@ -9155,6 +9172,115 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     }
 
     // Fire a single turn for one controller on the first free lane it has.
+    // Whose answer this round takes, and what the round remembers about it.
+    //
+    // Lifted out of startTurn's promise chain unchanged — the reasoning below is the
+    // original, including the measurement — so that the decision could be exercised without
+    // a network, a round clock and four lanes. See tests/late-answer.test.cjs.
+    takeTurnAnswer(controller, lane, actionData) {
+        // Hold it for flushRound. Arriving first must not mean taking
+        // effect first. An answer to a round that has already resolved
+        // (this seat timed out and the others moved on without it) is
+        // dropped rather than replayed onto a board it never saw.
+        //
+        // A lane asked in an EARLIER round is not stale, it is mid-pipeline,
+        // and its answer is exactly what the current round is waiting for --
+        // so the test is no longer "were you asked this round" but "has this
+        // seat answered yet, and were you cut for missing a deadline".
+        // The round takes the answer built on the LATEST board it is offered.
+        //
+        // "First to land" was arbitrary: the winner is whichever lane happened
+        // to finish first, which for a fast seat is dominated by latency
+        // variance rather than by anything meaningful. Measured over 72
+        // competing pairs, it already kept the fresher answer 86% of the time
+        // by luck -- this makes the remaining 14% deliberate. It matters far
+        // more the slower the seat: at two lanes on a 63s model the boards are
+        // ~32s apart, against ~2.5s on a 8s one.
+        //
+        // It costs nothing. The round closes when it closes; this only chooses
+        // between answers already in hand by then. Still exactly one action per
+        // seat per round -- the superseded one becomes the dropped one, counted
+        // and struck from history like any other.
+        const supersedes = this.seatAnswered(controller)
+            && controller.answerContext
+            && lane.askedAt > controller.answerContext._askedAt;
+        if (supersedes) {
+            this.noteLaneDropped(lane, controller.queuedAction,
+                                 controller.answerContext._logTurn);
+        }
+        if (this._roundPhase === 'wait' && !lane.missed
+            && (!this.seatAnswered(controller) || supersedes)) {
+            controller.queuedAction = actionData;
+            controller.answeredRound = this._roundNo;
+            // WHICH lane answered. flushRound runs the move later, and it has
+            // to run it as that lane: the outcome belongs on the history
+            // record that lane wrote, and the idle counts it is judged
+            // against came from the state that lane was sent.
+            controller.answeringLane = lane;
+            // How many rounds stale this answer is: the round it was asked in against the round
+            // taking it. Zero is the ordinary case — asked this round, answered this round.
+            //
+            // This RECORDS and changes nothing. The rule above deliberately accepts an answer from
+            // an earlier round ("a lane asked in an EARLIER round is not stale, it is
+            // mid-pipeline"), which is right for a seat whose inference simply takes longer than a
+            // round. But `lane.askedInRound` was stamped, written into the transcript, and then
+            // never compared with anything — so nobody could say how often a seat's move landed on
+            // a board that seat had never been shown, and that frequency is exactly what a
+            // decision to age out or reject stale answers would have to rest on. So it goes on the
+            // turn and into a per-seat tally, and the move itself is untouched: enforcement would
+            // change who gets to act, which is a different call than this one.
+            const staleBy = (typeof lane.askedInRound === 'number' && typeof this._roundNo === 'number')
+                ? Math.max(0, this._roundNo - lane.askedInRound) : 0;
+            if (staleBy > 0) {
+                const st = controller.seat || (controller.seat = {});
+                st.lateAnswers = (st.lateAnswers || 0) + 1;
+                st.lateAnswerMax = Math.max(st.lateAnswerMax || 0, staleBy);
+            }
+            // Everything the executor will need about THIS answer, pinned now.
+            //
+            // The lane is handed straight back to the pipeline and may open a
+            // new request before flushRound runs. That request clears _moveNo
+            // and _moveMs at its start and rebuilds every "what was I shown"
+            // field for its own board -- so by execution time the lane no
+            // longer describes the answer being executed. The visible symptom
+            // was cards arriving with no inference time on them; the quiet one
+            // was the duplicate and raced-pool checks judging an order against
+            // a snapshot it never saw.
+            //
+            // The lane was never the right owner of this. An answer's context
+            // belongs to the answer.
+            controller.answerContext = {
+                _moveNo: lane._moveNo, _moveMs: lane._moveMs,
+                _shownBuildings: lane._shownBuildings,
+                _shownResearched: lane._shownResearched,
+                _shownResearching: lane._shownResearching,
+                _shownAgeUpgrading: lane._shownAgeUpgrading,
+                _shownWorkers: lane._shownWorkers,
+                _shownWorkerPools: lane._shownWorkerPools,
+                _sentIdle: lane._sentIdle,
+                _logTurn: lane._logTurn,
+                _askedAt: lane.askedAt,
+                _lateByRounds: staleBy
+            };
+        } else {
+            // A complete, valid, paid-for inference that no round will take.
+            // It used to vanish here, which made the log look misaligned --
+            // failures were still written by parseResponse on their way out,
+            // so a lane seat showed every one of its refusals and only the
+            // successes a round happened to use. Measured on one match: 11 of
+            // 50 replies, every one carrying real commands.
+            //
+            // Logged as a control entry, not an action: nothing was executed,
+            // so it must not touch the action counters. It is the third drain
+            // beside blind duplicates and truncated replies, and the only one
+            // that was invisible.
+            // the LANE, not the seat: _moveNo and _moveMs are per-request,
+            // so the card would otherwise arrive with no move number and no
+            // inference time -- the two fields that place it in the log.
+            this.noteLaneDropped(lane, actionData);
+        }
+    }
+
     startTurn(controller, now = Date.now()) {
         // Both callers already check, but a seat with every lane in the air must never
         // silently overwrite one: that is the failure the pool exists to make impossible.
@@ -9215,87 +9341,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 if (lat.length > 10) lat.shift();
 
                 if (this.turnBased) {
-                    // Hold it for flushRound. Arriving first must not mean taking
-                    // effect first. An answer to a round that has already resolved
-                    // (this seat timed out and the others moved on without it) is
-                    // dropped rather than replayed onto a board it never saw.
-                    //
-                    // A lane asked in an EARLIER round is not stale, it is mid-pipeline,
-                    // and its answer is exactly what the current round is waiting for --
-                    // so the test is no longer "were you asked this round" but "has this
-                    // seat answered yet, and were you cut for missing a deadline".
-                    // The round takes the answer built on the LATEST board it is offered.
-                    //
-                    // "First to land" was arbitrary: the winner is whichever lane happened
-                    // to finish first, which for a fast seat is dominated by latency
-                    // variance rather than by anything meaningful. Measured over 72
-                    // competing pairs, it already kept the fresher answer 86% of the time
-                    // by luck -- this makes the remaining 14% deliberate. It matters far
-                    // more the slower the seat: at two lanes on a 63s model the boards are
-                    // ~32s apart, against ~2.5s on a 8s one.
-                    //
-                    // It costs nothing. The round closes when it closes; this only chooses
-                    // between answers already in hand by then. Still exactly one action per
-                    // seat per round -- the superseded one becomes the dropped one, counted
-                    // and struck from history like any other.
-                    const supersedes = this.seatAnswered(controller)
-                        && controller.answerContext
-                        && lane.askedAt > controller.answerContext._askedAt;
-                    if (supersedes) {
-                        this.noteLaneDropped(lane, controller.queuedAction,
-                                             controller.answerContext._logTurn);
-                    }
-                    if (this._roundPhase === 'wait' && !lane.missed
-                        && (!this.seatAnswered(controller) || supersedes)) {
-                        controller.queuedAction = actionData;
-                        controller.answeredRound = this._roundNo;
-                        // WHICH lane answered. flushRound runs the move later, and it has
-                        // to run it as that lane: the outcome belongs on the history
-                        // record that lane wrote, and the idle counts it is judged
-                        // against came from the state that lane was sent.
-                        controller.answeringLane = lane;
-                        // Everything the executor will need about THIS answer, pinned now.
-                        //
-                        // The lane is handed straight back to the pipeline and may open a
-                        // new request before flushRound runs. That request clears _moveNo
-                        // and _moveMs at its start and rebuilds every "what was I shown"
-                        // field for its own board -- so by execution time the lane no
-                        // longer describes the answer being executed. The visible symptom
-                        // was cards arriving with no inference time on them; the quiet one
-                        // was the duplicate and raced-pool checks judging an order against
-                        // a snapshot it never saw.
-                        //
-                        // The lane was never the right owner of this. An answer's context
-                        // belongs to the answer.
-                        controller.answerContext = {
-                            _moveNo: lane._moveNo, _moveMs: lane._moveMs,
-                            _shownBuildings: lane._shownBuildings,
-                            _shownResearched: lane._shownResearched,
-                            _shownResearching: lane._shownResearching,
-                            _shownAgeUpgrading: lane._shownAgeUpgrading,
-                            _shownWorkers: lane._shownWorkers,
-                            _shownWorkerPools: lane._shownWorkerPools,
-                            _sentIdle: lane._sentIdle,
-                            _logTurn: lane._logTurn,
-                            _askedAt: lane.askedAt
-                        };
-                    } else {
-                        // A complete, valid, paid-for inference that no round will take.
-                        // It used to vanish here, which made the log look misaligned --
-                        // failures were still written by parseResponse on their way out,
-                        // so a lane seat showed every one of its refusals and only the
-                        // successes a round happened to use. Measured on one match: 11 of
-                        // 50 replies, every one carrying real commands.
-                        //
-                        // Logged as a control entry, not an action: nothing was executed,
-                        // so it must not touch the action counters. It is the third drain
-                        // beside blind duplicates and truncated replies, and the only one
-                        // that was invisible.
-                        // the LANE, not the seat: _moveNo and _moveMs are per-request,
-                        // so the card would otherwise arrive with no move number and no
-                        // inference time -- the two fields that place it in the log.
-                        this.noteLaneDropped(lane, actionData);
-                    }
+                    this.takeTurnAnswer(controller, lane, actionData);
                     return;
                 }
                 this.executeTurn(lane, actionData);

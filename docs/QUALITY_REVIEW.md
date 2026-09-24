@@ -451,6 +451,10 @@ it is not optional.
 | `js/game.js` `rand`/`randJitter` + 62 call sites in `game.js`, `ai.js`, `openai-ai.js` | the match draws from the generator the seed already controls; unseeded it is literally `Math.random`, so no default match changed | two fresh pages, same seed, same step stamp: economy `6ed3deb2` identical, forced combat `398e91df` identical; HEAD differs on both, with 27 vs 29 survivors |
 | `tests/match-determinism.test.cjs` (new) | the seeded stream, the delegation, the unseeded fallthrough, and an allowlist of the two `Math.random()` sites that must stay unseeded | 4 tests; a new unseeded draw, a broken delegation, an off-centre jitter and a seed that stops reaching the generator each fail a different one |
 | `tests/build-coordinates.test.cjs` | the stub game now supplies `rand`/`randJitter` (the placement path draws through them) and pins them, so the tower-spacing assertion is exact instead of random | it failed with `game.randJitter is not a function` first, which is the interface change made visible |
+| `js/engine/glcore.js`, `js/engine/gamerenderer.js`, `js/openai-ai.js` | the renderer identity is read once, logged at boot, and written into the transcript header (`renderer`, `maxTextureSize`) | booted both paths: SwiftShader → 8192, R9700 → 16384, each named in full |
+| `tests/gl-identity.test.cjs` (new) | the four deployment shapes: no context, no debug extension, unmasked exposed, extension/getParameter throwing | 4 tests; dropping the fallback, the null-normalisation or either catch each fails one |
+| `js/openai-ai.js` `takeTurnAnswer` (extracted) + staleness recorded | the turn-based acceptance rule is now exercitable, and rounds-crossed is written to the turn and the seat without discarding anything | `tests/late-answer.test.cjs` (5); six mutations of the rule, five caught by the test that owns that rule |
+| `docs/QUALITY_REVIEW.md` item 6 | the `makeMesh` claim corrected — no such function exists, and shader/link failures already throw with the driver's log | whole-tree search; `glcore.js:35,44` |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
@@ -459,7 +463,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **319/319 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **328/328 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -536,10 +540,25 @@ GPUs; the direction is the part that holds.
 5. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). The two things this app writes into its own folder, `results_*.md` and
     `match-*.jsonl`, are now ignored; the existing history still needs LFS or a rewrite.
-6. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
-    `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
-    failure is "a unit silently never appears", which the transcript will blame on the
-    model's build order.
+6. **S4 — what a result was produced on was never recorded.** Closed.
+   Half of this item as first written was wrong, and the wrongness stays on the record: there is
+   no `makeMesh` anywhere in `js/` (whole tree searched), and the silent engine failure it described
+   does not exist either — a shader that will not compile *throws* with the driver's info log and
+   the offending source (`glcore.js:35`), as does a program that will not link (`:44`). What was
+   true is that nothing recorded the machine, which matters more here than it looks: the renderer
+   sets the frame cadence, the cadence sets how many simulation steps fit inside a seat's turn, and
+   software rasterisation against the installed card measured 21 fps against 60 on this build — two
+   results from those two machines are not the same experiment, and the transcript could not say
+   which one it held. `GLCore.describeContext(gl)` now reads the identity once at context creation
+   (unmasked renderer where the browser exposes it, core `RENDERER`/`VERSION`/`MAX_TEXTURE_SIZE`
+   where it does not, never an exception — four deployment shapes pinned in
+   `tests/gl-identity.test.cjs`), the renderer logs one line at boot, and `renderer` +
+   `maxTextureSize` ride in the transcript header beside `mapSeed`. Measured on both paths here:
+   `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) …), SwiftShader driver) | max texture
+   8192` and `ANGLE (AMD, Vulkan 1.4.354 (AMD Radeon AI PRO R9700 (RADV GFX1201)), radv) | max
+   texture 16384`. Still absent on purpose: `gl.getError()` polling — the failure modes that were
+   real, context loss and a rejected shader, are handled here and in §7, and polling an error queue
+   every frame costs the frames a match needs.
 7. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
     backoff the retry is skipped only when the run stopped or the seat's deadline was
     aborted; there is no staleness check where a reply is applied (`lane.askedInRound` is
@@ -550,6 +569,17 @@ GPUs; the direction is the part that holds.
     to a question nobody is asking — and a correct one needs both halves the helper named:
     the round number catches an answer overtaken by a later round, and the phase catches the
     round that resolved *without* this seat, since a timeout flush leaves the number alone.
+   What landed instead, because it decides nothing: the acceptance rule was lifted out of
+   `startTurn`'s promise chain verbatim (81 lines, checked byte-for-byte against the original after
+   dedenting) into `takeTurnAnswer`, so the rule can be exercised without a network, a round clock
+   and four lanes. `tests/late-answer.test.cjs` pins the five decisions it makes — including the
+   deliberate one that a lane asked in an *earlier* round is not stale, and the fresher-board rule
+   that, before it was written down, picked the fresher answer in 86% of 72 competing pairs by luck.
+   And the staleness that was stamped and ignored is now compared and recorded: rounds crossed goes
+   on the turn as `lateByRounds`, the tally and worst case onto the seat as `lateAnswers` /
+   `lateAnswerMax`. Nothing is discarded, because discarding changes who moves. What a rejection
+   rule would cost — how often a seat's order lands on a board it was never shown — is now something
+   a match reports instead of a question nobody can answer.
 8. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
@@ -660,7 +690,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 319 unit tests, ~77 s, needs only Node
+npm test                      # 328 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \

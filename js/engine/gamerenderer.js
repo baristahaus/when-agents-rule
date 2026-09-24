@@ -99,6 +99,13 @@
             this.canvas = canvas;
             this.W = W; this.H = H;
             this.gl = GLCore.createContext(canvas, { preserveDrawingBuffer: true });
+            // Read once, at the only moment the context is known to be fresh. The boot line is
+            // for a human debugging a machine; glInfo is for the transcript, where a result has
+            // to carry what it was played on (see GLCore.describeContext).
+            this.glInfo = GLCore.describeContext(this.gl);
+            console.info('[WAR] WebGL ' + (this.glInfo.renderer || 'unknown')
+                + ' | max texture ' + (this.glInfo.maxTextureSize || '?')
+                + ' | ' + (this.glInfo.version || '?'));
 
             // inner-renderer + scene shims (see header)
             this.renderer = {

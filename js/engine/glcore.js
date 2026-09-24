@@ -27,6 +27,37 @@
         return gl;
     };
 
+    // Which machine this actually is, read once. A match's frame cadence follows the renderer —
+    // software rasterisation and the installed card measured 21 fps against 60 on the same build
+    // of this game — and cadence is how many simulation steps a seat's turn contains, so results
+    // are only comparable across machines if the renderer is written down somewhere. That is why
+    // it travels next to mapSeed in the transcript header rather than only in a console.
+    // WEBGL_debug_renderer_info is not always exposed (it is a fingerprinting surface), and the
+    // core RENDERER/VERSION parameters are, so those are the fallback rather than a requirement.
+    GLCore.describeContext = (gl) => {
+        // Belt and braces: nothing distinguishes this guard from the two catches below, which is
+        // why no test pins it (removing it was tried, and the suite stayed green). It stays
+        // because those two catches exist for driver reasons, not for a null context, and a
+        // future edit that narrows either one would otherwise turn "no renderer to describe"
+        // into an exception during boot.
+        if (!gl) return { renderer: null, vendor: null, version: null, maxTextureSize: null };
+        const read = (name) => { try { const v = gl.getParameter(gl[name]); return v == null ? null : v; } catch (e) { return null; } };
+        let renderer = null, vendor = null;
+        try {
+            const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+            if (dbg) {
+                renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || null;
+                vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) || null;
+            }
+        } catch (e) { /* a missing diagnostic is never worth an exception on the draw path */ }
+        return {
+            renderer: renderer || read('RENDERER'),
+            vendor: vendor || read('VENDOR'),
+            version: read('VERSION'),
+            maxTextureSize: read('MAX_TEXTURE_SIZE'),
+        };
+    };
+
     GLCore.compileProgram = (gl, vsSource, fsSource) => {
         const make = (type, src) => {
             const sh = gl.createShader(type);
