@@ -245,8 +245,8 @@ class AIManager {
         worker.carryingResource = false;
         worker.harvestAmount = 0;
         worker.isMoving = true;
-        worker.targetX = node.x + (Math.random() - 0.5) * 2;
-        worker.targetZ = node.z + (Math.random() - 0.5) * 2;
+        worker.targetX = node.x + this.game.randJitter(2);
+        worker.targetZ = node.z + this.game.randJitter(2);
     }
 
     // Keep the workforce productive every think:
@@ -355,10 +355,10 @@ class AIManager {
         const sec = this.game.leastExploredSection ? this.game.leastExploredSection(ai) : null;
         let tx, tz;
         if (sec && sec.pct < 100) {
-            tx = sec.x + (Math.random() - 0.5) * 100;
-            tz = sec.z + (Math.random() - 0.5) * 100;
+            tx = sec.x + this.game.randJitter(100);
+            tz = sec.z + this.game.randJitter(100);
         } else {
-            ai._scoutAngle = (ai._scoutAngle == null) ? Math.random() * Math.PI * 2 : ai._scoutAngle + 2.399963;
+            ai._scoutAngle = (ai._scoutAngle == null) ? this.game.rand() * Math.PI * 2 : ai._scoutAngle + 2.399963;
             ai._scoutRadius = Math.min(half, (ai._scoutRadius || 60) + 40);
             const c = ai.buildings[0] || { x: 0, z: 0 };
             tx = c.x + Math.cos(ai._scoutAngle) * ai._scoutRadius;
@@ -567,7 +567,7 @@ class AIManager {
             if (!ai._armyScoutTarget || arrived || stuck) {
                 // Fan out from the base with the golden angle and a growing radius so
                 // repeated legs sweep the whole map instead of circling one ring.
-                ai._armyScoutAngle = (ai._armyScoutAngle == null) ? Math.random() * Math.PI * 2 : ai._armyScoutAngle + 2.399963;
+                ai._armyScoutAngle = (ai._armyScoutAngle == null) ? this.game.rand() * Math.PI * 2 : ai._armyScoutAngle + 2.399963;
                 ai._armyScoutRadius = Math.min(half, (ai._armyScoutRadius || 90) + 60);
                 ai._armyScoutTarget = {
                     x: Math.max(-half, Math.min(half, base.x + Math.cos(ai._armyScoutAngle) * ai._armyScoutRadius)),
@@ -635,8 +635,8 @@ class AIManager {
     // Returns a valid {x,z} near the town centre or null — WITHOUT spending.
     findBuildPosition(ai, tc, buildingType, isWonder) {
         for (let attempts = 0; attempts < 24; attempts++) {
-            const x = tc.x + (Math.random() - 0.5) * 60;
-            const z = tc.z + (Math.random() - 0.5) * 60;
+            const x = tc.x + this.game.randJitter(60);
+            const z = tc.z + this.game.randJitter(60);
             if (this.isClearBuildSpot(ai, buildingType, isWonder, x, z)) return { x, z };
         }
         // A Wonder doesn't give up with the centre block: late-game bases fill the
@@ -645,7 +645,7 @@ class AIManager {
         if (isWonder) {
             for (let radius = 14; radius <= 90; radius += 8) {
                 const steps = Math.max(8, Math.round((2 * Math.PI * radius) / 12));
-                const a0 = Math.random() * Math.PI * 2;
+                const a0 = this.game.rand() * Math.PI * 2;
                 for (let s = 0; s < steps; s++) {
                     const ang = a0 + (s / steps) * 2 * Math.PI;
                     const x = tc.x + Math.cos(ang) * radius;

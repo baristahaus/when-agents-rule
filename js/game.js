@@ -342,7 +342,7 @@ class Game {
 
             // Create initial workers
             for (let w = 0; w < 3; w++) {
-                const worker = createUnit('worker', spawn.x + (Math.random() - 0.5) * 10, spawn.z + (Math.random() - 0.5) * 10, ai.id, ai.civilization, 'stone');
+                const worker = createUnit('worker', spawn.x + this.randJitter(10), spawn.z + this.randJitter(10), ai.id, ai.civilization, 'stone');
                 if (worker) {
                     ai.units.push(worker);
                     this.renderer.addUnit(worker);
@@ -510,8 +510,8 @@ class Game {
             // Create initial workers near player town center
             for (let i = 0; i < 3; i++) {
                 const worker = createUnit('worker', 
-                    playerSpawn.x + (Math.random() - 0.5) * 10, 
-                    playerSpawn.z + (Math.random() - 0.5) * 10, 
+                    playerSpawn.x + this.randJitter(10), 
+                    playerSpawn.z + this.randJitter(10), 
                     'player', this.player.civilization, 'stone');
                 this.player.units.push(worker);
                 this.renderer.addUnit(worker);
@@ -546,8 +546,8 @@ class Game {
             // Create AI workers near their town center
             for (let j = 0; j < 3; j++) {
                 const aiWorker = createUnit('worker', 
-                    aiSpawn.x + (Math.random() - 0.5) * 10, 
-                    aiSpawn.z + (Math.random() - 0.5) * 10, 
+                    aiSpawn.x + this.randJitter(10), 
+                    aiSpawn.z + this.randJitter(10), 
                     ai.id, aiCiv, 'stone');
                 ai.units.push(aiWorker);
                 this.renderer.addUnit(aiWorker);
@@ -908,8 +908,8 @@ class Game {
                 resourceNode.farmRef.assignedWorker = unit;
                 // Move worker to the farm
                 unit.isMoving = true;
-                unit.targetX = resourceNode.farmRef.x + (Math.random() - 0.5) * 3;
-                unit.targetZ = resourceNode.farmRef.z + (Math.random() - 0.5) * 3;
+                unit.targetX = resourceNode.farmRef.x + this.randJitter(3);
+                unit.targetZ = resourceNode.farmRef.z + this.randJitter(3);
                 unit.harvestTarget = null;
                 unit.carryingResource = false;
             } else if (unit.type === 'worker' && resourceNode) {
@@ -1070,8 +1070,8 @@ class Game {
             // had, and it undid the formation for exactly the units standing closest to
             // the fighting.
             const off = u.formationOffset;
-            u.targetX = x + (off ? off.x : (Math.random() - 0.5) * 4);
-            u.targetZ = z + (off ? off.z : (Math.random() - 0.5) * 4);
+            u.targetX = x + (off ? off.x : this.randJitter(4));
+            u.targetZ = z + (off ? off.z : this.randJitter(4));
             n++;
         });
         return n;
@@ -1461,8 +1461,8 @@ class Game {
                 // marching/holding; do not alternate patient pursuit with the slot.
                 // Idle with someone hurt nearby: walk over (generic mover drives it).
                 u.isMoving = true;
-                u.targetX = patient.x + (Math.random() - 0.5) * 2;
-                u.targetZ = patient.z + (Math.random() - 0.5) * 2;
+                u.targetX = patient.x + this.randJitter(2);
+                u.targetZ = patient.z + this.randJitter(2);
             }
         });
     }
@@ -1740,7 +1740,7 @@ class Game {
                 d.attackTarget = atk;
                 // Small spread on the rally point so a worker mob doesn't try to
                 // occupy one exact spot when the fight ends (the old jam).
-                d.attackMove = { x: atk.x + (Math.random() - 0.5) * 5, z: atk.z + (Math.random() - 0.5) * 5 };
+                d.attackMove = { x: atk.x + this.randJitter(5), z: atk.z + this.randJitter(5) };
                 d.attackTimer = 0;
                 d.isMoving = true;
                 d.targetX = atk.x;
@@ -1794,8 +1794,8 @@ class Game {
         unit.carryingResource = false;
         unit.harvestAmount = 0;
         unit.isMoving = true;
-        unit.targetX = q.node.x + (Math.random() - 0.5) * 2;
-        unit.targetZ = q.node.z + (Math.random() - 0.5) * 2;
+        unit.targetX = q.node.x + this.randJitter(2);
+        unit.targetZ = q.node.z + this.randJitter(2);
         return true;
     }
 
@@ -1813,8 +1813,8 @@ class Game {
             unit.farmRef = r.farmRef;
             r.farmRef.assignedWorker = unit;
             unit.isMoving = true;
-            unit.targetX = r.farmRef.x + (Math.random() - 0.5) * 3;
-            unit.targetZ = r.farmRef.z + (Math.random() - 0.5) * 3;
+            unit.targetX = r.farmRef.x + this.randJitter(3);
+            unit.targetZ = r.farmRef.z + this.randJitter(3);
             return;
         }
         if (r.harvestTarget && r.harvestTarget.amount > 0) {
@@ -1823,8 +1823,8 @@ class Game {
             unit.isHarvesting = false;
             unit.harvestTimer = 0;
             unit.isMoving = true;
-            unit.targetX = r.harvestTarget.x + (Math.random() - 0.5) * 2;
-            unit.targetZ = r.harvestTarget.z + (Math.random() - 0.5) * 2;
+            unit.targetX = r.harvestTarget.x + this.randJitter(2);
+            unit.targetZ = r.harvestTarget.z + this.randJitter(2);
             return;
         }
         if (r.harvestTarget) {
@@ -1978,6 +1978,34 @@ class Game {
     }
 
     effectiveSimSpeed() { return this.anyWonderStanding() ? 1 : (this.simSpeed || 1); }
+
+    // The match's own source of randomness, and the reason it is not Math.random: terrain
+    // already owns a seeded PRNG (mulberry32, terrain.js:88) because two models cannot be
+    // compared on "identical terrain" unless the map really is identical — but that was the
+    // ONLY thing the seed reached. Everything else the simulation's trajectory depends on
+    // (spawn scatter, where a worker parks on a farm, the angle a trained unit walks out at,
+    // where a builder puts a structure when the model gave no coordinates, which tile an
+    // explore order resolves to) drew from Math.random, so a seeded match reproduced the
+    // LAYOUT and not the MATCH: same island, different game, and nothing in the transcript
+    // header's mapSeed said which was which.
+    //
+    // With no seed, terrain.rand IS Math.random (terrain.js:89), so the default game is
+    // bit-for-bit the same code path it always took. With one, gameplay draws continue the
+    // generator the map was built from — which is why map generation itself is unaffected:
+    // it consumes the stream first, unchanged, before any of these calls exist.
+    //
+    // What this does NOT claim: that a live match replays. The world advances by wall-clock
+    // delta, so a 60fps tab and a backgrounded one take different numbers of steps through
+    // the same seed (measured in §7). Seeded runs are reproducible at a fixed step cadence —
+    // which is what a test harness, a replay-driven review, and a bug report need.
+    rand() {
+        return ((this.terrain && typeof this.terrain.rand === 'function') ? this.terrain.rand : Math.random)();
+    }
+
+    // Half-width jitter, the shape almost every call site wants: a park-and-spread offset so
+    // a crowd does not weld into one point, ±k/2. Kept as a method because the alternative
+    // was writing `(this.rand() - 0.5) * 3` thirty times and inviting a typo in the sign.
+    randJitter(k) { return (this.rand() - 0.5) * k; }
 
     toggleActionCam() {
         this._actionCam = !this._actionCam;
@@ -2597,8 +2625,8 @@ class Game {
             hand.farmRef = f;
             hand.task = 'farm_work';
             hand.isMoving = true;
-            hand.targetX = f.x + (Math.random() - 0.5) * 3;
-            hand.targetZ = f.z + (Math.random() - 0.5) * 3;
+            hand.targetX = f.x + this.randJitter(3);
+            hand.targetZ = f.z + this.randJitter(3);
             resumed++;
         });
 
@@ -4414,8 +4442,8 @@ class Game {
                 unit.task = 'farm_work';
                 unit.farmRef = f.farmRef;
                 unit.isMoving = true;
-                unit.targetX = f.farmRef.x + (Math.random() - 0.5) * 3;
-                unit.targetZ = f.farmRef.z + (Math.random() - 0.5) * 3;
+                unit.targetX = f.farmRef.x + this.randJitter(3);
+                unit.targetZ = f.farmRef.z + this.randJitter(3);
                 return;
             }
             if ((f.task === 'harvesting' || f.task === 'carrying') && f.harvestTarget) {
@@ -4436,8 +4464,8 @@ class Game {
             unit.task = 'farm_work';
             unit.farmRef = site;
             unit.isMoving = true;
-            unit.targetX = site.x + (Math.random() - 0.5) * 3;
-            unit.targetZ = site.z + (Math.random() - 0.5) * 3;
+            unit.targetX = site.x + this.randJitter(3);
+            unit.targetZ = site.z + this.randJitter(3);
             return;
         }
         // A worker that just finished building looks for ANOTHER unfinished site with
@@ -4583,8 +4611,8 @@ class Game {
         unit.task = 'harvesting';
         unit.harvestTarget = best;
         unit.isMoving = true;
-        unit.targetX = best.x + (Math.random() - 0.5) * 2;
-        unit.targetZ = best.z + (Math.random() - 0.5) * 2;
+        unit.targetX = best.x + this.randJitter(2);
+        unit.targetZ = best.z + this.randJitter(2);
     }
 
     updateWorkerTasks(deltaTime) {
@@ -4829,8 +4857,8 @@ class Game {
                         : (unit.harvestTarget.amount > 0);
                     
                     if (hasMoreResources) {
-                        unit.targetX = unit.harvestTarget.x + (Math.random() - 0.5) * 2;
-                        unit.targetZ = unit.harvestTarget.z + (Math.random() - 0.5) * 2;
+                        unit.targetX = unit.harvestTarget.x + this.randJitter(2);
+                        unit.targetZ = unit.harvestTarget.z + this.randJitter(2);
                         unit.isMoving = true;
                         unit.task = 'harvesting';
                     } else if (!unit.harvestTarget.isFarm) {
@@ -4848,8 +4876,8 @@ class Game {
                 if (unit.farmRef && unit.farmRef.assignedWorker === unit && unit.farmRef.health > 0) {
                     unit.task = 'farm_work';
                     unit.isMoving = true;
-                    unit.targetX = unit.farmRef.x + (Math.random() - 0.5) * 3;
-                    unit.targetZ = unit.farmRef.z + (Math.random() - 0.5) * 3;
+                    unit.targetX = unit.farmRef.x + this.randJitter(3);
+                    unit.targetZ = unit.farmRef.z + this.randJitter(3);
                 }
                 // Nothing resumed the job (harvestTarget was cleared mid-carry and there
                 // is no farm): become idle. Without this the worker lingered with
@@ -5069,8 +5097,8 @@ class Game {
                     // Return to farm
                     unit.task = 'farm_work';
                     unit.isMoving = true;
-                    unit.targetX = farm.x + (Math.random() - 0.5) * 3;
-                    unit.targetZ = farm.z + (Math.random() - 0.5) * 3;
+                    unit.targetX = farm.x + this.randJitter(3);
+                    unit.targetZ = farm.z + this.randJitter(3);
                     return;
                 }
                 
@@ -5082,8 +5110,8 @@ class Game {
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     if (dist > 3) {
                         unit.isMoving = true;
-                        unit.targetX = farm.x + (Math.random() - 0.5) * 2;
-                        unit.targetZ = farm.z + (Math.random() - 0.5) * 2;
+                        unit.targetX = farm.x + this.randJitter(2);
+                        unit.targetZ = farm.z + this.randJitter(2);
                     }
                 }
             }
@@ -5123,8 +5151,8 @@ class Game {
                         unit.task = 'farm_work';
                         unit.farmRef = nearestFarm;
                         unit.isMoving = true;
-                        unit.targetX = nearestFarm.x + (Math.random() - 0.5) * 2;
-                        unit.targetZ = nearestFarm.z + (Math.random() - 0.5) * 2;
+                        unit.targetX = nearestFarm.x + this.randJitter(2);
+                        unit.targetZ = nearestFarm.z + this.randJitter(2);
                     }
                 }
             }
@@ -5185,9 +5213,9 @@ class Game {
                     // Create the unit clearly OUTSIDE the building's footprint (bigger
                     // buildings push the unit further out) so it never spawns half-hidden
                     // inside the mesh.
-                    const spawnAngle = Math.random() * Math.PI * 2;
+                    const spawnAngle = this.rand() * Math.PI * 2;
                     const footRadius = (building.isWonder || building.type === 'town_center') ? 5 : 3.5;
-                    const spawnDist = footRadius + 3 + Math.random() * 1.5; // clear of the mesh + a little spread
+                    const spawnDist = footRadius + 3 + this.rand() * 1.5; // clear of the mesh + a little spread
                     const spawnX = building.x + Math.cos(spawnAngle) * spawnDist;
                     const spawnZ = building.z + Math.sin(spawnAngle) * spawnDist;
                     

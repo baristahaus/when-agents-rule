@@ -6,7 +6,11 @@ function setup(){
  const Manager=vm.runInContext('OpenAIAIManager',scope),m=new Manager({});
  const ai={id:'a',civilization:'greek',age:'iron',researchedTechs:{tower:true},units:[],buildings:[],resources:{hasResources:()=>true,spendResources(){spent++;}}};
  let spent=0;const added=[];
- const game={player:{buildings:[]},aiManager:{aiPlayers:[]},resourceClearance:()=>5,
+ // rand/randJitter: placement paths (findClearSpot, the crowded-site nudge) draw the match's
+ // own seeded random source, so a stand-in game has to provide it. Pinned to 0.5 — which makes
+ // randJitter 0 and the fallback angle a constant — because this file asserts an exact minimum
+ // distance between two towers, and there is no reason for that number to be a coin flip.
+ const game={player:{buildings:[]},aiManager:{aiPlayers:[]},resourceClearance:()=>5,rand:()=>0.5,randJitter:()=>0,
   renderer:{addBuilding:b=>added.push(b)},pickBuilder:()=>({worker:{}}),applyBuilder(){}};
  m.couldBeBlindDuplicate=()=>false;m.blindDuplicateBuilding=()=>null;m.noteIdleTaken=()=>{};m.travelEtaSec=()=>0;
  return {m,ai,game,added,spent:()=>spent,build:(x,z)=>m.executeBuildStructure(ai,game,'tower',x,z)};

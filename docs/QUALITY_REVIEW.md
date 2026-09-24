@@ -448,6 +448,9 @@ it is not optional.
 | `js/engine/gamerenderer.js` coincident cases | separation now reaches units on the identical point, and the dead-centre building escape fans by index instead of `+x` | welded stack `0.000 → 0.000` over 7 s before; `→ 1.2` after |
 | `js/game.js` `canAffordAnyMilitary` | "can this seat field a unit?" now includes having a population slot — the condition the executor *and the model-facing state* already applied, and the survival rule alone did not | `tests/elimination-predicate.test.cjs` (6); fails with the clause removed |
 | `tests/roster-advancement.test.cjs` (new) | the shared roster closes on itself; the per-civ free-upgrade table recorded verbatim | 5 tests; deleting `archer:`'s path, retargeting at `ghost_unit`, `slinger -> elite_archer` at neolithic and giving hoplite a path each fail it (the first escaped an earlier version of this test) |
+| `js/game.js` `rand`/`randJitter` + 62 call sites in `game.js`, `ai.js`, `openai-ai.js` | the match draws from the generator the seed already controls; unseeded it is literally `Math.random`, so no default match changed | two fresh pages, same seed, same step stamp: economy `6ed3deb2` identical, forced combat `398e91df` identical; HEAD differs on both, with 27 vs 29 survivors |
+| `tests/match-determinism.test.cjs` (new) | the seeded stream, the delegation, the unseeded fallthrough, and an allowlist of the two `Math.random()` sites that must stay unseeded | 4 tests; a new unseeded draw, a broken delegation, an off-centre jitter and a seed that stops reaching the generator each fail a different one |
+| `tests/build-coordinates.test.cjs` | the stub game now supplies `rand`/`randJitter` (the placement path draws through them) and pins them, so the tower-spacing assertion is exact instead of random | it failed with `game.randJitter is not a function` first, which is the interface change made visible |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
@@ -456,7 +459,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **315/315 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **319/319 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -482,10 +485,50 @@ GPUs; the direction is the part that holds.
    Still unenforced: the `?v=`-must-move-with-the-change rule
    (`tests/shipped-files.test.cjs` checks every tag *exists* and every file is *loaded*, not
    that a touched file got a new tag — that needs git history, which is a CI step).
-3. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
-   targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
-   `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
-   seeded from the map seed closes it.
+3. **S2 — match-level reproducibility: closed for the draws, open for the clock.**
+   The first half is done. `Game.rand()` / `Game.randJitter()` now delegate to the generator the
+   map was built from, and the 62 simulation draws that used `Math.random()` — spawn scatter
+   (`game.js:345,513`), where a worker parks on a farm (`updateWorkerTasks`, six sites), the angle
+   and distance a trained unit walks out at (`updateProduction:5188`), where a builder puts a
+   structure when the model gave no coordinates (`openai-ai.js:6683-6684,6843-6874`), which tile an
+   `explore` order resolves to (`pointInTile:656-665`), and the rule AI's own scout angles and
+   build spots (`ai.js:248-361,638-648`) — go through it. With no seed, `terrain.rand` *is*
+   `Math.random` (`terrain.js:89`), so an unseeded match runs the same function it always did and
+   cannot have changed distribution; the map generator consumes the stream before any of these
+   calls exist, so seeded layouts are byte-identical too (verified: the map hash `f9d05604`/`0f215e7d`
+   is equal across both trees and both runs).
+
+   Measured, two fresh pages, same seed, same absolute step stamp, the browser's own frames
+   refused (`/tmp/pw/war-determinism.cjs`, `/tmp/pw/war-combatdet.cjs`):
+
+   | | this tree | HEAD |
+   |---|---|---|
+   | 80 s of economy, 3 rule-AI seats, 31 units | **IDENTICAL** `6ed3deb2` | DIFFER `81e14bc8` vs `a248f71d` |
+   | 45 s of hand-forced infantry combat | **IDENTICAL** `398e91df` | DIFFER `c90bef1a` vs `f4b9fa45`, and the two runs ended with **27 and 29 survivors** |
+
+   What remains is that the simulation has a **second clock**. The tick derives its delta from
+   `Date.now()` (`game.js:695`), and five places read wall time *inside* the simulation: the two
+   `_lastDamageTime` stamps (`1369`, `1534`), the 4 s retaliation window that reads them (`1585`),
+   the 10 s "was this building recently damaged" query (`3402`), and the battle clustering in
+   `pruneBattles` (`2265`). Two consequences follow, and they are not the same kind of thing.
+   Reproducibly, a match replays only at a fixed step cadence — which a harness controls and a
+   player's frame rate does not. In play, damage windows are measured in wall time while
+   everything else (production, cooldowns, the Wonder hold) is measured in game time, so at 2× or
+   4× speed a retaliation window is *half or a quarter as long in game terms* as it is at 1×, and
+   during a pause it keeps elapsing. Routing those five reads onto a sim clock is a one-line-each
+   change that would make the match reproducible on a player's machine too, but it changes how
+   long an effective window is at every speed other than 1 and makes pause freeze combat timing
+   for the first time — a gameplay decision, listed as such, not taken here.
+
+   The fact that makes any of this testable, and which nothing recorded before today:
+   **`startGame` is synchronous** — `gameStarted` is true the moment it returns, and it takes
+   exactly one internal step — so a match can be run with `requestAnimationFrame` refused
+   outright, which is the only way to compare two runs fairly. Stepping `simulateStep` alone is
+   *not* enough and looks convincing when it fails: it moves units that already have orders, and
+   orders come from `aiManager.update(dt)` in the tick wrapper, so a probe that skips it sits a
+   frozen world that hashes identically and reports determinism about nothing. The per-frame
+   sequence a harness must reproduce is population accounting, `aiManager.update`, `pruneBattles`,
+   `simulateStep`, `keepUnitsAshore`.
 4. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
     `git mv` into one file per concern keeps all 303 tests green — that is the whole
@@ -617,7 +660,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 315 unit tests, ~77 s, needs only Node
+npm test                      # 319 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
