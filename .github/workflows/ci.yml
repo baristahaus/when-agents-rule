@@ -1,13 +1,18 @@
 name: ci
 
-# Nothing in this repo has ever run automatically: 263 unit tests and two browser suites
-# exist, and all of them depended on someone remembering. Every step below is a command
-# that was executed locally before being written here.
+# Nothing in this repo ran automatically before this file: 285 unit tests and two browser
+# suites existed, and all of it depended on someone remembering. Every command below was
+# executed locally before being written here. The one thing that cannot be is the GitHub
+# runner itself, so the first scheduled run of the browser job is that job's real test.
 
 on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 04:17 UTC — off the hour on purpose, because scheduled jobs queued at the :00 mark
+    # wait behind everything else that remembers the top of the hour.
+    - cron: '17 4 * * *'
 
 jobs:
   test:
@@ -35,12 +40,49 @@ jobs:
       - name: Tests
         run: node --test tests/*.test.cjs
 
-  # Not included: the Playwright suites (tests/browser/*.cjs). They pass locally, but the
-  # runner would have to fetch a browser at job time, and a CI job that is red for network
-  # reasons trains everyone to ignore it. To add it once that is settled:
+  # The two Playwright suites, nightly and on demand — deliberately not on every push.
   #
-  #   - run: npm i --no-save playwright && npx playwright install --with-deps chromium
-  #   - run: npm run test:browser
+  # They are the only regression guard for the escaping and showcase-mode work (a property of
+  # the parsed DOM, which no unit test can reach) and the only thing that looks at what a
+  # player actually sees. They stay off push because each run downloads a ~170 MB browser,
+  # and a check that goes red because a CDN hiccuped trains everyone to ignore the check.
+  # Nightly keeps the signal without holding a push hostage to it; workflow_dispatch is
+  # "run it now, before I ship".
   #
-  # It is the only regression guard for the escaping and showcase-mode fixes in
-  # docs/QUALITY_REVIEW.md, so it is worth the minute.
+  # The commands below are the ones that pass on the machine this file was written on (Node
+  # 22, Playwright 1.49.1, Chromium in software GL through --enable-unsafe-swiftshader, which
+  # both suites already pass themselves). The runner is the one part that cannot be exercised
+  # locally, so the first scheduled run is the real test of this job.
+  browser:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # --no-save so package.json stays the dependency-free manifest the app ships with;
+      # node_modules exists only inside this job's workspace.
+      - name: Install Playwright and Chromium
+        run: |
+          npm i --no-save --no-package-lock playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      # One step, not two: npm run test:browser runs the suites sequentially, and run
+      # concurrently they contend for the software GL stack until a scenario misses its own
+      # boot timeout and reports a failure that is not in the app.
+      - name: Browser suites
+        env:
+          WAR_PLAYWRIGHT_PATH: ${{ github.workspace }}/node_modules/playwright
+          WAR_QA_DIR: ${{ runner.temp }}/qa
+        run: npm run test:browser
+
+      - name: Keep the screenshots whatever happened
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-screenshots
+          path: ${{ runner.temp }}/qa
+          if-no-files-found: ignore
