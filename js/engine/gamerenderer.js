@@ -203,6 +203,29 @@
 
         _buildTextures(theme) {
             if (this._theme === theme && this.tex) return;
+            // The set being replaced has to be freed, or it leaks wholesale. The renderer is
+            // built with 'summer' before any map exists, and the theme actually used comes
+            // from the difficulty (medium → winter, hard → desert) in setTerrain — so on
+            // every non-easy match the entire first set, 39 textures including the 1024²
+            // terrain mega-texture with its mipmaps, was orphaned at boot and stayed resident
+            // for the rest of the page's life. Every other texture owner here (clutter
+            // visibility, flags, banners, fog) already deletes what it replaces.
+            //
+            // Safe because nothing can still be holding one of these handles: the only
+            // callers are setTerrain (boot, arena start, campaign start) and the analyzer's
+            // replay, and each of those clears the scene first — verified at game.js:267/324,
+            // game.js:438/494 and ui.js:6088/6091. Entities compose their parts AFTER the
+            // swap, so they read the new set. Rebuilding while anything is on screen is the
+            // thing this must never do.
+            if (this.tex) {
+                for (const key of Object.keys(this.tex)) {
+                    const t = this.tex[key];
+                    // try/catch like the banner owner: a lost GPU context makes every call
+                    // on the old handles fail, and a failed free must not abort the rebuild
+                    // that the rest of the renderer is waiting for.
+                    if (t) { try { this.gl.deleteTexture(t); } catch (e) {} }
+                }
+            }
             this._theme = theme;
             const gl = this.gl;
             const canopyBase = theme === 'winter' ? [58, 92, 66]
