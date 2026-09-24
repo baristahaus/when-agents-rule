@@ -273,6 +273,8 @@ it is not optional.
 | `js/openai-ai.js` `rawUsage` | copies the usage block without pricing/account fields (`cost`, `cost_details`, `total_cost`, `is_byok`, `native_statistics`), leaving the token detail that is the field's whole purpose | `tests/usage-redaction.test.cjs` |
 | `samples/*.jsonl` | 8508 pricing members removed from 2836 turns; every other byte identical | both versions parsed and compared record by record; the new test fails against the old files |
 | `.gitignore` | `results_*.md`, `match-*.jsonl`, `screenshots/` — a run's own output cannot be published by one `git add -A` | — |
+| `js/engine/gamerenderer.js` `_buildTextures` | frees the texture set it replaces; safe because all four `setTerrain` callers clear the scene first | A/B on identical paths: 39 textures left resident per theme change, then 0 |
+| `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
 | `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
 | `js/i18n.js` `sum.legend` ×4 | the legend says terms can be dropped and the rest share the score | rendered text in the summary |
@@ -313,20 +315,26 @@ GPUs; the direction is the part that holds.
    the shape.
 6. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
-    `git mv` into one file per concern keeps all 268 tests green — that is the whole
+    `git mv` into one file per concern keeps all 285 tests green — that is the whole
     migration.
 7. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
-    media, no LFS). `.gitignore` does not yet cover `results_*.md` or `match-*.jsonl`, the
-    two things this app writes into its own folder.
+    media, no LFS). The two things this app writes into its own folder, `results_*.md` and
+    `match-*.jsonl`, are now ignored; the existing history still needs LFS or a rewrite.
 8. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-9. **S4 — `_buildTextures` re-bakes 39 textures on a theme change without deleting the
-    old set**, while every other texture owner in that file does delete.
-10. **S4 — `roundStillOpen` and its comment** (`openai-ai.js:4387`) describe a guard that
-    is never called: either wire it or delete the comment that leans on it.
-11. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+9. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
+    backoff the retry is skipped only when the run stopped or the seat's deadline was
+    aborted; there is no staleness check where a reply is applied (`lane.askedInRound` is
+    stamped and logged, never compared on arrival), so an answer to round 40's question can
+    be executed against round 41's world. A dead `roundStillOpen` implied the check existed;
+    it is deleted and the comment at the retry now states what really happens. Wiring a guard
+    is a decision about what a turn-based match means — a late answer is still a good answer
+    to a question nobody is asking — and a correct one needs both halves the helper named:
+    the round number catches an answer overtaken by a later round, and the phase catches the
+    round that resolved *without* this seat, since a timeout flush leaves the number alone.
+10. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`

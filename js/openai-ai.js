@@ -4395,9 +4395,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                     const waitMs = OpenAIAIManager.retryAfterMs(response.headers, 1200);
                     console.warn(`[OpenAIAI] ${ai.id}: rate limited (${response.status}) — retrying once in ${waitMs}ms`);
                     await new Promise(r => setTimeout(r, waitMs));
-                    // The round may have moved on while we waited. Retrying into a
-                    // question nobody is asking any more wastes a call and can only
-                    // produce an answer roundStillOpen would throw away.
+                    // The round may have moved on while we waited, and the retry is only
+                    // skipped if the whole run stopped or this seat's deadline was aborted.
+                    // It is NOT skipped for staleness: nothing rejects an answer that lands
+                    // after its round closed (see the note on round phase in
+                    // docs/QUALITY_REVIEW.md), so this call can still be applied to a world
+                    // state it was never asked about. That is a decision about what a match
+                    // means, not a cleanup, so it is left standing rather than quietly fixed.
                     if (this._stopped || controller._deadlineAbort) {
                         throw new Error(`rate limited (${response.status}); the round moved on during backoff`);
                     }
@@ -8544,15 +8548,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         }
     }
 
-    // Is the question this answer was given to still the one on the table? Both halves
-    // are load-bearing: the number catches an answer overtaken by a later round, and
-    // the phase catches the round that resolved WITHOUT this seat — a timeout flush
-    // leaves the number untouched, so the number alone would let that answer through.
-    roundStillOpen(round) { return this._roundPhase === 'wait' && round === this._roundNo; }
-
     // ---- Lane pool ----------------------------------------------------------
     // At one lane these are exactly the old `controller.pending` boolean, spelled
     // out. At more than one they are the only place that knows the difference.
+
     // The rolling-history record THIS request wrote, for the outcome to be attached to.
     // Falls back to the newest record, which is the same thing whenever a seat has only
     // one request in the air -- and is all there is to go on when the caller is a seat
