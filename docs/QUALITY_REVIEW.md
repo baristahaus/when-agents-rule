@@ -274,6 +274,7 @@ it is not optional.
 | `samples/*.jsonl` | 8508 pricing members removed from 2836 turns; every other byte identical | both versions parsed and compared record by record; the new test fails against the old files |
 | `.gitignore` | `results_*.md`, `match-*.jsonl`, `screenshots/` — a run's own output cannot be published by one `git add -A` | — |
 | `js/engine/gamerenderer.js` `_buildTextures` | frees the texture set it replaces; safe because all four `setTerrain` callers clear the scene first | A/B on identical paths: 39 textures left resident per theme change, then 0 |
+| `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
 | `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
@@ -281,7 +282,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **285/285 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction); the visual suite and the trust-boundary suite each
+Suite state: **289/289 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -310,21 +311,18 @@ GPUs; the direction is the part that holds.
    targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
    `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
    seeded from the map seed closes it.
-5. **S2 — no test touches `WAR_PRIVATE_HOST`** — the host classifier itself (as opposed to
-   its effect, which block 1 now covers) is still unguarded, and `js/analyzer.js:11` shares
-   the shape.
-6. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
+5. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
-    `git mv` into one file per concern keeps all 285 tests green — that is the whole
+    `git mv` into one file per concern keeps all 289 tests green — that is the whole
     migration.
-7. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
+6. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). The two things this app writes into its own folder, `results_*.md` and
     `match-*.jsonl`, are now ignored; the existing history still needs LFS or a rewrite.
-8. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
+7. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-9. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
+8. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
     backoff the retry is skipped only when the run stopped or the seat's deadline was
     aborted; there is no staleness check where a reply is applied (`lane.askedInRound` is
     stamped and logged, never compared on arrival), so an answer to round 40's question can
@@ -334,7 +332,7 @@ GPUs; the direction is the part that holds.
     to a question nobody is asking — and a correct one needs both halves the helper named:
     the round number catches an answer overtaken by a later round, and the phase catches the
     round that resolved *without* this seat, since a timeout flush leaves the number alone.
-10. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+9. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`
@@ -363,7 +361,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 285 unit tests, ~77 s, needs only Node
+npm test                      # 289 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
