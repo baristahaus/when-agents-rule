@@ -102,6 +102,17 @@ class UIManager {
     }
 
     showScreen(screenId) {
+        // Showcase mode (this copy served from a public host) is a viewer, not a
+        // console. The menu, the setup screen (Arena and Campaign share one) and the
+        // model library are the screens that ask for credentials, and until now the
+        // only thing keeping them away was `body.demo-only .an-back { display:none }`
+        // — hiding the doorknob. Every screen is reached through this method, so the
+        // rule belongs here rather than in CSS.
+        if (typeof WAR_DEMO_ONLY !== 'undefined' && WAR_DEMO_ONLY &&
+            ['startScreen', 'gameModeScreen', 'arenaSetupScreen',
+             'modelLibraryScreen'].includes(screenId)) {
+            screenId = 'analyzeScreen';
+        }
         this.closeFormationPicker?.();
         if(this.game.renderer && this.game.renderer.cancelPointerGesture) this.game.renderer.cancelPointerGesture();
         document.querySelectorAll('.screen').forEach(screen => {
@@ -3534,10 +3545,19 @@ class UIManager {
 
     escapeHtml(str) {
         if (str === null || str === undefined) return '';
+        // Quotes are escaped as well as < and >. 241 of this file's ${} interpolations
+        // sit inside a DOUBLE-QUOTED ATTRIBUTE (value="…", title="…", data-v="…"),
+        // and there leaving " raw lets a value close the attribute and open the next one. Every escaped site that carries an outsider's string — a
+        // model id off an endpoint's /models list, a name or endpoint from an
+        // imported catalogue, an HTTP status phrase, anything in a transcript — is an
+        // attribute site, so the helper has to be safe by default rather than safe
+        // wherever someone remembered. ' is covered for the single-quoted ones.
         return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // Compact token counts for the summary: 830 -> "830", 12480 -> "12.5k", 1.2M.
@@ -5555,9 +5575,9 @@ class UIManager {
         if (h.mapSeed) bits.push('seed ' + esc(h.mapSeed));
         if (h.difficulty) bits.push(esc(h.difficulty));
         if (h.turnBased != null) bits.push(h.turnBased ? t('an.turnBased') : t('an.realTime'));
-        if (h.simSpeed) bits.push(h.simSpeed + '×');
+        if (h.simSpeed) bits.push(esc(h.simSpeed) + '×');
         if (h.promptVersion) bits.push(esc(h.promptVersion));
-        if (a.results && a.results.build) bits.push('build ' + a.results.build);
+        if (a.results && a.results.build) bits.push('build ' + esc(a.results.build));
         bits.push(mmss(st.duration));
         if (st.parseErrors) bits.push(t('an.parseErrors', { n: st.parseErrors }));
         // An interrupted match has turns but no tail. Better to say so than to leave a
