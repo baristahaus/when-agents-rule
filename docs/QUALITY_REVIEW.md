@@ -486,9 +486,16 @@ GPUs; the direction is the part that holds.
    the screenshots kept as an artefact. They are off push because each downloads a browser
    and a check that is red for network reasons trains people to ignore it — but the commands
    are verified locally and the runner is not. Watch the first scheduled run.
-   Still unenforced: the `?v=`-must-move-with-the-change rule
-   (`tests/shipped-files.test.cjs` checks every tag *exists* and every file is *loaded*, not
-   that a touched file got a new tag — that needs git history, which is a CI step).
+   Now enforced in CI, the one place it can be: the push job gained a step reading
+   `index.html` on the base commit and on the head, so a shipped script whose bytes changed
+   without its `?v=` moving fails the build, as does a change that leaves `js/game.js`'s tag
+   alone — the second one matters because the on-screen build number is derived from that tag,
+   so a change elsewhere silently under-reports which build a player is looking at. The step's
+   logic was run locally against real history in four configurations: honest history clean, a
+   stale tag flagged, a left-behind badge flagged, no shipped change silent. It needs
+   `fetch-depth: 0`, which the checkout now sets — at the default depth the base file is simply
+   absent and every comparison would fail as "path not found", which reads like a broken repo
+   rather than a shallow clone. Still unverified: the runner itself, as above.
 3. **S2 — match-level reproducibility: closed for the draws, open for the clock.**
    The first half is done. `Game.rand()` / `Game.randJitter()` now delegate to the generator the
    map was built from, and the 62 simulation draws that used `Math.random()` — spawn scatter
@@ -581,10 +588,12 @@ GPUs; the direction is the part that holds.
    rule would cost — how often a seat's order lands on a board it was never shown — is now something
    a match reports instead of a question nobody can answer.
 8. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
-    interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
-    attribute values in `ui.js`. After the helper fix, every one of them that can carry an
-    outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`
-    fields for name/endpoint/model/reasoning). What is left raw is internal —
+    interpolation rather than by DOM API. Re-measured rather than re-asserted: `ui.js` has **242**
+    interpolations inside double-quoted attribute values, **72** of them routed through an escaper
+    or the localisation dictionary, and **0** carrying anything that could be an outsider's string —
+    every `title`/`value=` that can hold a model name, an endpoint, a transcript field or an error
+    message is escaped (`$e` is the local alias, which is why a first pass at this count reported
+    six holes that were not holes); what remains raw is internal —
     `class="…${m._status.cls}"` (three literals: ok/err/pending), `placeholder="${t(…)}"`
     (the dictionary), `onclick="${clickHandler}"` and `data-cost='${JSON.stringify(cost)}'`
     (numbers and identifiers the code builds). So the residual risk is future, not present,

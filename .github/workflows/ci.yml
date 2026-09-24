@@ -19,6 +19,48 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, because the tag check below has to read index.html as it stood on the
+          # base commit. Depth 1 (the default) would make every comparison against a base fail
+          # with "path not found", which looks like a broken repo rather than a shallow clone.
+          fetch-depth: 0
+
+      # The repo's one convention that nothing can see by looking at a diff: a changed shipped
+      # script must get a new ?v= in index.html, or browsers keep running the file they cached.
+      # It has been broken before, silently, because the symptom is only on someone ELSE's
+      # machine — they see the old build and it looks like the fix did not work. And the on-screen
+      # build number is read from js/game.js's tag, so a change elsewhere that leaves game.js's tag
+      # alone under-reports the build too. Both halves are checked here, against the real base.
+      - name: Cache-busting tags moved with the files they version
+        run: |
+          set -eu
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE:index.html" 2>/dev/null; then
+            echo "::warning::no readable base commit, so the tag check had nothing to compare against"
+            exit 0
+          fi
+          echo "comparing against $BASE"
+          tag_of() {  # $1 = index.html ref, $2 = script path
+            git show "$1" 2>/dev/null | sed -n "s|.*src=\"$2?v=\([0-9]*\)\".*|\1|p" | head -1
+          }
+          changed="$(git diff --name-only "$BASE" HEAD -- 'js/' | grep '\.js$' || true)"
+          if [ -z "$changed" ]; then echo "no shipped scripts changed"; exit 0; fi
+          echo "$changed" | sed 's/^/  changed: /'
+          fail=0
+          game_old="$(tag_of "$BASE:index.html" js/game.js)"; game_new="$(tag_of HEAD:index.html js/game.js)"
+          if [ "$game_old" = "$game_new" ]; then
+            echo "::error::js/game.js is still ?v=$game_old while shipped scripts changed — the build badge under-reports"; fail=1
+          fi
+          for f in $changed; do
+            old="$(tag_of "$BASE:index.html" "$f")"; new="$(tag_of HEAD:index.html "$f")"
+            if [ -z "$new" ]; then echo "::error::$f changed but is not referenced with a ?v= tag in index.html"; fail=1; continue; fi
+            if [ "$old" = "$new" ]; then echo "::error::$f changed but its tag is still ?v=$new"; fail=1; fi
+          done
+          [ "$fail" = 0 ] && echo "every changed script carries a new tag"
+          exit "$fail"
 
       - uses: actions/setup-node@v4
         with:
