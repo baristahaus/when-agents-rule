@@ -1,0 +1,46 @@
+name: ci
+
+# Nothing in this repo has ever run automatically: 263 unit tests and two browser suites
+# exist, and all of them depended on someone remembering. Every step below is a command
+# that was executed locally before being written here.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The app has no dependencies, so there is no install step to be slow or to break.
+      # If that ever changes, this comment is the thing to delete.
+      - name: Syntax-check every shipped script
+        run: |
+          set -e
+          for f in js/*.js js/engine/*.js tests/*.test.cjs tests/browser/*.cjs; do
+            node --check "$f"
+          done
+
+      - name: The JSON the product promises must parse
+        run: |
+          node -e 'const f=require("fs");for(const p of ["game-state-schema.json","samples/index.json"])JSON.parse(f.readFileSync(p,"utf8"));'
+
+      - name: Tests
+        run: node --test tests/*.test.cjs
+
+  # Not included: the Playwright suites (tests/browser/*.cjs). They pass locally, but the
+  # runner would have to fetch a browser at job time, and a CI job that is red for network
+  # reasons trains everyone to ignore it. To add it once that is settled:
+  #
+  #   - run: npm i --no-save playwright && npx playwright install --with-deps chromium
+  #   - run: npm run test:browser
+  #
+  # It is the only regression guard for the escaping and showcase-mode fixes in
+  # docs/QUALITY_REVIEW.md, so it is worth the minute.
