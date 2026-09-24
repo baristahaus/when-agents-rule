@@ -70,8 +70,11 @@ built behind it, `main` stays on Three.js until the swap milestone.
   note: with the locked camera a unit dead-behind a prop is invisible —
   scenes flank, never stack, along the view diagonal.
 - **M4 — integration (done)**: EngineRenderer implements GameRenderer's whole
-  public surface — entity bookkeeping, embedded sim duties (AI movement lerp,
-  separation, building clearance — copied bit-identical), ortho ground-plane
+  public surface — entity bookkeeping, the two positional passes the old path
+  ran per frame (separation, building clearance — copied bit-identical; since
+  a later pass they run from EngineRenderer.simulateStep on the game's
+  simulation clock and animate() only draws, see docs/QUALITY_REVIEW.md §7),
+  ortho ground-plane
   picking, screen-space marquee, selection rings, building previews +
   validity, camera intents (position/lookAt map onto dimetric target + ortho
   zoom), health/food bars, projectiles, battle pings, flash-hit tints,

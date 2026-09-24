@@ -828,6 +828,13 @@ class Game {
         // time so the leaderboard age never lags behind the actual game.
         this.updateResearchProgress(dt);
         this.updateAgeUpgradeProgress(dt);
+        // Where units may stand. This belongs to the renderer's entity bookkeeping, but it
+        // mutates positions, so it runs on the SIMULATION clock rather than from the render
+        // loop: last in the step, mirroring where it sat relative to a completed tick before
+        // (movement and combat first, refereeing after). Guarded because the vm harnesses
+        // load game.js with no renderer at all — and because a match must keep simulating if
+        // the GPU took the context back, which is the same reason the loop no longer owns it.
+        if (this.renderer && this.renderer.simulateStep) this.renderer.simulateStep(dt);
     }
 
     // A jitter recorder lived here: it sampled every moving unit every 200ms and

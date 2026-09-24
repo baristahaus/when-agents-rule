@@ -1,9 +1,12 @@
 // EngineRenderer — the game's renderer, in-house since M6 (it replaced the
 // Three.js GameRenderer as a drop-in at M4, and the old path is now retired):
-// same public methods, same entity bookkeeping, same embedded sim duties (AI
-// unit movement lerp, separation, building clearance — game correctness
-// depends on them), drawn by our own WebGL pipeline: locked dimetric camera,
-// procedural textures, EngineBuildings/EngineUnits compositions, fog plane.
+// same public methods, same entity bookkeeping, drawn by our own WebGL
+// pipeline: locked dimetric camera, procedural textures,
+// EngineBuildings/EngineUnits compositions, fog plane. animate() only draws.
+// It also owns two positional passes that mutate unit coordinates — same-owner
+// separation and building clearance — which run from simulateStep(dt) on the
+// game's simulation clock, NOT from the render loop (see the comment there and
+// docs/QUALITY_REVIEW.md §7 for what that cost when it was the other way round).
 //
 // Compatibility shims (the freeze line, documented in ENGINE.md):
 // - this.renderer = { domElement, setSize, render } — input.js binds events to
@@ -34,6 +37,12 @@
     // Twice the former 300-unit cutoff, with the same proportional fade curve.
     const lightDetailFade = (distance, halfH) =>
         Math.max(0,Math.min(1,(600-distance)/180,(600-halfH)/210));
+    // A deterministic 8-way spread. Both refereeing passes below have to deal with two
+    // things standing on the SAME point, where there is no direction between them to push
+    // along: this picks one from the index so coincident units fan out instead of agreeing
+    // on the same escape vector. Index-derived, never random — a replayed or backgrounded
+    // match has to referee identically to a watched one.
+    const FAN = (k) => ((k % 8) * Math.PI) / 4;
     // Scene ambient. Lives here rather than inline at the draw call because the
     // sea colour beyond the map has to be derived from the SAME value — two
     // copies drifting apart is exactly what put a visible seam at the horizon.
@@ -1980,6 +1989,118 @@
             return true;
         }
 
+        // Positional refereeing: separation between friends, and the ring around every
+        // building a unit may not stand in. Both mutate unit coordinates, so they are
+        // SIMULATION — they just used to live in animate() below, which meant a hidden tab
+        // (game.js drives tick() from a Worker there, and no frame is ever painted) played
+        // out the rest of a match with no separation and no building clearance, and the same
+        // seed refereed differently on a 30Hz machine than on a 144Hz one. dt is the
+        // caller's simulation sub-step in milliseconds: Game.simulateStep already slices real
+        // elapsed time into ≤100ms quanta whether or not anything is being drawn, which is
+        // what makes this independent of frame painting.
+        //
+        // NOTE: no unit MOVEMENT happens here. An earlier "kept bit-identical" port carried
+        // over a legacy mover that advanced every non-player unit a SECOND time (game.js
+        // integrates at 3×speed/s, this added 1× more), so AI armies ran 33% hot on plain
+        // moves and — because it steered toward a STALE targetX/Z during attack-marches —
+        // dragged them 33% slow. Infantry visibly outpaced cavalry. game.js
+        // (updateUnitMovement / updateWorkerTasks / updateCombat) is the single source of
+        // movement, and this only referees where units may stand.
+        //
+        // Separation applies ONLY between units of the SAME owner — an enemy is not a wall.
+        // All-pairs separation meant a charging unit had to out-shove the entire enemy front
+        // to reach anything: the mover advances ~0.072/frame at speed 1.5 while each
+        // neighbour pushes ~0.018 back, so six defenders (0.108) simply repelled it and it
+        // never landed a blow, however the LLM ordered it. Enemies interpenetrate now and
+        // melee always connects; the cost is that opposing armies merge instead of holding a
+        // front line, which is the deliberate trade.
+        //
+        // dt-SCALED: the push used to be a flat per-FRAME amount, so a 144Hz display
+        // separated ~2.4x harder than a 60Hz one — the framerate silently tuned the combat.
+        // Normalised to 60Hz so the constants keep their old meaning, and capped so one long
+        // step cannot fling anyone. The cap is why a hidden match is refereed *close* to a
+        // visible one rather than exactly: at the Worker's 250ms ticks the ≤100ms quanta hit
+        // the 3x cap, where a 60fps tab accumulates the same push in 60 small steps.
+        simulateStep(dt) {
+            // A transcript is a snapshot: presentation must not push its recorded entities
+            // apart or out of buildings between turns.
+            if (this.replayMode) return;
+            const SEPARATION_DIST = 1.2, SEPARATION_FORCE = 0.03;
+            const sepK = Math.min(3, Math.max(0, dt / 1000) * 60);
+            for (let i = 0; i < this.units.length; i++) {
+                for (let j = i + 1; j < this.units.length; j++) {
+                    const a = this.units[i], b = this.units[j];
+                    if (a.owner !== b.owner) continue; // an enemy is not a wall
+                    const dx = b.x - a.x, dz = b.z - a.z;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    if (dist < SEPARATION_DIST) {
+                        // EXACTLY coincident units used to be skipped (dist > 0.01), which is
+                        // not the rare case the guard was written for: a plain move command
+                        // snaps every unit aimed at the same destination onto the same
+                        // coordinate, and the building escape below used to drop them all on
+                        // one point too. Such a stack never came apart again — measured: eight
+                        // units at one point, seven seconds of a running match, minimum
+                        // separation still 0.000. With no direction between them, take one.
+                        let nx, nz;
+                        if (dist > 0.01) { nx = dx / dist; nz = dz / dist; }
+                        else { const ang = FAN(i + j * 5); nx = Math.cos(ang); nz = Math.sin(ang); }
+                        const push = (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK;
+                        a.x -= nx * push; a.z -= nz * push;
+                        b.x += nx * push; b.z += nz * push;
+                    }
+                }
+            }
+            const UNIT_BUILDING_CLEARANCE = 4.5;
+            // Wonders are far bigger than ordinary buildings (largest footprint: the 13×13
+            // pyramid — faces at 5.07, corners at 7.17 world units), so the flat 4.5 let
+            // units walk straight THROUGH them. One uniform radius for ALL wonders keeps the
+            // four civs balanced. Attackability is unaffected: combatants are exempt from the
+            // push below, and ranged reach (7.5+) out-ranges the zone anyway.
+            const WONDER_CLEARANCE = 7.0;
+            this.units.forEach((unit, unitIndex) => {
+                // A marcher that has NOT yet acquired a target still ghosts every building:
+                // the radial clearance rings around a packed base overlap into channels it
+                // cannot thread, and it used to pin against them and slide along the walls
+                // forever instead of closing in — "can't reach the barracks from the side".
+                if (unit.isAttacking && !unit.attackTarget && unit.attackMove) return;
+                this.buildings.forEach(building => {
+                    if (building.type === 'farm') return;
+                    if (unit.task === 'building' && unit.buildTarget === building) return;
+                    if (unit.task === 'repairing' && unit.repairTarget === building) return;
+                    // Ghost through the ONE building you're attacking, so melee can close on
+                    // it — the same per-target shape as the build/repair exemptions above.
+                    // This used to exempt a combatant from EVERY building on the map, so the
+                    // instant a unit retaliated it lost all clearance and its own squadmates'
+                    // separation shoved it bodily THROUGH the nearest wall. Two pushes, one
+                    // exempting fighters and one exempting nobody, disagreeing.
+                    if (unit.isAttacking && unit.attackTarget === building) return;
+                    const clr = building.isWonder ? WONDER_CLEARANCE : UNIT_BUILDING_CLEARANCE;
+                    const dx = unit.x - building.x, dz = unit.z - building.z;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    // DEAD CENTRE is the one place this push could not reach. The old guard
+                    // was `dist > 0.01`, meant to avoid dividing by zero, and it meant a unit
+                    // standing exactly on a building's origin was left there forever — inside
+                    // the mesh, permanently. Not a rare spot: a plain move snaps onto its
+                    // destination exactly, so anything aimed at a building's coordinates lands
+                    // on 0.00 and stops being pushed at the instant it most needs to be.
+                    // game.clampSlot has always handled this case ("dead centre: any direction
+                    // out"); the continuous push simply never learned it.
+                    if (dist <= 0.01) {
+                        // "Any direction out" — but it was always the SAME direction (+x), so
+                        // every unit inside dead centre landed on one point of the ring and
+                        // then sat in each other, exactly where separation cannot reach.
+                        const ang = FAN(unitIndex);
+                        unit.x = building.x + Math.cos(ang) * clr;
+                        unit.z = building.z + Math.sin(ang) * clr;
+                    } else if (dist < clr) {
+                        const push = (clr - dist) * 0.05 * sepK; // dt-scaled, like the pass above
+                        unit.x += (dx / dist) * push;
+                        unit.z += (dz / dist) * push;
+                    }
+                });
+            });
+        }
+
         animate() {
             // Stopped for good once the context is gone: drawing into a dead one is cost
             // with no product at the end of it.
@@ -2022,96 +2143,11 @@
                 }
             }
 
-            // embedded sim duties (positional refereeing only) ---------------
-            // NOTE: no unit MOVEMENT happens here. An earlier "kept bit-identical"
-            // port carried over a legacy mover that advanced every non-player unit
-            // a SECOND time (game.js integrates at 3×speed/s, this added 1× more),
-            // so AI armies ran 33% hot on plain moves and — because it steered
-            // toward a STALE targetX/Z during attack-marches — dragged them 33%
-            // slow. Infantry visibly outpaced cavalry. game.js (updateUnitMovement /
-            // updateWorkerTasks / updateCombat) is the single source of movement.
-            // Separation stops an army stacking into one pillar. It applies ONLY
-            // between units of the SAME owner — an enemy is not a wall. All-pairs
-            // separation meant a charging unit had to out-shove the entire enemy
-            // front to reach anything: the mover advances ~0.072/frame at speed
-            // 1.5 while each neighbour pushes ~0.018 back, so six defenders
-            // (0.108) simply repelled it and it never landed a blow, however the
-            // LLM ordered it. Enemies interpenetrate now and melee always
-            // connects; the cost is that opposing armies merge instead of holding
-            // a front line, which is the deliberate trade.
-            //
-            // dt-SCALED: the push used to be a flat per-FRAME amount, so a 144Hz
-            // display separated ~2.4x harder than a 60Hz one — the framerate
-            // silently tuned the combat. Normalised to 60Hz so the constants keep
-            // their old meaning; clamped so one long frame can't fling anyone.
-            // A transcript is a snapshot: presentation must not push its recorded
-            // entities apart or out of buildings between turns.
-            if (!this.replayMode) {
-                const SEPARATION_DIST = 1.2, SEPARATION_FORCE = 0.03;
-                const sepK = Math.min(3, Math.max(0, deltaTime) * 60);
-                for (let i = 0; i < this.units.length; i++) {
-                    for (let j = i + 1; j < this.units.length; j++) {
-                        const a = this.units[i], b = this.units[j];
-                        if (a.owner !== b.owner) continue; // an enemy is not a wall
-                        const dx = b.x - a.x, dz = b.z - a.z;
-                        const dist = Math.sqrt(dx * dx + dz * dz);
-                        if (dist < SEPARATION_DIST && dist > 0.01) {
-                            const push = (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK;
-                            const nx = dx / dist, nz = dz / dist;
-                            a.x -= nx * push; a.z -= nz * push;
-                            b.x += nx * push; b.z += nz * push;
-                        }
-                    }
-                }
-                const UNIT_BUILDING_CLEARANCE = 4.5;
-                // Wonders are far bigger than ordinary buildings (largest footprint:
-                // the 13×13 pyramid — faces at 5.07, corners at 7.17 world units), so
-                // the flat 4.5 let units walk straight THROUGH them. One uniform
-                // radius for ALL wonders keeps the four civs balanced. Attackability
-                // is unaffected: combatants are exempt from the push below, and
-                // ranged reach (7.5+) out-ranges the zone anyway.
-                const WONDER_CLEARANCE = 7.0;
-                this.units.forEach(unit => {
-                    // A marcher that has NOT yet acquired a target still ghosts every
-                    // building: the radial clearance rings around a packed base overlap
-                    // into channels it cannot thread, and it used to pin against them
-                    // and slide along the walls forever instead of closing in —
-                    // "can't reach the barracks from the side".
-                    if (unit.isAttacking && !unit.attackTarget && unit.attackMove) return;
-                    this.buildings.forEach(building => {
-                        if (building.type === 'farm') return;
-                        if (unit.task === 'building' && unit.buildTarget === building) return;
-                        if (unit.task === 'repairing' && unit.repairTarget === building) return;
-                        // Ghost through the ONE building you're attacking, so melee can
-                        // close on it — the same per-target shape as the build/repair
-                        // exemptions above. This used to exempt a combatant from EVERY
-                        // building on the map, so the instant a unit retaliated it lost
-                        // all clearance and its own squadmates' separation shoved it
-                        // bodily THROUGH the nearest wall. Two pushes, one exempting
-                        // fighters and one exempting nobody, disagreeing.
-                        if (unit.isAttacking && unit.attackTarget === building) return;
-                        const clr = building.isWonder ? WONDER_CLEARANCE : UNIT_BUILDING_CLEARANCE;
-                        const dx = unit.x - building.x, dz = unit.z - building.z;
-                        const dist = Math.sqrt(dx * dx + dz * dz);
-                        // DEAD CENTRE is the one place this push could not reach. The old
-                        // guard was `dist > 0.01`, meant to avoid dividing by zero, and it
-                        // meant a unit standing exactly on a building's origin was left
-                        // there forever — inside the mesh, permanently. Not a rare spot: a
-                        // plain move snaps onto its destination exactly, so anything aimed
-                        // at a building's coordinates lands on 0.00 and stops being pushed
-                        // at the instant it most needs to be. game.clampSlot has always
-                        // handled this case ("dead centre: any direction out"); the
-                        // continuous push simply never learned it.
-                        if (dist <= 0.01) {
-                            unit.x = building.x + clr;
-                        } else if (dist < clr) {
-                            const push = (clr - dist) * 0.05 * sepK; // dt-scaled, like the pass above
-                            unit.x += (dx / dist) * push;
-                            unit.z += (dz / dist) * push;
-                        }
-                    });
-                });
-            }
+            // No simulation here any more. The two passes that used to sit in this spot —
+            // same-owner separation and building clearance — mutate unit positions and moved
+            // to simulateStep() above, where Game.simulateStep() calls them per simulation
+            // sub-step. Leaving them here meant a backgrounded match ran to its end without
+            // either, because nothing is ever painted to trigger the frame.
 
             // draw ------------------------------------------------------------
             const gl = this.gl;

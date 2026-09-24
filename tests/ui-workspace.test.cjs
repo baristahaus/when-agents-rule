@@ -111,10 +111,10 @@ test('camera commands respect map and zoom bounds, reset pose, and cancel pendin
     assert.ok(Number.isFinite(r._halfH));
 });
 
-function renderFrame(replayMode) {
+function renderFrame(replayMode, drive, units) {
     const h = harness(), r = h.renderer, noop = () => {};
     // Two close friendly units and one inside a building exercise both live pushes.
-    const units = [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 },
+    units = units || [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 },
         { x: 50, z: 50, owner: 2 }];
     Object.assign(r, { replayMode, units, buildings: [{ x: 50, z: 50, type: 'house' }],
         _lastTime: 83.333, updateCamera: noop, _computeCam: () => ({ view: [], proj: [], haze: [] }),
@@ -122,20 +122,49 @@ function renderFrame(replayMode) {
         gl: new Proxy({}, { get: () => noop }), prog: { uniforms: {} },
         tex: { white: {} }, _daySky: [0.42,0.60,0.79], _daySun: [0.96,0.84,0.66], sunDir: [], _dl: { opaque: [], blended: [], bars: [] } });
     const before = structuredClone(units);
-    r.animate(); h.setTime(116.667); h.frames.shift()();
+    // 'step' drives the simulation clock (Game.simulateStep's call), 'animate' drives one
+    // painted frame, 'both' the pair a live 60fps tab actually runs.
+    if (drive !== 'animate') r.simulateStep(1000 / 60);
+    if (drive !== 'step') { r.animate(); h.setTime(116.667); h.frames.shift()(); }
     return { before, after: units };
 }
 
-test('replay render frames preserve recorded positions, including overlaps', () => {
-    const { before, after } = renderFrame(true);
+test('replay frames preserve recorded positions, including overlaps', () => {
+    // The guard has to hold on BOTH clocks now: a transcript must never be re-refereed,
+    // whether something is painting it or the sim is stepping under it.
+    for (const drive of ['animate', 'step', 'both']) {
+        const { before, after } = renderFrame(true, drive);
+        assert.deepEqual(after, before, drive + ' moved a replayed unit');
+    }
+});
+
+test('separation and building clearance run on the simulation clock, not the render loop', () => {
+    const { before, after } = renderFrame(false, 'step');
+    assert.ok(after[0].x < before[0].x, 'friendly units must push apart');
+    assert.ok(after[1].x > before[1].x, 'and push each other the other way');
+    const escaped = Math.hypot(after[2].x - 50, after[2].z - 50);
+    assert.ok(escaped > 4.49, 'a unit inside dead centre must reach the clearance ring, got ' + escaped.toFixed(3));
+    // The escape direction is per unit, not a constant: the old `+x` parked every unit that
+    // ever landed on a building's origin on the SAME point of the ring, where separation
+    // could no longer reach them.
+    assert.ok(after[2].z > 54.49, 'the third unit should fan out along its own direction');
+});
+
+test('painting a frame no longer moves anything', () => {
+    // The invariant the migration bought: animate() draws. If a positional pass creeps back
+    // in, a backgrounded tab stops refereeing again and this fails.
+    const { before, after } = renderFrame(false, 'animate');
     assert.deepEqual(after, before);
 });
 
-test('live rendering retains friendly separation and building clearance', () => {
-    const { before, after } = renderFrame(false);
-    assert.ok(after[0].x < before[0].x);
-    assert.ok(after[1].x > before[1].x);
-    assert.equal(after[2].x, 54.5);
+test('units standing on the identical point still come apart', () => {
+    // dist > 0.01 used to skip the pair forever. A move command snaps units onto one
+    // coordinate, so this is the common case, not a corner: measured in a live match, eight
+    // stacked units went 0.000 -> 0.000 over seven seconds before the fix.
+    const stack = [{ x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }];
+    const { after } = renderFrame(false, 'step', stack);
+    const gaps = [[0, 1], [1, 2], [0, 2]].map(([i, j]) => Math.hypot(after[j].x - after[i].x, after[j].z - after[i].z));
+    assert.ok(gaps.every(g => g > 0.05), 'coincident units stayed welded: ' + gaps.map(g => g.toFixed(3)).join(', '));
 });
 
 test('all workspace controls have translations in every supported UI language', () => {

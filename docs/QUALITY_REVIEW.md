@@ -178,18 +178,46 @@ what is in it matters. Note too what this does **not** undo: the figures are in 
 and only a history rewrite removes them from a public remote. That is the author's call and
 not mine to take.
 
-### 7. Sim duties living in the render loop
+### 7. Sim duties living in the render loop — moved, and measured
 
-`gamerenderer.js` says it in its own header: *unit movement lerp, separation, building
-clearance — game correctness*. They run from `requestAnimationFrame`. The hidden-tab
-driver (`game.js:784`) calls `tick()` straight from a Worker. So while nobody is looking —
-which is most of a long match, since "keeps running in a background tab" is a headline
-feature — units get no separation and no building clearance. Two matches on one seed can
-also differ because one tab was hidden. This is the deepest structural issue here and the
-hardest to fix well: the passes touch meshes as well as coordinates, so it needs a
-position-space separation pass in `simulateStep` with the renderer reduced to copying
-results. Not attempted in this pass — a physics move needs the author watching the
-gameplay, and software-WebGL here cannot show it honestly.
+`gamerenderer.js` used to say it in its own header: *unit movement lerp, separation,
+building clearance — game correctness*, running from `requestAnimationFrame`, while the
+hidden-tab driver (`game.js`) calls `tick()` straight from a Worker. So while nobody was
+looking — which is most of a long match, since "keeps running in a background tab" is a
+headline feature — the match ran with no separation and no building clearance at all.
+
+The two positional passes now live in `EngineRenderer.simulateStep(dt)` and are called from
+`Game.simulateStep`, which already slices real elapsed time into ≤100 ms quanta whether or
+not a frame is ever painted. `animate()` draws. Movement was already in `game.js` — the
+header's "movement lerp" was stale, and a comment there records the day a duplicated mover
+made AI armies run 33% hot.
+
+Measured by pinning a pile of units, stubbing everything that could move them on its own
+(AI, worker re-tasking, movement integration, combat, auto-defence, shore clamp — without
+that the experiment just measures the AI walking the pile apart, which is exactly what the
+first version of it did), and then running the same pile in a tab that paints frames and a
+tab where `requestAnimationFrame` never fires again:
+
+| | visible tab | backgrounded tab |
+|---|---|---|
+| before (passes in `animate`) | min separation 0.26 → 1.2 | **0.042 → 0.042** |
+| after (passes on the sim clock) | 0.26 → 1.2 | **0.042 → 1.2** |
+
+Two things came out of building that measurement, both pre-existing and both fixed with it.
+Units standing on **exactly** the same coordinate were skipped by separation (`dist > 0.01`),
+and the building escape sent every unit caught in dead centre to the *same* point (`+x`), so a
+stack that ever landed on one spot was welded there for the rest of the match — the eight-units
+pile measured `minSep 0.000 → 0.000` over seven seconds of a running game, frames and all.
+Both directions are now derived from the index rather than random, so replays and background
+tabs referee identically.
+
+Two consequences worth knowing, both intended. Pause really pauses now: with the budget at 0
+no sub-step runs, so nothing is pushed apart any more while the match is stopped, where
+before the render loop kept refereeing a frozen game. And the `sepK` cap (three times the
+60 Hz-normalised push, so one long step cannot fling anyone) means a Worker tick applies
+less push per wall-clock second than a 60 fps tab does — a backgrounded match is refereed
+*close* to a watched one instead of exactly. Raising the cap would close the rest; that is
+tuning, and tuning is a gameplay call.
 
 Related and smaller: auto-acquisition (`game.js:1208`, range +20/24 against sight 15/22.5)
 scans **every** unit on the map with no fog check, and `attack_target` pins an object and
@@ -274,6 +302,8 @@ it is not optional.
 | `samples/*.jsonl` | 8508 pricing members removed from 2836 turns; every other byte identical | both versions parsed and compared record by record; the new test fails against the old files |
 | `.gitignore` | `results_*.md`, `match-*.jsonl`, `screenshots/` — a run's own output cannot be published by one `git add -A` | — |
 | `js/engine/gamerenderer.js` `_buildTextures` | frees the texture set it replaces; safe because all four `setTerrain` callers clear the scene first | A/B on identical paths: 39 textures left resident per theme change, then 0 |
+| `js/engine/gamerenderer.js` `simulateStep`, `js/game.js` | the two positional passes left the render loop and run per simulation sub-step; `animate()` only draws | pinned pile, backgrounded tab: `minSep 0.042 → 0.042` before, `→ 1.2` after, same run as the visible tab |
+| `js/engine/gamerenderer.js` coincident cases | separation now reaches units on the identical point, and the dead-centre building escape fans by index instead of `+x` | welded stack `0.000 → 0.000` over 7 s before; `→ 1.2` after |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
 | `.github/workflows/ci.yml` | nightly + on-demand job for the two Playwright suites, screenshots kept as an artefact | commands run here; the runner is the unverified part |
@@ -282,7 +312,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **289/289 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier); the visual suite and the trust-boundary suite each
+Suite state: **291/291 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -295,10 +325,9 @@ GPUs; the direction is the part that holds.
 
 ## Still open, ranked
 
-1. **S1 — sim duties in the render loop** (§7), including the hidden-tab divergence.
-2. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
+1. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
    targets never re-check it.
-3. **S3 — the browser job has never run on a runner.** `.github/workflows/ci.yml` now has
+2. **S3 — the browser job has never run on a runner.** `.github/workflows/ci.yml` now has
    two jobs: the push job (`node --check` over every shipped file, both JSON contracts,
    `node --test`) and a nightly `workflow_dispatch` job for the two Playwright suites, with
    the screenshots kept as an artefact. They are off push because each downloads a browser
@@ -307,22 +336,22 @@ GPUs; the direction is the part that holds.
    Still unenforced: the `?v=`-must-move-with-the-change rule
    (`tests/shipped-files.test.cjs` checks every tag *exists* and every file is *loaded*, not
    that a touched file got a new tag — that needs git history, which is a CI step).
-4. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
+3. **S2 — match-level reproducibility.** Terrain is seeded; unit positions, harvest
    targets and `explore` tile resolution use unseeded `Math.random()` (40 sites in
    `game.js`, 15 in `openai-ai.js`). Same *layout*, not same *match*. One `Game.rand`
    seeded from the map seed closes it.
-5. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
+4. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
-    `git mv` into one file per concern keeps all 289 tests green — that is the whole
+    `git mv` into one file per concern keeps all 291 tests green — that is the whole
     migration.
-6. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
+5. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). The two things this app writes into its own folder, `results_*.md` and
     `match-*.jsonl`, are now ignored; the existing history still needs LFS or a rewrite.
-7. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
+6. **S4 — no GPU diagnostics:** `getError` appears nowhere in `js/engine/`, and
     `makeMesh` returns `-1` on failure with unchecked callers — so the default engine
     failure is "a unit silently never appears", which the transcript will blame on the
     model's build order.
-8. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
+7. **S2 — nothing rejects an answer for a round that already closed.** After a rate-limit
     backoff the retry is skipped only when the run stopped or the seat's deadline was
     aborted; there is no staleness check where a reply is applied (`lane.askedInRound` is
     stamped and logged, never compared on arrival), so an answer to round 40's question can
@@ -332,7 +361,7 @@ GPUs; the direction is the part that holds.
     to a question nobody is asking — and a correct one needs both halves the helper named:
     the round number catches an answer overtaken by a later round, and the phase catches the
     round that resolved *without* this seat, since a timeout flush leaves the number alone.
-9. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
+8. **S4 — the structural version of §1.** Escaped strings still reach attributes by string
     interpolation rather than by DOM API, and 254 interpolations sit inside double-quoted
     attribute values in `ui.js`. After the helper fix, every one of them that can carry an
     outsider's string routes through it (audited: `data-v`, `title`, and the four `value=`
@@ -361,7 +390,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 289 unit tests, ~77 s, needs only Node
+npm test                      # 291 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \
