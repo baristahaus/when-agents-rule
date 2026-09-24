@@ -1569,6 +1569,25 @@ class OpenAIAIManager {
     // of them add about 9% output — nowhere near the cap that truncates a turn.
     static get MAX_COMMANDS_PER_TURN() { return 3; }
 
+    // A model-supplied "count", clamped — or null when it is not a number.
+    //
+    // Non-numeric input is REFUSED rather than quietly defaulted, because that is
+    // what used to happen and it was the worst of both outcomes. Every consumer of
+    // these numbers compares against them, and Math.min("all", 20) is NaN, so the
+    // same typo meant three different things depending on which handler received it:
+    // `removed < NaN` false → delete nothing and answer "OK - Deleted ,";
+    // `.slice(0, NaN)` empty → send nobody and blame the workers already building;
+    // `moved >= NaN` never true → reassign EVERY worker the seat owned. A model
+    // writing {"count":"all"} is not being exotic — "all" is exactly what it means —
+    // so it gets one clear sentence naming the field, the range and what it sent,
+    // and its turn survives intact to correct itself next time.
+    static parseCount(raw, def, max) {
+        if (raw === undefined || raw === null || raw === '' || raw === 0) return def;
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return null;
+        return Math.max(1, Math.min(Math.trunc(n), max));
+    }
+
     // How long to wait for a closing statement: the SAME budget a move gets. The 60s
     // it used to be was a compromise from before the skip button existed — a spectator
     // had to sit out whatever it cost, so it was kept short. Now nobody is trapped by
@@ -3603,13 +3622,8 @@ class OpenAIAIManager {
         return null;
     }
 
-    isAIOwned(building, ai) {
-        return ai.buildings.includes(building);
-    }
-
-    isAIUnitOwned(unit, ai) {
-        return ai.units.includes(unit);
-    }
+    // isAIOwned and isAIUnitOwned lived here: two membership checks that restated
+    // isOwnedByAI above, called from nowhere. isOwnedByAI is what every caller uses.
 
     // ----------------------------------------------------------------
     // 6. Helper: Get unit action JSON
@@ -7616,7 +7630,12 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const dTC = f => tcs.reduce((m, tc) => Math.min(m, Math.hypot(f.x - tc.x, f.z - tc.z)), Infinity);
             open.sort((a, b) => dTC(a) - dTC(b));
         }
-        const want = Math.max(1, Math.min(params.count || open.length, open.length));
+        const openLen = Math.max(1, open.length);
+        const want = OpenAIAIManager.parseCount(params.count, openLen, openLen);
+        if (want === null) {
+            this.outcome('log.out.badCount', { raw: JSON.stringify(params.count), max: openLen });
+            return `[ERROR] "count" must be a NUMBER of workers, 1-${openLen} — you sent ${JSON.stringify(params.count)}, which is not one. No farm was staffed. Omit "count" to man every open field.`;
+        }
 
         // Never cannibalize a farm to feed a farm, and never take a builder or a
         // fighter — the same exclusions the resource path applies.
@@ -7706,7 +7725,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         }
         const noTC = this.noTownCenterAdvice(ai);
         if (noTC) return noTC;
-        const count = Math.max(1, Math.min(params.count || 3, 20));
+        const count = OpenAIAIManager.parseCount(params.count, 3, 20);
+        if (count === null) {
+            // Rejected, not defaulted. This value is only ever used as
+            // `if (moved >= count) break`, and `moved >= NaN` is false for every
+            // number — so a model that wrote {"count":"all"} did not get a default,
+            // it got EVERY worker it owned pulled off whatever it was doing, which is
+            // the single most destructive reading of its own instruction it could ask
+            // for. Tell it what the field takes instead.
+            this.outcome('log.out.badCount', { raw: JSON.stringify(params.count), max: 20 });
+            return `[ERROR] "count" must be a NUMBER of workers, 1-20 — you sent ${JSON.stringify(params.count)}, which is not one. Nothing was reassigned. To move everyone you have, send 20.`;
+        }
 
         // Discovered nodes? If not, nothing is reassigned — and no scout goes out on
         // the model's behalf: a failed action must not quietly play a turn for it.
@@ -8122,7 +8151,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         } else {
             target = damaged.reduce((a, b) => (a.health / a.maxHealth <= b.health / b.maxHealth ? a : b));
         }
-        const count = Math.max(1, Math.min(params.count || 1, 5));
+        const count = OpenAIAIManager.parseCount(params.count, 1, 5);
+        if (count === null) {
+            this.outcome('log.out.badCount', { raw: JSON.stringify(params.count), max: 5 });
+            return `[ERROR] "count" must be a NUMBER of workers, 1-5 — you sent ${JSON.stringify(params.count)}, which is not one. No worker was sent to repair. Omit "count" to send one.`;
+        }
         const workers = ai.units
             .filter(u => u.type === 'worker' && u.health > 0 && u.task !== 'building' && !u.isBuilding)
             .sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z))
@@ -8259,7 +8292,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     executeDeleteUnit(ai, game, params) {
         const raw = (params.unitType || 'worker').toString().trim();
         const type = raw.toLowerCase();
-        const count = Math.max(1, Math.min(params.count || 1, 20));
+        const count = OpenAIAIManager.parseCount(params.count, 1, 20);
+        if (count === null) {
+            this.outcome('log.out.badCount', { raw: JSON.stringify(params.count), max: 20 });
+            return `[ERROR] "count" must be a NUMBER of units, 1-20 — you sent ${JSON.stringify(params.count)}, which is not one. Nothing was deleted. Omit "count" to delete one.`;
+        }
 
         // Match on either the unit id ("militia") OR its category ("infantry"),
         // case-insensitively — the model often passes the category or a label it

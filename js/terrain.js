@@ -163,8 +163,12 @@ class TerrainManager {
     // sector and rotate that sector onto every other. Spawns sit evenly spaced on
     // a circle, so one rotation maps a player's surroundings onto the next
     // player's node for node — same count, same radii, same angles. total = N*k is
-    // EXACTLY equal for any N, needs no divisibility, and leaves the counts at
-    // their intended 40 / 18 instead of inflating them.
+    // EXACTLY equal for any N and needs no divisibility. The price is that `k` is
+    // round(total/N), so the WORLD total is the base rounded to a whole share: stone
+    // 40 at two or four seats but 39 at three, gold 18 at two or three but 20 at
+    // four. Per-seat equality is the property fairness actually needs — the global
+    // tally may move by one share, and nodesLeftOnMap() reports the live count to
+    // the models rather than either figure quoted here.
     //
     // Radius is drawn as r = √(rMin² + u·(R² − rMin²)) — uniform by AREA. Drawing
     // r uniformly (density ∝ 1/r) is precisely the bug that discredited the old
@@ -288,7 +292,8 @@ class TerrainManager {
 
     generateGold() {
         // Gold is the Wonder's fuel and the one thing worth fighting a war over, so
-        // it stays SCARCE at 18 — rotational placement makes every player's share
+        // it stays SCARCE at 18 per player (20 at four seats — see the rounding note
+        // on scatterRotational) — rotational placement makes every player's share
         // identical without diluting it. On the 49-cell grid the smallest equal
         // share would have been one per cell: 45 nodes, as many as Desert has food
         // bushes. Equal, and worthless.

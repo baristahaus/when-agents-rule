@@ -21,8 +21,7 @@
     "enemyUnits",
     "research",
     "unlockedContent",
-    "trainableUnits",
-    "buildableStructures",
+    "units",
     "threats",
     "gameStats"
   ],
@@ -505,39 +504,107 @@
     },
     "buildings": {
       "type": "object",
-      "description": "Aggregate of friendlyBuildings, for at-a-glance rebalancing.",
+      "description": "The vocabulary for build_structure's \"buildingType\": every structure your civilization can EVER build, split into what you may order this turn and what you may not. It says nothing about what you already own — that is friendlyBuildings, and this key used to be a tally of it, which is why the name reads like a census. If a type is absent (e.g. stable for some civs), your civ does not have it and never will, so do not keep trying; if it is present under \"blocked\", it is present on purpose, priced, with the reason attached. Your Wonder is listed here too, as type \"wonder\", on whichever side its gates currently leave it.",
       "required": [
-        "total",
-        "idle",
-        "busy",
-        "underConstruction",
-        "producing",
-        "researching",
-        "byType"
+        "buildable",
+        "blocked"
       ],
       "properties": {
-        "total": {
-          "type": "integer"
+        "buildable": {
+          "type": "array",
+          "description": "Every structure whose age and unlock tech you have cleared. \"blockedBy\" is absent when you can pay for it right now and otherwise holds only \"cost\" — any structural gate would have moved the entry to blocked — so this list does not shuffle as your stockpiles tick, and an entry you cannot yet afford is a target to save toward rather than a refusal.",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "requiredAge",
+              "requiresTech",
+              "cost"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Pass this verbatim as build_structure's \"buildingType\"."
+              },
+              "requiredAge": {
+                "type": "string",
+                "description": "Earliest age at which this civilization can build it — already adjusted for an unlock tech that arrives later than the building's own age."
+              },
+              "requiresTech": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The tech that unlocks it, or null when it needs none. This is the id to look for in research.available; whether you hold it is what decided which list this entry is on."
+              },
+              "cost": {
+                "$ref": "#/$defs/cost"
+              },
+              "blockedBy": {
+                "$ref": "#/$defs/blockedBy"
+              },
+              "isWonder": {
+                "type": "boolean",
+                "description": "Present and true on the single Wonder entry. Building it and holding it for gameStats.wonderRequired seconds wins the match."
+              },
+              "builtAs": {
+                "type": "string",
+                "description": "Wonder only: the civilization-specific id the finished Wonder carries in friendlyBuildings (akropolis, pyramid, firetemple, shrine). You still BUILD it by passing type \"wonder\"."
+              }
+            }
+          }
         },
-        "idle": {
-          "type": "integer"
-        },
-        "busy": {
-          "type": "integer"
-        },
-        "underConstruction": {
-          "type": "integer"
-        },
-        "producing": {
-          "type": "integer"
-        },
-        "researching": {
-          "type": "integer"
-        },
-        "byType": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "integer"
+        "blocked": {
+          "type": "array",
+          "description": "The same entries, for the structures you cannot order yet. Every one carries a non-empty \"blockedBy\", and at least one value in it is structural: \"age\" (upgrade_age first), \"tech\" (research what requiresTech names), or \"alreadyBuilt\" (your one Wonder is standing or going up), with \"cost\" sometimes alongside. \"host\" and \"pop\" never appear on buildings — a structure is not built inside another structure and never occupies a population slot.",
+          "items": {
+            "type": "object",
+            "required": [
+              "type",
+              "requiredAge",
+              "requiresTech",
+              "cost",
+              "blockedBy"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "Pass this verbatim as build_structure's \"buildingType\" — once the gate lifts."
+              },
+              "requiredAge": {
+                "type": "string",
+                "description": "Earliest age at which this civilization can build it — already adjusted for an unlock tech that arrives later than the building's own age."
+              },
+              "requiresTech": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The tech that unlocks it, or null when it needs none. If \"tech\" is in blockedBy, this is the id to research."
+              },
+              "cost": {
+                "$ref": "#/$defs/cost"
+              },
+              "blockedBy": {
+                "$ref": "#/$defs/blockedBy"
+              },
+              "isWonder": {
+                "type": "boolean",
+                "description": "Present and true on the single Wonder entry. Building it and holding it for gameStats.wonderRequired seconds wins the match."
+              },
+              "builtAs": {
+                "type": "string",
+                "description": "Wonder only: the civilization-specific id the finished Wonder carries in friendlyBuildings (akropolis, pyramid, firetemple, shrine). You still BUILD it by passing type \"wonder\"."
+              }
+            }
           }
         }
       }
@@ -647,30 +714,32 @@
     },
     "workers": {
       "type": "object",
-      "description": "Live tally of what your villagers are doing — use it to rebalance the economy at a glance. Gathering is a round trip (walk out, gather, carry home), so a worker on wood is on wood for the whole cycle and onWood counts all of them, wherever they are in it.",
+      "description": "Live tally of what your villagers are doing — use it to rebalance the economy at a glance. Gathering is a round trip (walk out, gather, carry home), so a worker on wood is on wood for the whole cycle and wood counts all of them, wherever they are in it. Every key but total is also a pool: it is the word assign_workers' \"from\" takes back, so you read a number here and spend it there without translating.",
       "required": [
         "total",
         "idle",
         "building",
-        "onFarms",
+        "farm",
         "scouting",
         "moving",
-        "onFood",
-        "onWood",
-        "onStone",
-        "onGold"
+        "fighting",
+        "food",
+        "wood",
+        "stone",
+        "gold"
       ],
       "properties": {
         "total": { "type": "integer" },
         "idle": { "type": "integer" },
         "building": { "type": "integer" },
-        "onFarms": { "type": "integer" },
+        "farm": { "type": "integer" },
         "scouting": { "type": "integer" },
         "moving": { "type": "integer", "description": "In transit with no resolved job yet." },
-        "onFood": { "type": "integer", "description": "Workers whose job is food, at ANY point of the cycle: walking out, gathering, or carrying home. Reassigning a worker who happens to be carrying a load destroys it — but which ones those are changes every few seconds, far faster than a turn, so it is not something to plan from here. assign_workers' allowSpill decides it at the moment the order runs." },
-        "onWood": { "type": "integer" },
-        "onStone": { "type": "integer" },
-        "onGold": { "type": "integer" }
+        "fighting": { "type": "integer", "description": "Villagers hitting back. A worker under attack is counted here rather than in idle, which is why an ambush can empty workers.idle between this snapshot and the order that reads it." },
+        "food": { "type": "integer", "description": "Workers whose job is food, at ANY point of the cycle: walking out, gathering, or carrying home. Reassigning a worker who happens to be carrying a load destroys it — but which ones those are changes every few seconds, far faster than a turn, so it is not something to plan from here. assign_workers' allowSpill decides it at the moment the order runs." },
+        "wood": { "type": "integer" },
+        "stone": { "type": "integer" },
+        "gold": { "type": "integer" }
       }
     },
     "enemyUnits": {
@@ -789,69 +858,71 @@
         }
       }
     },
-    "trainableUnits": {
+    "units": {
       "type": "object",
-      "description": "The vocabulary for train_unit's \"unitType\": every unit your civilization can EVER train, nested building -> age -> entries, where the age is the earliest one at which that unit can be trained. Units you cannot reach yet are listed on purpose, so you can plan toward them — blockedBy says what stands in the way of each, and is empty for the ones you could order right now. Each entry's \"id\" is the bare unit id, ready to pass as \"unitType\" unchanged. The Town Center hosts \"worker\" — villagers are trained with train_unit like everything else. Includes your civ's unique units, and omits both standard units your civ does not field and any host building your civ can never construct. A category (infantry/ranged/cavalry/support) is NOT valid here — those work only in the \"units\" parameter of move_units and attack_target.",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": {
-          "type": "array",
-          "items": {
+      "description": "The vocabulary for train_unit's \"unitType\": every unit your civilization can EVER train, nested building -> age -> entries, where the age is the earliest one at which that unit can be trained, then split into what you may order now and what you may not. Units you cannot reach yet are listed on purpose, under \"blocked\", so you can plan toward them — \"blockedBy\" on each says what stands in the way. Only a gate that means \"not yet\" demotes an entry: a unit whose sole problem is money, or a full population cap, is still a unit you can train and stays under \"trainable\" wearing that gate. Each entry's \"id\" is the bare unit id, ready to pass as \"unitType\" unchanged — the host building and the age are where the entry sits in this tree, not part of its name, so \"militia (stone)\" is a rejected call where \"militia\" is not. The Town Center hosts \"worker\" — villagers are trained with train_unit like everything else. Includes your civ's unique units, and omits both standard units your civ does not field and any host building your civ can never construct. Either side can be empty: with no finished building to train from, the whole vocabulary sits under \"blocked\". A category (infantry/ranged/cavalry/support) is NOT valid here — those work only in the \"units\" parameter of move_units and attack_target, which is a different thing that happens to share this key's name.",
+      "required": [
+        "trainable",
+        "blocked"
+      ],
+      "properties": {
+        "trainable": {
+          "type": "object",
+          "description": "Host building id -> age -> the units that building could turn out this turn. \"blockedBy\" is absent when nothing at all stands in the way, and otherwise holds only \"cost\" or \"pop\" — both flip within a few seconds, so the entry stays here rather than claiming something has become impossible.",
+          "additionalProperties": {
             "type": "object",
-            "required": ["id", "cost", "blockedBy"],
-            "properties": {
-              "id": { "type": "string" },
-              "cost": { "$ref": "#/$defs/cost" },
-              "blockedBy": { "$ref": "#/$defs/blockedBy" }
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "cost"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Pass verbatim as train_unit's \"unitType\"."
+                  },
+                  "cost": {
+                    "$ref": "#/$defs/cost"
+                  },
+                  "blockedBy": {
+                    "$ref": "#/$defs/blockedBy"
+                  }
+                }
+              }
             }
           }
-        }
-      }
-    },
-    "buildableStructures": {
-      "type": "array",
-      "description": "What your civilization can EVER build, and the vocabulary for build_structure's \"buildingType\". If a type is absent (e.g. stable for some civs), your civ does not have it — do not keep trying. Your Wonder is listed here too, as type \"wonder\".",
-      "items": {
-        "type": "object",
-        "required": [
-          "type",
-          "requiredAge",
-          "requiresTech",
-          "cost",
-          "blockedBy"
-        ],
-        "properties": {
-          "type": {
-            "type": "string",
-            "description": "Pass this verbatim as build_structure's \"buildingType\"."
-          },
-          "requiredAge": {
-            "type": "string",
-            "description": "Earliest age at which this civilization can build it — already adjusted for a unlock tech that arrives later than the building's own age."
-          },
-          "requiresTech": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
+        },
+        "blocked": {
+          "type": "object",
+          "description": "The same nesting for the units you cannot order yet. Every entry here carries a non-empty \"blockedBy\", and at least one value in it is structural: \"age\" (an epoch you have not reached) or \"host\" (no finished building of that type stands), sometimes joined by \"pop\" or \"cost\". Read it as a plan: the answer to \"host\" is build_structure, the answer to \"age\" is upgrade_age.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "cost",
+                  "blockedBy"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Pass verbatim as train_unit's \"unitType\" — once the gate lifts."
+                  },
+                  "cost": {
+                    "$ref": "#/$defs/cost"
+                  },
+                  "blockedBy": {
+                    "$ref": "#/$defs/blockedBy"
+                  }
+                }
               }
-            ]
-          },
-          "cost": {
-            "$ref": "#/$defs/cost"
-          },
-          "blockedBy": {
-            "$ref": "#/$defs/blockedBy"
-          },
-          "isWonder": {
-            "type": "boolean",
-            "description": "Present and true on the single Wonder entry. Building it and holding it for gameStats.wonderRequired seconds wins the match."
-          },
-          "builtAs": {
-            "type": "string",
-            "description": "Wonder only: the civilization-specific id the finished Wonder carries in friendlyBuildings (akropolis, pyramid, firetemple, shrine). You still BUILD it by passing type \"wonder\"."
+            }
           }
         }
       }

@@ -2515,9 +2515,10 @@ class Game {
     // The mirror of onTownCenterLost: a Town Center stands again, so the delivery
     // economy can restart. Anyone still holding goods walks them to the new
     // centre, and idle hands go back onto fields that lost their farmhand when
-    // the drop-off vanished — a farm only produces while a worker is assigned,
-    // and NO model action can staff one (the builder normally becomes its
-    // farmer), so without this a rebuilt base would leave its fields dead.
+    // the drop-off vanished — a farm only produces while a worker is assigned.
+    // The builder normally becomes its farmer, and assign_workers "farm" can staff
+    // one from the model side, but neither of those fires on a rebuild: without this
+    // a base that lost its Town Center would stand up with its fields dead.
     onTownCenterBuilt(owner) {
         if (!owner || !owner.units || !owner.buildings) return 0;
         const drops = owner.buildings.filter(b => b.type === 'town_center' && !b.underConstruction && b.health > 0);
@@ -2604,7 +2605,7 @@ class Game {
             (civForBuild?.uniqueBuildings || []).find(b => b.id === buildingType);
         if (!buildingDef) return;
 
-        // Wonder: Iron-age, one at a time, hold 180s to win.
+        // Wonder: Iron-age, one at a time, hold it wonderRequired (600s) to win.
         if (buildingDef.type === 'wonder') {
             const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
             const reqAge = buildingDef.requiredAge || 'iron';

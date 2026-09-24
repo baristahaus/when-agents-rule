@@ -1645,7 +1645,7 @@ const I18N_GAME = {
         'Starker Infanterist': 'Strong infantryman', 'Steinabbau +25% effizienter': 'Stone mining +25% more efficient',
         'Tempel': 'Temple', 'Töpferei': 'Pottery', 'Verteidigungsturm': 'Defensive tower',
         'Wachtturm': 'Watchtower',
-        'Weltwunder - im Bau ~60s, danach 180s halten zum Sieg!': 'Wonder — ~60s to build, then hold 180s to win!',
+        'Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!': 'Wonder — ~60s to build, then hold it 600s (10 minutes) to win!',
         'Zentrale Gebäude - baut Dorfbewohner, forscht Altsteinzeit-Technologien': 'Central building — trains villagers, researches Stone Age technologies'
     },
     es: {
@@ -1714,7 +1714,7 @@ const I18N_GAME = {
         'Starker Infanterist': 'Infante fuerte', 'Steinabbau +25% effizienter': 'Extracción de piedra +25% más eficiente',
         'Tempel': 'Templo', 'Töpferei': 'Alfarería', 'Verteidigungsturm': 'Torre defensiva',
         'Wachtturm': 'Torre de vigilancia',
-        'Weltwunder - im Bau ~60s, danach 180s halten zum Sieg!': 'Maravilla — ~60s de construcción, luego mantenla 180s para ganar!',
+        'Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!': 'Maravilla — ~60s de construcción, luego mantenla 600s (10 min) para ganar!',
         'Zentrale Gebäude - baut Dorfbewohner, forscht Altsteinzeit-Technologien': 'Edificio central — entrena aldeanos, investiga tecnologías de la Edad de Piedra'
     },
     zh: {
@@ -1783,7 +1783,7 @@ const I18N_GAME = {
         'Starker Infanterist': '强力步兵', 'Steinabbau +25% effizienter': '采石效率 +25%',
         'Tempel': '神庙', 'Töpferei': '制陶', 'Verteidigungsturm': '防御塔',
         'Wachtturm': '瞭望塔',
-        'Weltwunder - im Bau ~60s, danach 180s halten zum Sieg!': '世界奇观——建造约 60 秒，之后坚守 180 秒即可获胜！',
+        'Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!': '世界奇观——建造约 60 秒，之后坚守 600 秒（10 分钟）即可获胜！',
         'Zentrale Gebäude - baut Dorfbewohner, forscht Altsteinzeit-Technologien': '核心建筑——训练村民，研究石器时代科技'
     }
 };
@@ -1968,6 +1968,7 @@ const I18N_OUTCOMES_2 = {
         'log.out.moveUnits': '{count} Einheit(en) ziehen nach ({x}, {z}) – ~{eta}s.',
         'log.out.repairStarted': '{count} Arbeiter reparieren „{type}" bei ({x}, {z}) ({pct}% HP).',
         'log.out.deleted': '{what} gelöscht – Bevölkerung frei.',
+        'log.out.badCount': '„{raw}" ist keine Zahl – „count" erwartet 1-{max}. Es wurde nichts gelöscht.',
         'log.out.destroyed': '„{buildingType}" bei ({x}, {z}) abgerissen.',
         'log.out.noTCPlacement': 'Kein Dorfzentrum als Platzierungsreferenz gefunden.',
         'log.out.attackDispatched': '{count} Einheit(en) greifen „{target}" an.',
@@ -2054,6 +2055,7 @@ const I18N_OUTCOMES_2 = {
         'log.out.moveUnits': '{count} unidad(es) se mueven a ({x}, {z}) – ~{eta}s.',
         'log.out.repairStarted': '{count} trabajador(es) reparan «{type}» en ({x}, {z}) ({pct}% HP).',
         'log.out.deleted': '{what} eliminado; población liberada.',
+        'log.out.badCount': '«{raw}» no es un número; «count» admite 1-{max}. No se borró nada.',
         'log.out.destroyed': '«{buildingType}» derribado en ({x}, {z}).',
         'log.out.noTCPlacement': 'Sin Centro urbano como referencia de colocación.',
         'log.out.attackDispatched': '{count} unidad(es) atacan «{target}».',
@@ -2140,6 +2142,7 @@ const I18N_OUTCOMES_2 = {
         'log.out.moveUnits': '{count} 个单位前往 ({x}, {z})，约 {eta} 秒。',
         'log.out.repairStarted': '{count} 名工人在 ({x}, {z}) 维修“{type}”（{pct}% 生命）。',
         'log.out.deleted': '已删除 {what}，释放人口。',
+        'log.out.badCount': '“{raw}”不是数字——“count”需要 1-{max}。未删除任何单位。',
         'log.out.destroyed': '已在 ({x}, {z}) 拆除“{buildingType}”。',
         'log.out.noTCPlacement': '没有可作为放置参照的镇中心。',
         'log.out.attackDispatched': '{count} 个单位正在攻击“{target}”。',
