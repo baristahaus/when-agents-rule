@@ -219,11 +219,27 @@ less push per wall-clock second than a 60 fps tab does — a backgrounded match 
 *close* to a watched one instead of exactly. Raising the cap would close the rest; that is
 tuning, and tuning is a gameplay call.
 
-Related and smaller: auto-acquisition (`game.js:1208`, range +20/24 against sight 15/22.5)
-scans **every** unit on the map with no fog check, and `attack_target` pins an object and
-then steers on its live coordinates forever. Both let units act on enemies they have
-never seen, which contradicts the rule the models are told. Fixing them changes combat
-outcomes, so they go on the open list too.
+Related and smaller, and now half-fixed: auto-acquisition scans for enemies within an aggro
+radius of 24 (melee) or weapon range + 20 — **32 for an archer** — against a sight of 15 for
+infantry and 22.5 for cavalry. There was no visibility test in the scan at all, so a unit
+reacted to enemies its seat had no way of knowing about, which is the opposite of the rule the
+models are told and made a fogged match one board watched by four omniscient brains.
+
+The scan now takes a `requireSight` flag, and acquisition passes it, using the same sight rule
+the fog, the model-facing state and rival discovery already use (a seat sees what its living
+units and finished buildings cover — `aiManager.isVisibleTo`, not the human's single-observer
+fog grid, because an arena has four seats whose knowledge must not be one). Measured on a
+deliberately placed board — two facing lines of recruits 22 apart, mid-map, out of sight of
+any town center, inside every aggro radius: **8 units would acquire, all 8 blind; with the gate
+all 8 hold.** Base defence is untouched, because a town center sees 40 and the attackers walk
+into that long before the archers react.
+
+What remains is the other half, and it is a feature rather than a filter: `attack_target` pins
+an object and then steers on its **live** coordinates forever, so a chased unit that has walked
+into fog is still being run down exactly as the crow flies. Doing that properly means target
+memory — last-known position, an age, and a give-up rule — and inventing a give-up window in
+the same breath as changing who lives is not a swap anyone should review as one change. It is
+open item 1.
 
 ### 8. Testing a page of classic scripts
 
@@ -303,6 +319,8 @@ it is not optional.
 | `.gitignore` | `results_*.md`, `match-*.jsonl`, `screenshots/` — a run's own output cannot be published by one `git add -A` | — |
 | `js/engine/gamerenderer.js` `_buildTextures` | frees the texture set it replaces; safe because all four `setTerrain` callers clear the scene first | A/B on identical paths: 39 textures left resident per theme change, then 0 |
 | `js/engine/gamerenderer.js` `simulateStep`, `js/game.js` | the two positional passes left the render loop and run per simulation sub-step; `animate()` only draws | pinned pile, backgrounded tab: `minSep 0.042 → 0.042` before, `→ 1.2` after, same run as the visible tab |
+| `js/game.js` `findNearestEnemyInRange` + `canOwnerSee`/`visionSources` | auto-acquisition requires the seat to see the target; ordered attacks and retaliation do not | placed board: 8 would-acquire, 8 blind → 0 acquisitions; base defence unchanged |
+| `tests/fog-acquisition.test.cjs` (new) | the sight/aggro band, town-center sight, ruins and corpses, enemy buildings, the per-step cache and the no-cache-outside-a-step case | 8 tests |
 | `js/engine/gamerenderer.js` coincident cases | separation now reaches units on the identical point, and the dead-centre building escape fans by index instead of `+x` | welded stack `0.000 → 0.000` over 7 s before; `→ 1.2` after |
 | `tests/host-classifier.test.cjs` (new) | the showcase gate's input: 13 private forms, 9 public ones, the prefix-bypass shapes, `?full=1` and `file://` | 4 tests; an unanchored v4 regex (a fail-open) is caught by it |
 | `js/openai-ai.js` | dead `roundStillOpen` deleted and the comment that leaned on it rewritten to say what the code actually does | grep: no call sites; the gap it implied is now open item 9 |
@@ -312,7 +330,7 @@ it is not optional.
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
 
-Suite state: **291/291 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
+Suite state: **299/299 unit tests** (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests);; the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
 before the fixes, on exactly the three assertions it now passes — a green security test is
 only worth what its red run was worth. The context-loss path was proven the same way, by
@@ -325,8 +343,10 @@ GPUs; the direction is the part that holds.
 
 ## Still open, ranked
 
-1. **S2 — fog leaks in combat** (§7): aggro outranges sight and scans through fog; pinned
-   targets never re-check it.
+1. **S2 — a chased target is never lost.** Acquisition is sight-gated now (§7), but
+   `attack_target` still steers on the target's live coordinates indefinitely, so a unit runs
+   down an enemy it stopped seeing several turns ago. Needs last-known-position memory plus a
+   give-up window; the window is a gameplay decision and should be reviewed as one.
 2. **S3 — the browser job has never run on a runner.** `.github/workflows/ci.yml` now has
    two jobs: the push job (`node --check` over every shipped file, both JSON contracts,
    `node --test`) and a nightly `workflow_dispatch` job for the two Playwright suites, with
@@ -342,7 +362,7 @@ GPUs; the direction is the part that holds.
    seeded from the map seed closes it.
 4. **S3 — size.** `buildGameStateJSON` is 1093 lines and `sendToOpenAI` 810: the state
     contract and the request path are each one un-reviewable function. Byte-identical
-    `git mv` into one file per concern keeps all 291 tests green — that is the whole
+    `git mv` into one file per concern keeps all 299 tests green — that is the whole
     migration.
 5. **S3 — repo weight.** 108 MiB pack for 2.6 MiB of text (51.3 MiB transcripts, 28.7 MiB
     media, no LFS). The two things this app writes into its own folder, `results_*.md` and
@@ -390,7 +410,7 @@ app's — recorded here because it looked like a finding.
 ## Reproducing
 
 ```bash
-npm test                      # 291 unit tests, ~77 s, needs only Node
+npm test                      # 299 unit tests, ~77 s, needs only Node
 npm run test:browser          # optional: needs Playwright reachable via WAR_PLAYWRIGHT_PATH
                               #   WAR_PLAYWRIGHT_PATH=/path/to/node_modules/playwright \
                               #   WAR_CHROME_PATH=/path/to/chrome WAR_QA_DIR=/tmp/qa \

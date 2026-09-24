@@ -809,6 +809,10 @@ class Game {
     // One fixed simulation slice (dt ≤ 100ms). Called once for a normal 60fps frame,
     // or several times to replay a long/throttled frame without losing time.
     simulateStep(dt) {
+        // One sight-list rebuild per owner per sub-step, however many units scan
+        // (visionSources below). The stamp is what makes the cache honest: positions move
+        // every step, so a source list may not outlive the step that computed it.
+        this._stepStamp = (this._stepStamp || 0) + 1;
         // Unit work + movement (movement is the teleport-sensitive part — keep dt small)
         if(this._standingOrders)this._standingOrders.update(dt);
         this.measureFormationLead();
@@ -1228,7 +1232,7 @@ class Game {
                 if (unit._acquireTimer >= 150) {
                     unit._acquireTimer = 0;
                     const aggro = (unit.range > 1 ? unit.range + 20 : 24);
-                    const found = this.findNearestEnemyInRange(unit, aggro, true);
+                    const found = this.findNearestEnemyInRange(unit, aggro, true, true);
                     if (found) {
                         unit.attackTarget = found;
                     } else if (unit._draftReturn) {
@@ -1454,18 +1458,28 @@ class Game {
     }
 
     // Nearest living enemy entity (unit, and optionally building) within `range`.
-    findNearestEnemyInRange(unit, range, includeBuildings = true) {
+    //
+    // requireSight is the difference between "something is near me" and "I know something
+    // is near me". Auto-acquisition sets it: the aggro radius (24, or weapon range + 20 —
+    // 27.5 for an archer) is LONGER than any unit's sight (15, cavalry 22.5), so without it
+    // a unit reacts to enemies the seat has no way of seeing, which is the rule the models
+    // are told and the reason a fogged match was really two games played by one board.
+    // An ordered attack_target does not set it: a model may lawfully send its army after
+    // something it spotted and has since lost. Retaliation does not either — being shot is
+    // information.
+    findNearestEnemyInRange(unit, range, includeBuildings = true, requireSight = false) {
         let nearest = null;
         let minDist = range;
+        const unknown = requireSight ? (o) => !this.canOwnerSee(unit.owner, o.x, o.z) : () => false;
         this.renderer.units.forEach(o => {
-            if (o.owner === unit.owner || o.health <= 0) return;
+            if (o.owner === unit.owner || o.health <= 0 || unknown(o)) return;
             const d = Math.hypot(o.x - unit.x, o.z - unit.z);
             if (d < minDist) { minDist = d; nearest = o; }
         });
         if (includeBuildings) {
             this.renderer.buildings.forEach(b => {
-                if (b.owner === unit.owner || b.health <= 0) return;
-                const d = Math.hypot(b.x - unit.x, b.z - unit.z);
+                if (b.owner === unit.owner || b.health <= 0 || unknown(b)) return;
+                const d = Math.hypot(b.x - unit.x, b.z - b.z);
                 if (d < minDist) { minDist = d; nearest = b; }
             });
         }
@@ -4443,6 +4457,54 @@ class Game {
     getOwner(entity) {
         if (entity.owner === 'player') return this.player;
         return this.aiManager.aiPlayers.find(a => a.units.includes(entity) || a.buildings.includes(entity));
+    }
+
+    // The player object an entity's `owner` id names. getOwner() searches every entity
+    // list, which is right for a click and far too slow for a targeting scan.
+    playerById(ownerId) {
+        if (this.player && (ownerId === 'player' || ownerId === this.player.id)) return this.player;
+        return (this.aiManager && this.aiManager.aiPlayers.find(a => a.id === ownerId)) || null;
+    }
+
+    // Sight sources for one owner, cached per simulation sub-step. Acquisition asks "can
+    // this seat see that position" once per candidate, per scanning unit, per 150ms —
+    // recomputing the owner's radii each time turns a filter into a second quadratic pass.
+    // Squared radii: the comparison never needs the root.
+    visionSources(owner) {
+        if (!this._visionCache) this._visionCache = new Map();
+        // Stamp 0 means "not inside a sub-step" — an analyzer rebuild, a test, anything
+        // calling this outside the sim loop. Nothing there advances time, so a cached list
+        // would be read after the units had already moved: rebuild, every time, there.
+        const stamp = this._stepStamp || 0;
+        const hit = stamp ? this._visionCache.get(owner) : null;
+        if (hit && hit.stamp === stamp) return hit.list;
+        const list = [];
+        for (const u of (owner.units || [])) {
+            if (!(u.health > 0)) continue;
+            const r = this.unitVision(u);
+            list.push({ x: u.x, z: u.z, r2: r * r });
+        }
+        for (const b of (owner.buildings || [])) {
+            if (!(b.health > 0)) continue;
+            const r = this.buildingVision(b);   // 0 while under construction
+            if (r > 0) list.push({ x: b.x, z: b.z, r2: r * r });
+        }
+        if (stamp) this._visionCache.set(owner, { stamp, list });
+        return list;
+    }
+
+    // Same sight rule the fog, the model-facing state and rival discovery already use
+    // (aiManager.isVisibleTo): a seat sees what its living units and completed buildings
+    // cover. Deliberately not fogOfWar.isPositionVisible — that grid is single-observer
+    // (the human's), and an arena has four seats whose knowledge must not be one.
+    canOwnerSee(ownerId, x, z) {
+        const owner = this.playerById(ownerId);
+        if (!owner) return true;    // unknown owner: do not invent a blind spot
+        for (const s of this.visionSources(owner)) {
+            const dx = s.x - x, dz = s.z - z;
+            if (dx * dx + dz * dz <= s.r2) return true;
+        }
+        return false;
     }
 
     // Get all units on the map (player + AI)
