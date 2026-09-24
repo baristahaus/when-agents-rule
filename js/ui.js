@@ -3569,6 +3569,14 @@ class UIManager {
         return String(n);
     }
 
+    // A percentage, or the honest absence of one. These rates are null when there was
+    // nothing to divide (see the metrics block in showArenaSummary), and printing 0% for that
+    // tells the reader the model failed when the harness never let it answer.
+    pct(v, na) {
+        if (v === null || v === undefined || Number.isNaN(v)) return na || '—';
+        return Math.round(v * 100) + '%';
+    }
+
     // Team-badge chip: the UI twin of the ownership mark worn on building
     // flags and unit chests — same per-seat fill, SHAPE and contrast rim,
     // drawn as a tiny inline SVG. Returns '' when the seat is unknown so
@@ -3962,12 +3970,23 @@ class UIManager {
             (rep.ageIdx / 3) * 0.5 +
             Math.min(Math.max(rep.buildings - 1, 0), 5) / 5 * 0.3 +
             Math.min(rep.military, 10) / 10 * 0.2);
-        const score = 100 * (
-            0.34 * m.successRate +
-            0.20 * progression +
-            0.18 * m.formatOk +
-            0.15 * m.reliability +
-            0.13 * diversity);
+        // Five terms, three of which the harness may have no evidence for at all. An
+        // unknown term drops out and the remaining weights are re-normalised over what is
+        // known, so a seat judged on two terms is ranked on those two rather than docked a
+        // third of its score for silence: at full weight, the three model-quality terms sum
+        // to 0.67, which is how much a seat used to lose for never having been asked.
+        const terms = [
+            [0.34, m.successRate], [0.20, progression], [0.18, m.formatOk],
+            [0.15, m.reliability], [0.13, diversity],
+        ];
+        let sum = 0, known = 0;
+        for (const term of terms) {
+            const v = term[1];
+            if (v === null || v === undefined || Number.isNaN(v)) continue;
+            sum += term[0] * v; known += term[0];
+        }
+        if (!known) return 0;
+        const score = 100 * sum / known;
         return Math.round(Math.max(0, Math.min(100, score)));
     }
 
@@ -3981,8 +4000,11 @@ class UIManager {
         if (m.responded > 0 && m.formatOk >= 0.95) tags.push({ t: t('tag.formatLoyal'), cls: 'good' });
         else if (m.responded > 0 && m.formatOk < 0.7) tags.push({ t: t('tag.formatIssues'), cls: 'bad' });
         if (m.invalidActions >= 2) tags.push({ t: t('tag.inventsActions'), cls: 'bad' });
-        if (m.attempted >= 3 && m.successRate >= 0.8) tags.push({ t: t('tag.efficient'), cls: 'good' });
-        else if (m.attempted >= 3 && m.successRate < 0.5) tags.push({ t: t('tag.manyFails'), cls: 'warn' });
+        // null must not fall through to the `<` branch: null < 0.5 is true in JS, so an
+        // unjudged seat (every attempt contended, nothing scored) would be tagged as
+        // failing at what the harness has no measurement for.
+        if (m.attempted >= 3 && m.successRate !== null && m.successRate >= 0.8) tags.push({ t: t('tag.efficient'), cls: 'good' });
+        else if (m.attempted >= 3 && m.successRate !== null && m.successRate < 0.5) tags.push({ t: t('tag.manyFails'), cls: 'warn' });
         // Loud, because it changes what every other number on the card MEANS. A seat
         // that answered a third of its rounds did not play a third as well -- it played
         // a different match from the one the ranking describes.
@@ -4146,15 +4168,20 @@ class UIManager {
                     // A model whose only failures were a busy barracks made no mistake,
                     // so it should read 1.0 — docking it would score tempo as error, and
                     // the models that contend with themselves most are the busy ones.
+                    // A rate with nothing to divide is null, not 0. Zero means "answered and
+                    // was wrong"; these four mean "there was nothing to answer with", which
+                    // is the harness's own doing (a cut request, an overflow, a turn the rate
+                    // limit ate) and must not be charged to the model. computeSoundness
+                    // re-normalises around them, and pct() renders them as a dash.
                     successRate: (() => {
                         const judged = st.actionsAttempted - (st.actionsContended || 0);
-                        return judged > 0 ? st.actionsSucceeded / judged : 0;
+                        return judged > 0 ? st.actionsSucceeded / judged : null;
                     })(),
                     // Format fidelity: prose-only replies (no JSON action) are format
                     // failures too — they just get their own counter.
-                    formatOk: responded > 0 ? (responded - st.parseFails - (st.noActionReturns || 0)) / responded : 0,
-                    reliability: reliabilityBase ? 1 - (st.timeouts + st.networkErrors) / reliabilityBase : 0,
-                    reasonRate: st.actionsAttempted ? st.reasonsGiven / st.actionsAttempted : 0,
+                    formatOk: responded > 0 ? (responded - st.parseFails - (st.noActionReturns || 0)) / responded : null,
+                    reliability: reliabilityBase ? 1 - (st.timeouts + st.networkErrors) / reliabilityBase : null,
+                    reasonRate: st.actionsAttempted ? st.reasonsGiven / st.actionsAttempted : null,
                     actionCounts: st.actionCounts,
                     workersTrained: st.workersTrained || 0
                 };
@@ -4237,9 +4264,9 @@ class UIManager {
                             ? `<div class="sum-metric bad"><span>\u{1F4C9} ${t('sum.slowdown')}</span><b>${(m.latEarly / 1000).toFixed(1)}s \u2192 ${(m.latLate / 1000).toFixed(1)}s</b><i>${t('sum.slowdownHint')}</i></div>`
                             : ''}
                         <div class="sum-metric"><span>\u{1F9E0} ${t('sum.mDecisions')}</span><b>${m.decisions}</b><i>${t('sum.mAnswered', { n: m.responded })}${(m.roundsMissed || 0) ? ` · ${t('sum.missedRounds', { n: m.roundsMissed })}` : ''} · ${t('sum.perTurn', { n: (m.commandsPerTurn || 0).toFixed(1), max: m.maxCommands || 3 })}</i></div>
-                        <div class="sum-metric"><span>✅ ${t('sum.mSuccess')}</span><b>${Math.round(m.successRate * 100)}%</b><i>${m.succeeded}/${m.attempted - (m.contended || 0)}${(m.contended || 0) ? ` · ${t('sum.contended', { n: m.contended })}` : ''}</i></div>
-                        <div class="sum-metric"><span>\u{1F4CB} ${t('sum.mFormat')}</span><b>${Math.round(m.formatOk * 100)}%</b><i>${t('sum.mJsonOk')}</i></div>
-                        <div class="sum-metric"><span>\u{1F4AC} ${t('sum.mReasons')}</span><b>${Math.round(m.reasonRate * 100)}%</b><i>${t('sum.mOfMoves')}</i></div>
+                        <div class="sum-metric"><span>✅ ${t('sum.mSuccess')}</span><b>${this.pct(m.successRate)}</b><i>${m.succeeded}/${m.attempted - (m.contended || 0)}${(m.contended || 0) ? ` · ${t('sum.contended', { n: m.contended })}` : ''}</i></div>
+                        <div class="sum-metric"><span>\u{1F4CB} ${t('sum.mFormat')}</span><b>${this.pct(m.formatOk)}</b><i>${t('sum.mJsonOk')}</i></div>
+                        <div class="sum-metric"><span>\u{1F4AC} ${t('sum.mReasons')}</span><b>${this.pct(m.reasonRate)}</b><i>${t('sum.mOfMoves')}</i></div>
                         <div class="sum-metric"><span>\u{1FA99} ${t('sum.mTokens')}</span><b>${this.fmtTokens(m.promptTokens + m.completionTokens)}</b><i>${(m.promptTokens + m.completionTokens) ? t('sum.mTokSplit', { p: this.fmtTokens(m.promptTokens), c: this.fmtTokens(m.completionTokens) }) : t('sum.mTokNone')}</i></div>
                         <div class="sum-metric${errTotal ? ' err' : ''}"><span>⚠️ ${t('sum.mErrors')}</span><b>${errTotal}</b><i>${t('sum.errBreak', { to: m.timeouts, net: this.netErrLabel(m), parse: m.parseFails, cut: m.truncated || 0, na: m.noAction || 0, inv: m.invalidActions, rej: m.rejected, ctx: m.contextOverflows || 0 })}</i></div>
                         ${(m.laneCount || 1) > 1
@@ -6602,10 +6629,10 @@ class UIManager {
                 // model's mistake). Printing raw m.attempted here made "95% (374/402)"
                 // where 374/402 is 93%: the fraction contradicted its own percentage
                 // whenever contended > 0. Mirror the in-app summary (sum-metric) exactly.
-                L.push(`- Success rate: ${Math.round(m.successRate * 100)}% (${m.succeeded}/${m.attempted - (m.contended || 0)}${(m.contended || 0) ? ` · ${m.contended} not scored (timing)` : ''})`);
-                L.push(`- Format fidelity: ${Math.round(m.formatOk * 100)}%`);
-                L.push(`- Reasoning rate: ${Math.round(m.reasonRate * 100)}%`);
-                L.push(`- Reliability: ${Math.round(m.reliability * 100)}%`);
+                L.push(`- Success rate: ${this.pct(m.successRate, 'n/a')} (${m.succeeded}/${m.attempted - (m.contended || 0)}${(m.contended || 0) ? ` · ${m.contended} not scored (timing)` : ''})`);
+                L.push(`- Format fidelity: ${this.pct(m.formatOk, 'n/a')} (${m.responded || 0} answered)`);
+                L.push(`- Reasoning rate: ${this.pct(m.reasonRate, 'n/a')}`);
+                L.push(`- Reliability: ${this.pct(m.reliability, 'n/a')}`);
                 L.push(`- Latency: avg ${(m.avgLatency / 1000).toFixed(1)}s (min ${(m.minLatency / 1000).toFixed(1)}s, max ${(m.maxLatency / 1000).toFixed(1)}s)`);
                 L.push(`- Errors: timeouts ${m.timeouts} · network ${m.networkErrors} · parse ${m.parseFails} (of which truncated ${m.truncated || 0}) · no-action ${m.noAction || 0} · invalid ${m.invalidActions} · rejected ${m.rejected} · contended ${m.contended || 0} · context-overflows ${m.contextOverflows || 0} · rate-limited ${m.rateLimited || 0} (of which cost a turn ${m.rateLimitLost || 0})`);
             L.push(`- Tokens: ${(m.promptTokens + m.completionTokens) ? `${m.promptTokens} prompt + ${m.completionTokens} completion = ${m.promptTokens + m.completionTokens}` : 'not reported by endpoint'}`);

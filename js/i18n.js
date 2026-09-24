@@ -116,7 +116,7 @@ const I18N = {
         'sum.mFormat': 'Format fidelity', 'sum.mJsonOk': 'JSON ok', 'sum.mReasons': 'Reasonings', 'sum.mOfMoves': 'of moves',
         'sum.mTokens': 'Tokens', 'sum.mTokSplit': '{p} in · {c} out', 'sum.mTokNone': 'not reported', 'sum.contended': '{n} not scored (timing)', 'sum.contended': '{n} not scored (timing)', 'sum.mLanes': 'Rounds rescued', 'sum.laneBreak': '{lanes} lanes · {dup} doublettes caught · {drop} answers dropped', 'sum.laneTip': 'Rolling inference: rounds this seat played that a one-lane seat would have forfeited, because a lane came back with nothing playable and a sibling answered in time. Beside it, what the pipeline cost: orders dropped as blind duplicates, and complete replies no round could take.', 'sum.mErrors': 'Errors', 'sum.errBreak': 'TO {to} · Net {net} · Parse {parse} (cut {cut}) · No-action {na} · Invalid {inv} · Rejected {rej} · Ctx {ctx}',
         'sum.noActions': 'no actions',
-        'sum.legend': 'Strategy score = 34% action success · 20% progression (age/building/military) · 18% format fidelity · 15% reliability · 13% action diversity.',
+        'sum.legend': 'Strategy score = 34% action success · 20% progression (age/building/military) · 18% format fidelity · 15% reliability · 13% action diversity. Terms that cannot be judged at all — no scored action, no answer, no request — are left out, and the rest share the score between them.',
 
         'hud.quit': '✕ Menu',
         'hud.quitTitle': 'End game and return to the menu',
@@ -512,7 +512,7 @@ const I18N = {
         'sum.mFormat': 'Formattreue', 'sum.mJsonOk': 'JSON ok', 'sum.mReasons': 'Begründungen', 'sum.mOfMoves': 'der Züge',
         'sum.mTokens': 'Tokens', 'sum.mTokSplit': '{p} ein · {c} aus', 'sum.mTokNone': 'nicht gemeldet', 'sum.contended': '{n} ungewertet (Timing)', 'sum.contended': '{n} ungewertet (Timing)', 'sum.mLanes': 'Gerettete Runden', 'sum.laneBreak': '{lanes} Spuren · {dup} Doubletten abgefangen · {drop} Antworten verworfen', 'sum.laneTip': 'Rollierende Inferenz: Runden, die dieser Sitz gespielt hat und die er mit nur einer Spur verloren hätte, weil eine Spur nichts Spielbares lieferte und eine Schwesterspur rechtzeitig antwortete. Daneben der Preis der Pipeline: als blinde Doubletten verworfene Befehle und vollständige Antworten, die keine Runde mehr annehmen konnte.', 'sum.mErrors': 'Fehler', 'sum.errBreak': 'TO {to} · Netz {net} · Parse {parse} (abgeschn. {cut}) · Ohne Aktion {na} · Ungültig {inv} · Abgelehnt {rej} · Ctx {ctx}',
         'sum.noActions': 'keine Aktionen',
-        'sum.legend': 'Strategie-Score = 34% Aktionserfolg · 20% Fortschritt (Epoche/Bau/Militär) · 18% Formattreue · 15% Zuverlässigkeit · 13% Aktionsvielfalt.',
+        'sum.legend': 'Strategie-Score = 34% Aktionserfolg · 20% Fortschritt (Epoche/Bau/Militär) · 18% Formattreue · 15% Zuverlässigkeit · 13% Aktionsvielfalt. Begriffe, die sich gar nicht bewerten lassen – keine gewertete Aktion, keine Antwort, keine Anfrage – bleiben außen vor; die übrigen teilen sich die Wertung.',
 
         'hud.quit': '✕ Menü',
         'hud.quitTitle': 'Spiel beenden und zum Menü zurück',
@@ -901,7 +901,7 @@ const I18N = {
         'sum.mFormat': 'Fidelidad de formato', 'sum.mJsonOk': 'JSON ok', 'sum.mReasons': 'Justificaciones', 'sum.mOfMoves': 'de las jugadas',
         'sum.mTokens': 'Tokens', 'sum.mTokSplit': '{p} entrada · {c} salida', 'sum.mTokNone': 'no informado', 'sum.contended': '{n} sin puntuar (timing)', 'sum.contended': '{n} sin puntuar (timing)', 'sum.mLanes': 'Rondas rescatadas', 'sum.laneBreak': '{lanes} carriles · {dup} duplicados detectados · {drop} respuestas descartadas', 'sum.laneTip': 'Inferencia rodante: rondas que este asiento jugó y que habría perdido con un solo carril, porque un carril no devolvió nada jugable y otro respondió a tiempo. Al lado, lo que costó la tubería: órdenes descartadas como duplicados ciegos y respuestas completas que ninguna ronda pudo tomar.', 'sum.mErrors': 'Errores', 'sum.errBreak': 'TO {to} · Red {net} · Parse {parse} (cortadas {cut}) · Sin acción {na} · Inválidas {inv} · Rechazadas {rej} · Ctx {ctx}',
         'sum.noActions': 'sin acciones',
-        'sum.legend': 'Puntuación de estrategia = 34% éxito de acciones · 20% progreso (edad/construcción/ejército) · 18% fidelidad de formato · 15% fiabilidad · 13% diversidad de acciones.',
+        'sum.legend': 'Puntuación de estrategia = 34% éxito de acciones · 20% progreso (edad/construcción/ejército) · 18% fidelidad de formato · 15% fiabilidad · 13% diversidad de acciones. Los términos que no se pueden juzgar en absoluto (ninguna acción puntuada, ninguna respuesta, ninguna solicitud) se omiten, y el resto se reparte la puntuación.',
 
         'hud.quit': '✕ Menú',
         'hud.quitTitle': 'Terminar y volver al menú',
@@ -1282,7 +1282,7 @@ const I18N = {
         'sum.mFormat': '格式规范度', 'sum.mJsonOk': 'JSON 正常', 'sum.mReasons': '理由', 'sum.mOfMoves': '占行动比例',
         'sum.mTokens': 'Token', 'sum.mTokSplit': '输入 {p} · 输出 {c}', 'sum.mTokNone': '未报告', 'sum.contended': '{n} 不计分（时机）', 'sum.contended': '{n} 不计分（时机）', 'sum.mLanes': '挽救的回合', 'sum.laneBreak': '{lanes} 条车道 · 拦截重复 {dup} · 丢弃回复 {drop}', 'sum.laneTip': '滚动推理：该席位实际行动的回合数，若只有一条车道则会失去这些回合——因为一条车道未返回可用内容，而另一条及时作答。旁边是流水线的代价：被当作盲重复丢弃的指令，以及无回合可接收的完整回复。', 'sum.mErrors': '错误', 'sum.errBreak': '超时 {to} · 网络 {net} · 解析 {parse}（截断 {cut}）· 无动作 {na} · 无效 {inv} · 拒绝 {rej} · 上下文 {ctx}',
         'sum.noActions': '无动作',
-        'sum.legend': '战略评分 = 34% 动作成功率 · 20% 进展（时代/建造/军事）· 18% 格式规范度 · 15% 可靠性 · 13% 动作多样性。',
+        'sum.legend': '战略评分 = 34% 动作成功率 · 20% 进展（时代/建造/军事）· 18% 格式规范度 · 15% 可靠性 · 13% 动作多样性。 完全无法评判的项目（没有计分的动作、没有回答、没有请求）会被略去，其余项目按各自权重分摊全部分数。',
 
         'hud.quit': '✕ 菜单',
         'hud.quitTitle': '结束游戏并返回菜单',
