@@ -487,7 +487,7 @@ it is not optional.
 | `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
 | `js/i18n.js` `sum.legend` ×4 | the legend says terms can be dropped and the rest share the score | rendered text in the summary |
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
-| `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite — every step was executed locally first | commands run here |
+| `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite, and fail a build whose changed script kept its `?v=` tag | **run #1 on a real runner: `test` job success in 196 s, all steps green** (`88ee61c`, `ubuntu-latest`); `browser` job skipped by design until schedule/dispatch |
 
 Suite state: **333/333 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests); the visual suite and the trust-boundary suite each
 run **three times, green every time**. The trust-boundary suite was also watched failing,
@@ -506,12 +506,20 @@ GPUs; the direction is the part that holds.
    `attack_target` still steers on the target's live coordinates indefinitely, so a unit runs
    down an enemy it stopped seeing several turns ago. Needs last-known-position memory plus a
    give-up window; the window is a gameplay decision and should be reviewed as one.
-2. **S3 — the browser job has never run on a runner.** `.github/workflows/ci.yml` now has
-   two jobs: the push job (`node --check` over every shipped file, both JSON contracts,
-   `node --test`) and a nightly `workflow_dispatch` job for the two Playwright suites, with
-   the screenshots kept as an artefact. They are off push because each downloads a browser
-   and a check that is red for network reasons trains people to ignore it — but the commands
-   are verified locally and the runner is not. Watch the first scheduled run.
+2. **S3 — half closed: the push job has now run green on a real runner.** Run #1 of `ci`,
+   triggered by the first push to the fork's `main` (`88ee61c`), completed on `ubuntu-latest` in
+   196 s with every step passing: the syntax sweep over all shipped scripts, both JSON contracts,
+   `node --test`, and — the step that had only ever been exercised on my own machine —
+   *"Cache-busting tags moved with the files they version"*, which on that push compared
+   `ffe9e34..88ee61c`, saw 24 commits' worth of bumped tags, and passed. The second job,
+   `browser`, reported `skipped`, which is correct: it is gated to `schedule` and
+   `workflow_dispatch` on purpose, because each run downloads a ~170 MB browser and a check that
+   goes red on a CDN hiccup trains people to ignore it.
+   What is still unverified: **the browser job itself on a runner** — first scheduled attempt
+   04:17 UTC, or on demand from Actions → *ci* → *Run workflow*. Note for whoever follows this: a
+   fork pushes fine with a read-and-write Contents token, but GitHub refuses any token push that
+   creates or updates a file under `.github/workflows/` without the **Workflows** permission —
+   which is the one permission this repo's own CI work requires you to have granted.
    Now enforced in CI, the one place it can be: the push job gained a step reading
    `index.html` on the base commit and on the head, so a shipped script whose bytes changed
    without its `?v=` moving fails the build, as does a change that leaves `js/game.js`'s tag
