@@ -487,6 +487,7 @@ it is not optional.
 | `tests/elimination.test.cjs` | loads the real tables instead of stubbing them — the old stubs were only possible because the predicate carried its own copy | 7 tests, unchanged assertions |
 | `js/i18n.js` `sum.legend` ×4 | the legend says terms can be dropped and the rest share the score | rendered text in the summary |
 | `index.html` | `?v=` → 908 for the first pass's seven scripts, → 909 (+ stylesheet 837) for the context-loss change, → 910 for the scoring pass | repo convention held |
+| `.github/workflows/ci.yml` | both jobs pin `ubuntu-24.04`; checkout, setup-node and upload-artifact move `v4 → v7` | run #1's annotations: `node20` deprecation (all three declared it; v7 declares `node24`) and the `ubuntu-latest` → 26.04 rollout from 19 Oct 2026 |
 | `.github/workflows/ci.yml` (new) | syntax-check every shipped file, parse both JSON contracts, run the suite, and fail a build whose changed script kept its `?v=` tag | **run #1 on a real runner: `test` job success in 196 s, all steps green** (`88ee61c`, `ubuntu-latest`); `browser` job skipped by design until schedule/dispatch |
 
 Suite state: **333/333 unit tests**, and the browser suites now also pass against the real GPU (see *Reproducing*) — (259 before the pass; +3 engine guard, +6 scoring, +5 elimination, +3 redaction, +4 classifier, +2 net from retargeting the refereeing tests); the visual suite and the trust-boundary suite each
@@ -515,11 +516,27 @@ GPUs; the direction is the part that holds.
    `browser`, reported `skipped`, which is correct: it is gated to `schedule` and
    `workflow_dispatch` on purpose, because each run downloads a ~170 MB browser and a check that
    goes red on a CDN hiccup trains people to ignore it.
-   What is still unverified: **the browser job itself on a runner** — first scheduled attempt
-   04:17 UTC, or on demand from Actions → *ci* → *Run workflow*. Note for whoever follows this: a
-   fork pushes fine with a read-and-write Contents token, but GitHub refuses any token push that
-   creates or updates a file under `.github/workflows/` without the **Workflows** permission —
-   which is the one permission this repo's own CI work requires you to have granted.
+   What is still unverified: **the browser job itself on a runner.** It cannot be left to the
+   schedule, and that is not obvious: GitHub's own docs say *"When a public repository is forked,
+   scheduled workflows are disabled by default"*, and that a public repository has them
+   auto-disabled again after 60 days without activity. So a fork inherits a workflow file whose
+   `schedule:` trigger does nothing until someone enables it (Actions → `ci` in the left sidebar →
+   Enable workflow); until then the only way to see the suites run there is Actions → *Run
+   workflow*. The `skipped` the `browser` job reports on every push is correct and by design.
+   Run #1's two annotations were also both real and are now fixed: every `@v4` of checkout,
+   setup-node and upload-artifact declares `using: node20` — deprecated, force-run on Node 24,
+   which is what the warning was about — so they move to `@v7`, which declares `node24`; and
+   `ubuntu-latest` rolls forward to Ubuntu 26.04 beginning 19 October 2026
+   ([runner-images#14748](https://github.com/actions/runner-images/issues/14748)), which for a job
+   whose dependency layer is `playwright install --with-deps` against a pinned Chromium is a change
+   to the thing being measured, so both jobs pin `ubuntu-24.04` instead. The app itself is still
+   tested at `node-version: 22`, matching the README and the development machine; that is the
+   runner's Node being discussed, not the app's.
+   And the lesson that cost an hour: a fork pushes fine with a Contents read-and-write token, but
+   GitHub refuses **any** token push that creates or updates a file under `.github/workflows/`
+   unless the token also has the **Workflows** permission — even for the repo's owner. It surfaces
+   as `! [remote rejected] … (refusing to allow a Personal Access Token to create or update
+   workflow …)`, which reads like an authentication failure and is not one.
    Now enforced in CI, the one place it can be: the push job gained a step reading
    `index.html` on the base commit and on the head, so a shipped script whose bytes changed
    without its `?v=` moving fails the build, as does a change that leaves `js/game.js`'s tag

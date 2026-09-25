@@ -5,6 +5,23 @@ name: ci
 # executed locally before being written here. The one thing that cannot be is the GitHub
 # runner itself, so the first scheduled run of the browser job is that job's real test.
 
+# Pinned environment, deliberately. `ubuntu-latest` moves to Ubuntu 26.04 in a rollout that
+# began 19 October 2026 (actions/runner-images#14748), and the browser job's dependency layer is
+# apt packages installed by `playwright install --with-deps` against a pinned Chromium — a base
+# image change is a change to what is being measured, which is the one thing a benchmark cannot
+# absorb silently. 24.04 is the image the suites passed on, locally and on run #1.
+#
+# Action majors: GitHub warned on run #1 because every @v4 of checkout, setup-node and
+# upload-artifact declares `using: node20`, a runtime now deprecated and being force-run on
+# Node 24. The v7 line declares node24. That is the runner's own Node; the app under test is still
+# installed at node-version: 22 below, matching the README and the development machine.
+#
+# Fork caveat, learned the hard way: GitHub disables SCHEDULED workflows by default on a fork of a
+# public repository, and disables them again in a public repo after 60 days without activity. So
+# the nightly below will NOT fire on a fork until you enable it — Actions, then `ci` in the left
+# sidebar, then Enable workflow. Until then: Actions → ci → Run workflow (the job skips on push and
+# on pull_request by design).
+
 on:
   push:
   pull_request:
@@ -16,9 +33,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history, because the tag check below has to read index.html as it stood on the
           # base commit. Depth 1 (the default) would make every comparison against a base fail
@@ -62,7 +79,7 @@ jobs:
           [ "$fail" = 0 ] && echo "every changed script carries a new tag"
           exit "$fail"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -96,12 +113,12 @@ jobs:
   # both suites already pass themselves). The runner is the one part that cannot be exercised
   # locally, so the first scheduled run is the real test of this job.
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -123,7 +140,7 @@ jobs:
 
       - name: Keep the screenshots whatever happened
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-screenshots
           path: ${{ runner.temp }}/qa
