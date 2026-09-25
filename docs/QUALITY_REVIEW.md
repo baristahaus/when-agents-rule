@@ -516,6 +516,13 @@ GPUs; the direction is the part that holds.
    `browser`, reported `skipped`, which is correct: it is gated to `schedule` and
    `workflow_dispatch` on purpose, because each run downloads a ~170 MB browser and a check that
    goes red on a CDN hiccup trains people to ignore it.
+   Run #2 (`5ec8e31`, the push carrying the pins below) then passed in 159 s with both jobs on
+   `ubuntu-24.04` and `checkout@v7`/`setup-node@v7` in the step list, so the pinned image and the
+   new majors are verified rather than assumed — including the tag step's other branch, since that
+   push changed no `js/` file and took the "no shipped scripts changed" path on a real runner.
+   (The annotations themselves cannot be read anonymously — the endpoint answers 404 — so the
+   disappearance of the `node20` warning rests on the v7 `action.yml` files declaring `node24`,
+   not on observation.)
    What is still unverified: **the browser job itself on a runner.** It cannot be left to the
    schedule, and that is not obvious: GitHub's own docs say *"When a public repository is forked,
    scheduled workflows are disabled by default"*, and that a public repository has them
