@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# The core's build tree: `cargo build` leaves hundreds of MB of incremental-compile
+# artifacts under target/. A source `git add -A` would publish all of it to a public
+# remote, so it is listed rather than merely left untracked.
+target/
+
 # Local Claude / editor config (may contain machine-specific paths & permissions)
 .claude/
 .vscode/
