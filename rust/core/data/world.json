@@ -1,0 +1,1695 @@
+{
+  "ages": [
+    "stone",
+    "neolithic",
+    "bronze",
+    "iron"
+  ],
+  "ageCosts": {
+    "neolithic": {
+      "food": 1000,
+      "wood": 800,
+      "stone": 0,
+      "gold": 0
+    },
+    "bronze": {
+      "food": 2000,
+      "wood": 1500,
+      "stone": 400,
+      "gold": 200
+    },
+    "iron": {
+      "food": 4000,
+      "wood": 3000,
+      "stone": 1000,
+      "gold": 600
+    }
+  },
+  "maxPopulationCap": 100,
+  "buildingDefs": {
+    "town_center": {
+      "id": "town_center",
+      "name": "Dorfzentrum",
+      "cost": {
+        "food": 100,
+        "wood": 100,
+        "stone": 100,
+        "gold": 100
+      },
+      "health": 1000,
+      "type": "economic",
+      "popBonus": 10,
+      "canTrain": true,
+      "trainOptions": [
+        "worker"
+      ],
+      "canResearch": true,
+      "researchOptions": [],
+      "requiredAge": "stone",
+      "description": "Zentrale Gebäude - baut Dorfbewohner, forscht Altsteinzeit-Technologien",
+      "buildTime": 15000
+    },
+    "house": {
+      "id": "house",
+      "name": "Haus",
+      "cost": {
+        "food": 30,
+        "wood": 20,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 300,
+      "type": "economic",
+      "popBonus": 5,
+      "requiredAge": "stone",
+      "requiresTech": "house",
+      "description": "Erhöht das Bevölkerungslimit um 5 (benötigt Forschung: Haus)",
+      "buildTime": 5000
+    },
+    "temple": {
+      "id": "temple",
+      "name": "Tempel",
+      "cost": {
+        "food": 100,
+        "wood": 100,
+        "stone": 150,
+        "gold": 100
+      },
+      "health": 800,
+      "type": "religious",
+      "canTrain": true,
+      "trainOptions": [
+        "priest"
+      ],
+      "canResearch": true,
+      "requiredAge": "bronze",
+      "description": "Ausbildung von Priestern",
+      "buildTime": 20000
+    },
+    "barracks": {
+      "id": "barracks",
+      "name": "Kaserne",
+      "cost": {
+        "food": 50,
+        "wood": 150,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 800,
+      "type": "military",
+      "canTrain": true,
+      "trainOptions": [],
+      "requiredAge": "stone",
+      "requiresTech": "barracks",
+      "description": "Ausbildung von Infanterie (benötigt Forschung: Kaserne)",
+      "buildTime": 15000
+    },
+    "stable": {
+      "id": "stable",
+      "name": "Stall",
+      "cost": {
+        "food": 100,
+        "wood": 100,
+        "stone": 0,
+        "gold": 50
+      },
+      "health": 700,
+      "type": "military",
+      "canTrain": true,
+      "trainOptions": [],
+      "requiredAge": "neolithic",
+      "requiresTech": "horseback",
+      "description": "Ausbildung von Kavallerie",
+      "buildTime": 15000
+    },
+    "archery_range": {
+      "id": "archery_range",
+      "name": "Bogenschützenstand",
+      "cost": {
+        "food": 50,
+        "wood": 100,
+        "stone": 50,
+        "gold": 0
+      },
+      "health": 600,
+      "type": "military",
+      "canTrain": true,
+      "trainOptions": [],
+      "requiredAge": "neolithic",
+      "requiresTech": "longbow",
+      "description": "Ausbildung von Bogenschützen (benötigt Langbogen)",
+      "buildTime": 12000
+    },
+    "academy": {
+      "id": "academy",
+      "name": "Akademie",
+      "cost": {
+        "food": 100,
+        "wood": 100,
+        "stone": 100,
+        "gold": 50
+      },
+      "health": 700,
+      "type": "economic",
+      "canResearch": true,
+      "researchOptions": [],
+      "requiredAge": "neolithic",
+      "requiresTech": "academy",
+      "description": "Forschung fortgeschrittener Technologien",
+      "buildTime": 15000
+    },
+    "farm": {
+      "id": "farm",
+      "name": "Farm",
+      "cost": {
+        "food": 50,
+        "wood": 50,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 400,
+      "type": "economic",
+      "requiredAge": "stone",
+      "requiresTech": "farm",
+      "description": "Produziert Nahrung (benötigt Forschung: Farm)",
+      "buildTime": 8000
+    },
+    "tower": {
+      "id": "tower",
+      "name": "Wachtturm",
+      "cost": {
+        "food": 50,
+        "wood": 50,
+        "stone": 100,
+        "gold": 0
+      },
+      "health": 600,
+      "type": "defense",
+      "attack": 10,
+      "range": 18,
+      "requiredAge": "stone",
+      "description": "Verteidigungsturm",
+      "buildTime": 12000
+    },
+    "market": {
+      "id": "academy",
+      "name": "Akademie",
+      "cost": {
+        "food": 100,
+        "wood": 100,
+        "stone": 100,
+        "gold": 50
+      },
+      "health": 700,
+      "type": "economic",
+      "canResearch": true,
+      "researchOptions": [],
+      "requiredAge": "neolithic",
+      "requiresTech": "academy",
+      "description": "Forschung fortgeschrittener Technologien",
+      "buildTime": 15000
+    }
+  },
+  "buildingTrainTiers": {
+    "barracks": {
+      "stone": [
+        "militia"
+      ],
+      "neolithic": [
+        "militia"
+      ],
+      "bronze": [
+        "militia",
+        "warrior"
+      ],
+      "iron": [
+        "militia",
+        "warrior",
+        "champion"
+      ]
+    },
+    "stable": {
+      "neolithic": [
+        "scout_cavalry"
+      ],
+      "bronze": [
+        "scout_cavalry",
+        "cavalry"
+      ],
+      "iron": [
+        "scout_cavalry",
+        "cavalry",
+        "heavy_cavalry"
+      ]
+    },
+    "archery_range": {
+      "neolithic": [
+        "archer"
+      ],
+      "bronze": [
+        "archer"
+      ],
+      "iron": [
+        "archer",
+        "crossbowman",
+        "elite_archer"
+      ]
+    }
+  },
+  "unitDefs": {
+    "worker": {
+      "id": "worker",
+      "name": "Dorfbewohner",
+      "cost": {
+        "food": 50,
+        "wood": 0,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 40,
+      "speed": 1,
+      "attack": 3,
+      "range": 0.5,
+      "type": "worker",
+      "harvestRate": 1,
+      "buildSpeed": 1,
+      "description": "Baut Gebäude und sammelt Ressourcen"
+    },
+    "militia": {
+      "id": "militia",
+      "name": "Miliz",
+      "cost": {
+        "food": 50,
+        "wood": 20,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 70,
+      "speed": 1.1,
+      "attack": 7,
+      "range": 0.5,
+      "type": "infantry",
+      "tier": "stone",
+      "description": "Grundlegende Infanterieeinheit"
+    },
+    "warrior": {
+      "id": "warrior",
+      "name": "Krieger",
+      "cost": {
+        "food": 80,
+        "wood": 0,
+        "stone": 30,
+        "gold": 20
+      },
+      "health": 120,
+      "speed": 1,
+      "attack": 12,
+      "range": 0.5,
+      "type": "infantry",
+      "tier": "bronze",
+      "description": "Starker Infanterist"
+    },
+    "champion": {
+      "id": "champion",
+      "name": "Champion",
+      "cost": {
+        "food": 150,
+        "wood": 50,
+        "stone": 50,
+        "gold": 100
+      },
+      "health": 200,
+      "speed": 1.5,
+      "attack": 18,
+      "range": 0.5,
+      "type": "infantry",
+      "tier": "iron",
+      "description": "Eliteeinheit"
+    },
+    "archer": {
+      "id": "archer",
+      "name": "Bogenschütze",
+      "cost": {
+        "food": 60,
+        "wood": 30,
+        "stone": 0,
+        "gold": 0
+      },
+      "health": 40,
+      "speed": 1,
+      "attack": 6,
+      "range": 12,
+      "type": "ranged",
+      "tier": "neolithic",
+      "description": "Fernkampf-Einheit"
+    },
+    "crossbowman": {
+      "id": "crossbowman",
+      "name": "Armbrustschütze",
+      "cost": {
+        "food": 100,
+        "wood": 40,
+        "stone": 20,
+        "gold": 30
+      },
+      "health": 60,
+      "speed": 0.9,
+      "attack": 12,
+      "range": 13.5,
+      "type": "ranged",
+      "tier": "iron",
+      "description": "Starker Fernkämpfer mit Armbrust"
+    },
+    "elite_archer": {
+      "id": "elite_archer",
+      "name": "Elite-Bogenschütze",
+      "cost": {
+        "food": 150,
+        "wood": 60,
+        "stone": 30,
+        "gold": 50
+      },
+      "health": 80,
+      "speed": 1.1,
+      "attack": 16,
+      "range": 15,
+      "type": "ranged",
+      "tier": "iron",
+      "description": "Elite Fernkampf-Einheit"
+    },
+    "scout_cavalry": {
+      "id": "scout_cavalry",
+      "name": "Aufklärungskavallerie",
+      "cost": {
+        "food": 100,
+        "wood": 0,
+        "stone": 0,
+        "gold": 30
+      },
+      "health": 100,
+      "speed": 2.2,
+      "attack": 8,
+      "range": 0.5,
+      "type": "cavalry",
+      "tier": "neolithic",
+      "description": "Schnelle Kavallerieeinheit"
+    },
+    "cavalry": {
+      "id": "cavalry",
+      "name": "Reiter",
+      "cost": {
+        "food": 120,
+        "wood": 0,
+        "stone": 0,
+        "gold": 50
+      },
+      "health": 140,
+      "speed": 2,
+      "attack": 12,
+      "range": 0.5,
+      "type": "cavalry",
+      "tier": "bronze",
+      "description": "Schwerer Reiter"
+    },
+    "heavy_cavalry": {
+      "id": "heavy_cavalry",
+      "name": "Schwere Kavallerie",
+      "cost": {
+        "food": 180,
+        "wood": 0,
+        "stone": 50,
+        "gold": 80
+      },
+      "health": 200,
+      "speed": 1.8,
+      "attack": 18,
+      "range": 0.5,
+      "type": "cavalry",
+      "tier": "iron",
+      "description": "Elite Kavallerie"
+    },
+    "priest": {
+      "id": "priest",
+      "name": "Priester",
+      "cost": {
+        "food": 50,
+        "wood": 0,
+        "stone": 0,
+        "gold": 30
+      },
+      "health": 60,
+      "speed": 1,
+      "attack": 3,
+      "range": 10.5,
+      "type": "support",
+      "tier": "bronze",
+      "description": "Heilt andere Einheiten in der Nähe"
+    }
+  },
+  "civilizations": {
+    "egyptian": {
+      "name": "Ägypter",
+      "enName": "Egyptians",
+      "color": 16766720,
+      "bonuses": "{\"harvest\":1,\"techCostMult\":1}",
+      "buildingHealthMultiplier": 1.5,
+      "excludedUnits": [
+        "cavalry",
+        "heavy_cavalry"
+      ],
+      "uniqueUnits": [
+        {
+          "id": "priest",
+          "name": "Priester",
+          "cost": {
+            "food": 50,
+            "wood": 0,
+            "stone": 0,
+            "gold": 30
+          },
+          "health": 60,
+          "speed": 1.2,
+          "attack": 3,
+          "range": 10.5,
+          "type": "support",
+          "tier": "bronze",
+          "description": "Heilt andere Einheiten in der Nähe"
+        },
+        {
+          "id": "slinger",
+          "name": "Schleuderer",
+          "cost": {
+            "food": 60,
+            "wood": 20,
+            "stone": 0,
+            "gold": 0
+          },
+          "health": 45,
+          "speed": 1,
+          "attack": 6,
+          "range": 12,
+          "type": "ranged",
+          "tier": "neolithic",
+          "trainAt": "archery_range",
+          "description": "Starker Bogenschütze"
+        },
+        {
+          "id": "horse_carriage",
+          "name": "Pferdewagen",
+          "cost": {
+            "food": 60,
+            "wood": 20,
+            "stone": 40,
+            "gold": 40
+          },
+          "health": 100,
+          "speed": 2,
+          "attack": 8,
+          "range": 2,
+          "type": "cavalry",
+          "tier": "bronze",
+          "trainAt": "stable",
+          "description": "Speerkämpfer im Wagen hinter dem Pferd"
+        }
+      ],
+      "uniqueBuildings": [
+        {
+          "id": "pyramid",
+          "name": "Pyramide",
+          "cost": {
+            "food": 4800,
+            "wood": 4800,
+            "stone": 4250,
+            "gold": 2650
+          },
+          "health": 1500,
+          "type": "wonder",
+          "requiredAge": "iron",
+          "buildTime": 60000,
+          "description": "Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!"
+        }
+      ],
+      "techTree": {
+        "house": {
+          "name": "Haus",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Haus-Bau frei (+5 Bevölkerung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "house"
+            ]
+          }
+        },
+        "farm": {
+          "name": "Farm",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Farm-Bau frei (Nahrungsproduktion)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "farm"
+            ]
+          }
+        },
+        "barracks": {
+          "name": "Kaserne",
+          "cost": {
+            "food": 100,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Kaserne-Bau frei (Infanterie-Ausbildung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "barracks"
+            ]
+          }
+        },
+        "agriculture": {
+          "name": "Landwirtschaft",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [
+            "farm"
+          ],
+          "description": "Dorfbewohner ernten +25% mehr",
+          "researchTime": 15000,
+          "bonus": {
+            "harvestRate": 0.25
+          },
+          "appliesTo": "worker"
+        },
+        "pottery": {
+          "name": "Töpferei",
+          "cost": {
+            "food": 80,
+            "wood": 40,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Dorfbewohner bauen +25% schneller",
+          "researchTime": 15000,
+          "bonus": {
+            "buildSpeed": 0.25
+          },
+          "appliesTo": "worker"
+        },
+        "longbow": {
+          "name": "Langbogen",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Bogenschützenstand frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "archery_range"
+            ]
+          }
+        },
+        "academy": {
+          "name": "Akademie",
+          "cost": {
+            "food": 200,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet die Akademie frei für weitere Forschung",
+          "unlocks": {
+            "buildings": [
+              "academy"
+            ]
+          }
+        },
+        "mining": {
+          "name": "Bergbau",
+          "cost": {
+            "food": 50,
+            "wood": 50,
+            "stone": 50,
+            "gold": 0
+          },
+          "researchAt": "academy",
+          "requiredAge": "neolithic",
+          "requires": [
+            "academy"
+          ],
+          "description": "Steinabbau +25% effizienter",
+          "researchTime": 20000,
+          "bonus": {
+            "harvestRate": 0.25
+          },
+          "appliesTo": "worker"
+        },
+        "archery": {
+          "name": "Bogenschützen-Ausbildung",
+          "cost": {
+            "food": 100,
+            "wood": 100,
+            "stone": 0,
+            "gold": 50
+          },
+          "researchAt": "academy",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Bogenschützen +2 Angriff",
+          "researchTime": 20000,
+          "bonus": {
+            "attack": 2
+          },
+          "appliesTo": "ranged"
+        },
+        "bronze_armor": {
+          "name": "Bronzerüstung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 150,
+            "gold": 100
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Alle Militäreinheiten +15 Gesundheit",
+          "researchTime": 25000,
+          "bonus": {
+            "health": 15
+          },
+          "appliesTo": "all_military"
+        },
+        "horseback": {
+          "name": "Pferdezucht",
+          "cost": {
+            "food": 150,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet Stall und Kundschafter frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "stable"
+            ],
+            "unitTypes": [
+              "horse_carriage"
+            ]
+          }
+        },
+        "healing": {
+          "name": "Heilkunde",
+          "cost": {
+            "food": 150,
+            "wood": 0,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "temple",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Stellt die volle Heilkraft der Priester wieder her",
+          "researchTime": 20000,
+          "bonus": {
+            "healPower": 0.2
+          }
+        },
+        "iron_working": {
+          "name": "Eisenverarbeitung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 200,
+            "gold": 200
+          },
+          "researchAt": "academy",
+          "requiredAge": "iron",
+          "requires": [
+            "bronze_armor"
+          ],
+          "description": "Alle Militäreinheiten +3 Angriff",
+          "researchTime": 30000,
+          "bonus": {
+            "attack": 3
+          },
+          "appliesTo": "all_military"
+        }
+      }
+    },
+    "greek": {
+      "name": "Griechen",
+      "enName": "Greeks",
+      "color": 4286945,
+      "bonuses": "{\"harvest\":1,\"techCostMult\":1}",
+      "buildingHealthMultiplier": 1.3,
+      "excludedUnits": [
+        "cavalry",
+        "heavy_cavalry"
+      ],
+      "uniqueUnits": [
+        {
+          "id": "hoplite",
+          "name": "Hoplite",
+          "cost": {
+            "food": 80,
+            "wood": 0,
+            "stone": 50,
+            "gold": 30
+          },
+          "health": 150,
+          "speed": 0.9,
+          "attack": 10,
+          "range": 1,
+          "type": "infantry",
+          "tier": "neolithic",
+          "trainAt": "barracks",
+          "description": "Schwerer Infanterist mit Schild"
+        },
+        {
+          "id": "phalanx",
+          "name": "Phalanx",
+          "cost": {
+            "food": 60,
+            "wood": 0,
+            "stone": 40,
+            "gold": 20
+          },
+          "health": 100,
+          "speed": 0.8,
+          "attack": 8,
+          "range": 2,
+          "type": "infantry",
+          "tier": "bronze",
+          "trainAt": "barracks",
+          "description": "Speerträger, stark gegen Kavallerie"
+        }
+      ],
+      "uniqueBuildings": [
+        {
+          "id": "akropolis",
+          "name": "Akropolis",
+          "cost": {
+            "food": 4500,
+            "wood": 4500,
+            "stone": 4000,
+            "gold": 2500
+          },
+          "health": 1500,
+          "type": "wonder",
+          "requiredAge": "iron",
+          "buildTime": 60000,
+          "description": "Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!"
+        }
+      ],
+      "techTree": {
+        "house": {
+          "name": "Haus",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Haus-Bau frei (+5 Bevölkerung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "house"
+            ]
+          }
+        },
+        "farm": {
+          "name": "Farm",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Farm-Bau frei (Nahrungsproduktion)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "farm"
+            ]
+          }
+        },
+        "barracks": {
+          "name": "Kaserne",
+          "cost": {
+            "food": 100,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Kaserne-Bau frei (Infanterie-Ausbildung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "barracks"
+            ]
+          }
+        },
+        "horseback": {
+          "name": "Pferdezucht",
+          "cost": {
+            "food": 150,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet Stall und Kundschafter frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "stable"
+            ]
+          }
+        },
+        "falx": {
+          "name": "Falx-Schwerter",
+          "cost": {
+            "food": 100,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [
+            "barracks"
+          ],
+          "description": "Infanterie +3 Angriff",
+          "researchTime": 15000,
+          "bonus": {
+            "attack": 3
+          },
+          "appliesTo": "infantry"
+        },
+        "farsight": {
+          "name": "Weitblick",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 30
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Alle Einheiten +20% Sichtweite",
+          "researchTime": 20000,
+          "bonus": {
+            "visionRange": 0.2
+          },
+          "appliesTo": "all_units"
+        },
+        "longbow": {
+          "name": "Langbogen",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Bogenschützenstand frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "archery_range"
+            ]
+          }
+        },
+        "academy": {
+          "name": "Akademie",
+          "cost": {
+            "food": 200,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet die Akademie frei für weitere Forschung",
+          "researchTime": 20000,
+          "unlocks": {
+            "buildings": [
+              "academy"
+            ]
+          }
+        },
+        "philosophy": {
+          "name": "Philosophie",
+          "cost": {
+            "food": 200,
+            "wood": 0,
+            "stone": 0,
+            "gold": 150
+          },
+          "researchAt": "academy",
+          "requiredAge": "neolithic",
+          "requires": [
+            "academy"
+          ],
+          "description": "Alle Militäreinheiten +10% Gesundheit (+10 HP)",
+          "researchTime": 20000,
+          "bonus": {
+            "health": 10
+          },
+          "appliesTo": "all_military"
+        },
+        "democracy": {
+          "name": "Demokratie",
+          "cost": {
+            "food": 300,
+            "wood": 0,
+            "stone": 0,
+            "gold": 200
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [
+            "philosophy"
+          ],
+          "description": "Dorfzentrum -50% Ausbildzeit",
+          "researchTime": 25000,
+          "bonus": {
+            "trainSpeed": 0.5
+          },
+          "appliesTo": "town_center"
+        },
+        "phalanx_armor": {
+          "name": "Phalanx-Rüstung",
+          "cost": {
+            "food": 0,
+            "wood": 50,
+            "stone": 150,
+            "gold": 100
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Infanterie +20 Gesundheit",
+          "researchTime": 25000,
+          "bonus": {
+            "health": 20
+          },
+          "appliesTo": "infantry"
+        },
+        "healing": {
+          "name": "Heilkunde",
+          "cost": {
+            "food": 150,
+            "wood": 0,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "temple",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Stellt die volle Heilkraft der Priester wieder her",
+          "researchTime": 20000,
+          "bonus": {
+            "healPower": 0.2
+          }
+        },
+        "iron_working": {
+          "name": "Eisenverarbeitung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 200,
+            "gold": 200
+          },
+          "researchAt": "academy",
+          "requiredAge": "iron",
+          "requires": [
+            "phalanx_armor"
+          ],
+          "description": "Alle Militäreinheiten +3 Angriff",
+          "researchTime": 30000,
+          "bonus": {
+            "attack": 3
+          },
+          "appliesTo": "all_military"
+        }
+      }
+    },
+    "persian": {
+      "name": "Perser",
+      "enName": "Persians",
+      "color": 16737095,
+      "bonuses": "{\"harvest\":1.2,\"techCostMult\":1}",
+      "buildingHealthMultiplier": 1,
+      "excludedUnits": [],
+      "uniqueUnits": [
+        {
+          "id": "archer",
+          "name": "Persischer Bogenschütze",
+          "cost": {
+            "food": 70,
+            "wood": 30,
+            "stone": 0,
+            "gold": 0
+          },
+          "health": 50,
+          "speed": 1.1,
+          "attack": 7,
+          "range": 15,
+          "type": "ranged",
+          "tier": "neolithic",
+          "description": "Schneller Bogenschütze"
+        },
+        {
+          "id": "cavalry",
+          "name": "Kavallerist",
+          "cost": {
+            "food": 110,
+            "wood": 0,
+            "stone": 0,
+            "gold": 40
+          },
+          "health": 140,
+          "speed": 2,
+          "attack": 12,
+          "range": 1,
+          "type": "cavalry",
+          "tier": "bronze",
+          "description": "Schneller Reiter"
+        },
+        {
+          "id": "heavy_cavalry",
+          "name": "Kataphrakt",
+          "cost": {
+            "food": 160,
+            "wood": 0,
+            "stone": 40,
+            "gold": 70
+          },
+          "health": 200,
+          "speed": 1.8,
+          "attack": 18,
+          "range": 1,
+          "type": "cavalry",
+          "tier": "iron",
+          "description": "Gepanzerter Reiter, Persiens Elite"
+        }
+      ],
+      "uniqueBuildings": [
+        {
+          "id": "firetemple",
+          "name": "Feuertempel",
+          "cost": {
+            "food": 4500,
+            "wood": 4500,
+            "stone": 4000,
+            "gold": 2500
+          },
+          "health": 1500,
+          "type": "wonder",
+          "requiredAge": "iron",
+          "buildTime": 60000,
+          "description": "Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!"
+        }
+      ],
+      "techTree": {
+        "house": {
+          "name": "Haus",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Haus-Bau frei (+5 Bevölkerung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "house"
+            ]
+          }
+        },
+        "farm": {
+          "name": "Farm",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Farm-Bau frei (Nahrungsproduktion)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "farm"
+            ]
+          }
+        },
+        "barracks": {
+          "name": "Kaserne",
+          "cost": {
+            "food": 100,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Kaserne-Bau frei (Infanterie-Ausbildung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "barracks"
+            ]
+          }
+        },
+        "horseback": {
+          "name": "Pferdezucht",
+          "cost": {
+            "food": 150,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet Stall und Kavallerie frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "stable"
+            ]
+          }
+        },
+        "longbow": {
+          "name": "Langbogen",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Bogenschützenstand frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "archery_range"
+            ]
+          }
+        },
+        "academy": {
+          "name": "Akademie",
+          "cost": {
+            "food": 200,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet die Akademie frei für weitere Forschung",
+          "researchTime": 20000,
+          "unlocks": {
+            "buildings": [
+              "academy"
+            ]
+          }
+        },
+        "cavalry_training": {
+          "name": "Kavallerie-Ausbildung",
+          "cost": {
+            "food": 150,
+            "wood": 50,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "academy",
+          "requiredAge": "neolithic",
+          "requires": [
+            "horseback"
+          ],
+          "description": "Kavallerie +2 Angriff, +10 Gesundheit",
+          "researchTime": 20000,
+          "bonus": {
+            "attack": 2,
+            "health": 10
+          },
+          "appliesTo": "cavalry"
+        },
+        "cavalry_armor": {
+          "name": "Kavallerie-Rüstung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 200,
+            "gold": 150
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [
+            "cavalry_training"
+          ],
+          "description": "Kavallerie +25 Gesundheit",
+          "researchTime": 25000,
+          "bonus": {
+            "health": 25
+          },
+          "appliesTo": "cavalry"
+        },
+        "immortals": {
+          "name": "Unsterbliche",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 150,
+            "gold": 100
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Alle Militäreinheiten +15 Gesundheit",
+          "researchTime": 25000,
+          "bonus": {
+            "health": 15
+          },
+          "appliesTo": "all_military"
+        },
+        "healing": {
+          "name": "Heilkunde",
+          "cost": {
+            "food": 150,
+            "wood": 0,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "temple",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Stellt die volle Heilkraft der Priester wieder her",
+          "researchTime": 20000,
+          "bonus": {
+            "healPower": 0.2
+          }
+        },
+        "archery": {
+          "name": "Bogenschützen-Ausbildung",
+          "cost": {
+            "food": 100,
+            "wood": 100,
+            "stone": 0,
+            "gold": 50
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Bogenschützen +2 Angriff",
+          "researchTime": 25000,
+          "bonus": {
+            "attack": 2
+          },
+          "appliesTo": "ranged"
+        },
+        "siege": {
+          "name": "Belagerungswaffen",
+          "cost": {
+            "food": 0,
+            "wood": 200,
+            "stone": 150,
+            "gold": 200
+          },
+          "researchAt": "academy",
+          "requiredAge": "iron",
+          "requires": [
+            "archery"
+          ],
+          "description": "Bogenschützen +2 Reichweite, +3 Angriff",
+          "researchTime": 30000,
+          "bonus": {
+            "range": 2,
+            "attack": 3
+          },
+          "appliesTo": "ranged"
+        }
+      }
+    },
+    "yamato": {
+      "name": "Yamato",
+      "enName": "Yamato",
+      "color": 16738740,
+      "bonuses": "{\"harvest\":1,\"techCostMult\":0.7}",
+      "buildingHealthMultiplier": 1,
+      "excludedUnits": [],
+      "uniqueUnits": [
+        {
+          "id": "samurai",
+          "name": "Samurai",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 50
+          },
+          "health": 130,
+          "speed": 1.3,
+          "attack": 14,
+          "range": 1,
+          "type": "infantry",
+          "tier": "bronze",
+          "trainAt": "barracks",
+          "description": "Elitewarrior mit starkem Schwert"
+        },
+        {
+          "id": "archer_ship",
+          "name": "Bogenschiffs",
+          "cost": {
+            "food": 150,
+            "wood": 150,
+            "stone": 0,
+            "gold": 50
+          },
+          "health": 200,
+          "speed": 1.5,
+          "attack": 8,
+          "range": 12,
+          "type": "ranged",
+          "description": "Schiff mit Bogenschützen"
+        }
+      ],
+      "uniqueBuildings": [
+        {
+          "id": "shrine",
+          "name": "Schrein",
+          "cost": {
+            "food": 4500,
+            "wood": 4500,
+            "stone": 4000,
+            "gold": 2500
+          },
+          "health": 1500,
+          "type": "wonder",
+          "requiredAge": "iron",
+          "buildTime": 60000,
+          "description": "Weltwunder - im Bau ~60s, danach 600s halten zum Sieg!"
+        }
+      ],
+      "techTree": {
+        "house": {
+          "name": "Haus",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Haus-Bau frei (+5 Bevölkerung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "house"
+            ]
+          }
+        },
+        "farm": {
+          "name": "Farm",
+          "cost": {
+            "food": 100,
+            "wood": 50,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Farm-Bau frei (Nahrungsproduktion)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "farm"
+            ]
+          }
+        },
+        "barracks": {
+          "name": "Kaserne",
+          "cost": {
+            "food": 100,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Kaserne-Bau frei (Infanterie-Ausbildung)",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "barracks"
+            ]
+          }
+        },
+        "bushido": {
+          "name": "Bushido",
+          "cost": {
+            "food": 150,
+            "wood": 0,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [
+            "barracks"
+          ],
+          "description": "Alle Militäreinheiten +15% Angriff (+2 ATK)",
+          "researchTime": 15000,
+          "bonus": {
+            "attack": 2
+          },
+          "appliesTo": "all_military"
+        },
+        "healing": {
+          "name": "Heilkunde",
+          "cost": {
+            "food": 150,
+            "wood": 0,
+            "stone": 0,
+            "gold": 100
+          },
+          "researchAt": "temple",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Stellt die volle Heilkraft der Priester wieder her",
+          "researchTime": 20000,
+          "bonus": {
+            "healPower": 0.2
+          }
+        },
+        "speed": {
+          "name": "Schnelle Hände",
+          "cost": {
+            "food": 100,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Dorfbewohner +20% Bewegungsgeschwindigkeit",
+          "researchTime": 15000,
+          "bonus": {
+            "speed": 0.2
+          },
+          "appliesTo": "worker"
+        },
+        "longbow": {
+          "name": "Langbogen",
+          "cost": {
+            "food": 50,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "stone",
+          "requires": [],
+          "description": "Schaltet Bogenschützenstand frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "archery_range"
+            ]
+          }
+        },
+        "academy": {
+          "name": "Akademie",
+          "cost": {
+            "food": 200,
+            "wood": 150,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet die Akademie frei für weitere Forschung",
+          "researchTime": 20000,
+          "unlocks": {
+            "buildings": [
+              "academy"
+            ]
+          }
+        },
+        "horseback": {
+          "name": "Pferdezucht",
+          "cost": {
+            "food": 150,
+            "wood": 100,
+            "stone": 0,
+            "gold": 0
+          },
+          "researchAt": "town_center",
+          "requiredAge": "neolithic",
+          "requires": [],
+          "description": "Schaltet Stall und Kavallerie frei",
+          "researchTime": 15000,
+          "unlocks": {
+            "buildings": [
+              "stable"
+            ]
+          }
+        },
+        "armor": {
+          "name": "Schwertrüstung",
+          "cost": {
+            "food": 0,
+            "wood": 100,
+            "stone": 150,
+            "gold": 150
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [
+            "bushido"
+          ],
+          "description": "Infanterie +20 Gesundheit",
+          "bonus": {
+            "health": 20
+          },
+          "appliesTo": "infantry"
+        },
+        "lamellar_armor": {
+          "name": "Lamellenrüstung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 150,
+            "gold": 100
+          },
+          "researchAt": "academy",
+          "requiredAge": "bronze",
+          "requires": [],
+          "description": "Alle Militäreinheiten +15 Gesundheit",
+          "researchTime": 25000,
+          "bonus": {
+            "health": 15
+          },
+          "appliesTo": "all_military"
+        },
+        "iron_working": {
+          "name": "Eisenverarbeitung",
+          "cost": {
+            "food": 0,
+            "wood": 0,
+            "stone": 200,
+            "gold": 200
+          },
+          "researchAt": "academy",
+          "requiredAge": "iron",
+          "requires": [
+            "armor"
+          ],
+          "description": "Alle Militäreinheiten +3 Angriff",
+          "bonus": {
+            "attack": 3
+          },
+          "appliesTo": "all_military"
+        }
+      }
+    }
+  }
+}
