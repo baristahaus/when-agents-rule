@@ -622,6 +622,14 @@ sequence is ordered so that the *riskiest* bet (the core port) is first and the
 | **P3** | **The eyes** — the analyzer (web + CLI), the benchmark runner, the OTel export | the analysis | The **A/B view** renders over a two-match corpus (the diff of the decision, the diff of the outcome); the **causal-chain** view answers "why did this kill happen" from `events.jsonl` alone; the **report** command emits a correct per-match and per-corpus document; the **OTel export** is ingested by a standard APM/LLM-observability tool without a new viewer. |
 | **P4** *(optional)* | **The arena** — the hosted `--serve`, a remote agent seat, the spectator feed, the mobile spectator | the multiplayer | A **match with a seat on two machines and a spectator on a third** runs to a declared outcome; the *canonical* `transcript.jsonl` is **identical** to a local run on the same seed (the server is a transparent authority, not a new game); the spectator feed is read-only and the server's input boundary is the schema-validated command. |
 
+**On the P0 golden diff, in detail.** Its degenerate core is the *golden reference
+match* (spec §3.4): a headless four-seat rule-brain match under fixed conditions,
+shipped as a JSONL stream whose **degenerate invariants are part of the file** — the
+match clock reads 0 on every beat (a byproduct of the recorder's zero wall clock, not a
+bug the port may fix), all four seats end still in the stone age, no seat discovers a
+single tile, and no winner is declared. A port that "fixes" any of those invariants has
+changed the game; the gate measures exactly that it has not.
+
 **Branch hygiene.** The work lands on `rebuild/v2`; `main` stays the shippable **v1**
 and is the *baseline every diff is measured against* — the spec's "a contract verified
 only against one old file is not verified" cuts both ways, so v1 is kept exactly as the

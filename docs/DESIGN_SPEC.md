@@ -16,6 +16,12 @@ design law, and each flag names what an alternate stack may decide freely.
 
 Every claim in this document that pins a number was checked against the shipped code or
 its tests; the cross-references at the end of each section name the source.
+**How this document is kept current.** A living contract: as the rebuild
+transcribes a constant from the reference, or resolves one of §13's open
+questions, the section that owns it is updated in place, and §13's list shrinks.
+Where a pin here conflicts with the reference implementation, the reference wins
+for the byte-identical gate — and the conflict is recorded in §13, never silently
+absorbed.
 
 ---
 
@@ -70,7 +76,7 @@ The vocabulary every other section of this document uses.
 | **Seat** | A slot in a match. Holds one *controller*: a model agent, a rule-based AI, or (campaign) a human. A seat has a civilization, an age, resources, units, buildings, and a body of knowledge. |
 | **Controller** | The thing that decides a seat's turns. For a model: the provider, the model id, the settings, and the standing objective/plan. For a seat, *what decided it* is recorded even after the endpoint dies. |
 | **Civilization** | One of four rule sets (Egyptian, Greek, Persian, Yamato): a stat bonus, unique units, a Wonder, and a tech tree. |
-| **Age (epoch)** | A seat's progression tier: Stone → Neolithic → Bronze → Iron. The ladder is a *wire format* (see §3.4, §12): it is pinned in the state contract and in every published transcript. |
+| **Age (epoch)** | A seat's progression tier: Stone → Neolithic → Bronze → Iron. The ladder is a *wire format* (see §8.2, §12): it is pinned in the state contract and in every published transcript. |
 | **Node** | A finite deposit of one resource type, in a map location, with a remaining amount. Depletes to zero and disappears. |
 | **Building** | A placed structure with an owner, type, position, health, construction state, and activity (producing / researching / advancing / idle). |
 | **Unit** | A mobile entity with an owner, type, position, health, and an action. Every unit occupies one population slot. |
@@ -101,22 +107,37 @@ rules as the game enforces them; the *contract* by which a model is told those r
 
 - A **square world**, 800×800 world units, centred on (0,0); coordinates are (x, z).
   The map is divided into a **7×7 tile grid** for the exploration system — tiles are
-  labelled `A1`…`G7` (columns A–G west→east, rows 1–7 north→south). The abundant
-  resources are distributed over the same tiling of the *land* area, so every tile
-  carries a proportional share (about 8 food nodes and 16 wood nodes per tile in the
-  base configuration) — no tile is starved, none is a bonanza.
+  labelled `A1`…`G7` (columns A–G west→east, rows 1–7 north→south). The *land* is a
+  wobbled square whose walkable radius varies by direction — the waterline itself
+  swings between about 390 and 416 units — and it is built from a **fixed seed that
+  does not follow the map seed**: the coast is identical on every map, and on the 800
+  world the walkable limit clears 400 in every direction, so *every point of the tile
+  grid is land*. The waterline is decoration around the play square, not a wall
+  inside it.
 - **Seeds decide layout.** The same seed produces the identical node layout — verified to
   byte identity — and the same base placement. A seed is a small token string stored in
   the transcript header; the map generator consumes the seeded random stream before any
   other randomness exists, so the layout is deterministic while everything else can still
   draw from the same stream (§3.2).
-- **Fair placement.** Each of the up-to-four bases sits in its own sector; the scarce
-  resources are placed **identically relative to every seat** (equal counts, equal
-  radii from the spawn), so no seat starts richer. Food and wood are the common
-  resources: food fills an even grid (8 nodes per cell × 49 cells), wood the same at 16
-  per cell. Stone (36 nodes) and gold (18 nodes) are the scarce, contested resources —
-  and the binding constraint, because the map carries far more total food and wood than
-  a match can spend.
+- **Fair placement.** Each of the up-to-four bases sits in its own sector: the spawns
+  stand on a circle of radius (800/2 − 40) × 0.85 = **306 units** from the centre, at
+  90° steps starting north, so a four-seat match opens with its four Town Centers at
+  the north, east, south, and west points of that circle, three workers apiece. The
+  scarce resources are placed **identically relative to every seat** — each seat's
+  share is a rotation of the same sector — so no seat starts richer.
+- **The resource layout is per-difficulty, and it is exact** (node counts; every node
+  carries a fixed amount, and food and wood are scattered evenly over the 49 tiles —
+  no tile starved, none a bonanza):
+
+  | Resource | easy / medium / hard nodes | Per node | Placement |
+  |---|---|---|---|
+  | Food (bushes) | 392 / 98 / 49 | 500 | even over the grid (8 / 2 / 1 per tile) |
+  | Wood (trees) | 784 / 784 / 196 | 300 | even over the grid (16 / 16 / 4 per tile) |
+  | Stone | 40 / 40 / 20 | 1000 | a rotational ring, one sector per seat |
+  | Gold | 18 per seat (20 at four seats) | 2000 | a rotational ring, one sector per seat |
+
+  The map therefore carries far more total food and wood than a match can spend:
+  scarcity is a *discovery and logistics* problem, not a node-count problem.
 - **Themes.** The same layout is available in three surface themes (summer / winter /
   desert) that change appearance and ground cover, not rules.
 - **Land and water.** The map has a land limit; units may not stand in water. The
@@ -201,6 +222,14 @@ rules as the game enforces them; the *contract* by which a model is told those r
   countdown) → `complete`. Construction is a timed, worker-driven affair — a building
   that is being built by a living worker *counts* for what it will become (an unfinished
   Temple with a worker on it already lets its owner field a priest, when affordable).
+- **Worker assignment prices workers in seconds, and takes the cheapest.** When a
+  seat needs a worker at a site (building, repairing), every candidate is costed:
+  the walk to the site (distance ÷ the worker's pace) plus a per-task pull penalty —
+  idle 0 s; a harvester 4–10 s, the fatter the stockpile of the resource it carries,
+  the cheaper; a repairer 14 s; a farm hand 18 s; a scout 45 s; a worker in combat
+  is never pulled. The chosen worker saves its current task and resumes it when the
+  site is done (a farm hand re-binds only while the farm still stands); the other
+  candidates are left untouched.
 - **Buildings do three different jobs**, and the state keeps them separate:
   - *produce* units (one unit-type at a time, with a countdown),
   - *host research*,
@@ -507,6 +536,73 @@ punched (§13).
    recorded as a live disclosure decision (§13) — silently divergent truth is the bug
    class this design exists to eliminate.
 
+### 3.4 The golden reference match
+
+The determinism gate is not a test written against a description of determinism. It is
+a **file**. The reference build ships a complete headless match — the *golden
+stream* — recorded from the shipping simulation, and a rebuild's first obligation is
+to produce those bytes.
+
+**The conditions** are fixed and small: seed `golden`; four seats (Egyptian, Greek,
+Persian, Yamato), each driven by the rule-based brain (§4.6); real-time tempo;
+difficulty `medium`; one 100 ms simulation sub-step per tick; one snapshot beat every
+500 ms; ten minutes of simulation — a one-minute sibling under the same conditions
+ships with the core's own gate; no model, no human, no network. The recorder supplies
+the environment: a single fake wall clock that starts at zero and advances exactly one
+sub-step per tick, and the game's only nondeterminism — the raw random draw (player
+id minting, terrain scatter) — is fed from a stream seeded by the match seed. Even the
+id mint, the one draw a live match keeps *unseeded*, is seeded here, so the reference
+contains **no unseeded randomness at all**.
+
+**The stream** is the transcript's own line vocabulary plus two reference lines: a
+`match` header; one `map` line — the seeded layout as the match starts, the four
+spawn points and every one of the 942 resource nodes in integer-millimetre
+coordinates — the first thing a port must reproduce; then, per beat, one snapshot line
+(the beat's time and sequence number, the world's age-advance and exhaustion events,
+each seat's age, population, unit and building counts) followed by the four seats'
+**full state lines** — the exact object §4.2 hands a model; and at the end a
+`results` line (how the match ended, who won, each seat's final age, resources and
+roster) and a `timeline` line (the match's 5-second economy samples — nothing is ever
+gathered — plus the age-advance, exhaustion and Wonder event lists). The shipped
+ten-minute file is 6,004 content lines; the one-minute sibling, 604.
+
+**What the reference match actually does** is the point of the gate, because a port
+must reproduce the file — and the file is a *degenerate* match:
+
+1. **The bases stand on land the grid does not reach.** The spawn circle is fixed to
+   the 800 world (306 units from the centre, §2.1); the reference instantiates the
+   terrain at its 200-unit default, whose tile grid spans only ±100. The coast (§2.1)
+   keeps all four Town Centers and their three workers on land, so nothing is ever
+   clamped, and nothing a seat owns ever crosses a tile of the 7×7 grid: every tile of
+   every seat reads unexplored for the whole match, no seat discovers a node (the
+   seeded nodes all sit within ~77 units of the centre — inside the grid, unseen), and
+   no seat harvests, trains, builds, fights, or advances an age. Across all 1,200
+   beats every seat holds: stone age, population 3 of 10, three units, one building,
+   no eliminations.
+2. **The only thing that moves is research bookkeeping.** Each rule brain pays from
+   the opening 200/200/100/50 stockpile and, by the end of the match, has completed
+   exactly two researches on every seat — `house` and `farm` (food 200 → 0, wood 200
+   → 50) — and has queued a third worker whose cost the now-empty stockpile can no
+   longer pay.
+3. **The match clock never moves.** The model-facing `clock.matchSeconds` reads 0 on
+   all 4,800 state lines. The clock is measured from the timeline's start instant,
+   with a "no timeline yet" fallback that answers *now* — and the reference's fake
+   clock starts at zero, so the latched start instant is zero, and zero is
+   indistinguishable from absent. A live match starts from wall-clock milliseconds
+   and reads normally; the reference's clock is a byproduct of its environment. The
+   gate keeps the bytes: the file says 0, so a port must say 0.
+4. **Nothing ends it.** No elimination, no Wonder, no victory: the driver spends its
+   step budget and the tail records the end as a *time-limit* with no winner — all
+   four seats alive in the stone age, holding 0 / 50 / 100 / 50 in food / wood /
+   stone / gold, three idle workers and one Town Center apiece.
+
+**The gate.** A rebuild run under the same conditions must produce the same stream
+**byte for byte** — the `map` line first, then the beat- and seat-interleaved lines in
+order — and its existing tests must pass against the new core through the boundary the
+rebuild chooses (§12). A port that "fixes" the degeneracy has failed the gate: the
+gate measures that porting the simulation did not change the game, and a changed
+game, however better, is a different game.
+
 ---
 
 ## 4. The agent protocol
@@ -529,14 +625,14 @@ turn**:
 | `research_tech` | `techId` (from `research.available`) | Start the one research a seat may run. |
 | `upgrade_age` | — | Begin the advance at the Town Center (never re-issue while in progress). |
 | `build_structure` | `buildingType` (from the state's building vocabulary), optional `targetX/Z` | Place a structure; the civ's Wonder is built here, as type `wonder`. |
-| `assign_workers` | `resourceType` (food/wood/stone/gold/farm), `count?` (default 3, max 20), `from?` (a worker pool: the resource pools, `farm`, or `idle`), `allowSpill?`, optional `targetX/Z` | Assign workers to gather at the nearest node of that type to the target; `from` + the same value in `resourceType` moves a crew node-to-node; `allowSpill: false` takes only workers not carrying a load (and takes fewer if that is all there are). |
+| `assign_workers` | `resourceType?` (food/wood/stone/gold/farm — omittable only when `targetX/Z` identify a known node or your farm unambiguously), `count?` (default 3, max 20), `from?` (any pool of the state's `workers` map — a resource pool, `farm`, or `idle`; `building` and `fighting` are taken when that ends; omitted = idle first, then the largest stockpile), `whenCarrying?` (`spillLoad` — the default: move now, the load is lost — or `deliverLoad`, or `skipAssignment`), `targetX/Z` (always together) | Assign workers to gather at the target node; `from` names where the workers come from, and `from` + the same value in `resourceType` moves a crew node-to-node. |
 | `repair_building` | `count?` (default 1, max 5), optional `targetX/Z` (omitted = most damaged) | Send workers to repair. |
-| `explore` | `tile` (a map label, e.g. `C5`), optional `unitType` | Send a scout to sweep a tile of the exploration grid. |
-| `move_units` | `targetX, targetZ` (always together), optional `units` / `unitIds` | Move units to a point — the standing-order layer's `march`/`patrol`/`guard` live here; `unitIds` moves *exactly those* units. |
+| `explore` | `tile` (a map label, e.g. `C5`), optional `unitType`, optional `unitIds` | Send a scout to sweep a tile of the exploration grid. |
+| `move_units` | `mode?` (`march` — the default — `scout`, `guard`, `patrol`), `targets?` (`any` — the default — or `military`, the incidental engagement while `march`/`guard`/`patrol` travels), `targetX, targetZ` (always together), optional `units` / `unitIds`, `matchSpeed?` (`slowestUnit` holds the group to its slowest member), `formation?` (`line` / `wedge` / `block` / `screen` — implies `slowestUnit`) | A persistent movement order — the standing-order layer's `march`/`patrol`/`guard` live here; `unitIds` moves *exactly those* units; a formation shapes the march and keeps the shooters out of the contact rank. |
 | `attack_target` | `targetId` (a handle from the state) **or** `targetX, targetZ` (attack-move), optional `units` / `unitIds`, or a class filter | Attack a unit or building by handle, or march-and-attack toward coordinates; a pinned target is steered on its live position (§2.7). |
 | `delete_unit` | `unitType?` (default `worker`), `count?` (default 1, max 20) | Deliberately free a unit (and its population slot). |
 | `destroy_building` | `buildingType`, optional `targetX/Z` | Demolish one of your own. |
-| `wait` | — | A complete, valid, deliberate no-move. |
+| `wait` | `reason?` (one line) | A complete, valid, deliberate no-move. |
 
 **2. The `plan` tool** — independent of the command budget, at most **one per turn**:
 it saves the seat's standing **objective** (one line) and **plan** (up to ten short
@@ -647,11 +743,17 @@ that the old order, state-first, made the model answer a stale old result):
    from;
 4. any spectator **advice** sent to the seat (appended after the state).
 
-**Budgeting.** History is sized to *each model's context budget*: the configured budget
-(default 32768; a per-model "Max" fills in the model's true discovered maximum) is
-clamped to the model's real limit, then split with headroom — a pessimistic
-~3-chars-per-token estimate, an 80% cap, and a reserve for the fixed parts. A 128K model
-therefore remembers more of the match than a 32K one.
+**Budgeting.** History is sized to *each model's context budget*: the seat's
+configured budget (default **65536** where it sets none or one below the 512 floor) is
+clamped to the model's *real* window when that is known — the endpoint's reported
+maximum, or the harness's per-model table when the endpoint does not report one — and a
+per-model "Max" fills in the model's true discovered maximum. What remains is split
+with headroom: a reserve for the reply (the seat's output cap, default 8192 tokens,
+plus 1500 of margin), then 80% of the balance as the history slice, estimated at a
+pessimistic ~3-chars-per-token (dense JSON tokenizes well under 3.5). The slice has a
+2000-token floor, and a self-healing shrink factor — the ×0.7 ratchet of the
+self-healing paragraph below — multiplies it. A 128K model therefore remembers more of
+the match than a 32K one.
 
 **Self-healing history.** The prompt is rebuilt from scratch every turn, so the harness —
 not any server's truncation rules — decides exactly what the model sees. Two failure
@@ -1349,7 +1451,12 @@ stable 100/100/0/50 — 700, 15 s (neolithic); archery range 50/100/50 — 600, 
 (neolithic); academy 100/100/100/50 — 700, 15 s (neolithic); temple
 100/100/150/100 — 800, 20 s (bronze); tower 50/50/100 — 600, 12 s, with per-age
 firepower (2/3/4/5 projectiles, attack 10/12/15/20, a fixed long range — unit range
-bonuses cap at the tower's). The **wonder** is a single shared cost vector
+bonuses cap at the tower's). An unknown or missing epoch falls back to the stone
+row; and the table is **civ-neutral by design** — a rebuild that re-derives tower
+firepower from a civ's attack techs breaks it: no civ owns a matching tech set
+(Persia has no all-military tech at all; Greece and Yamato have no ranged tech), and
+Yamato's Bushido would make *stone* towers stronger, the opposite of the intent.
+The **wonder** is a single shared cost vector
 (4500/4500/4000/2500 — "one shared vector by design"), iron age, ~60 s, and a flat
 1500 HP.
 
@@ -1643,6 +1750,12 @@ build has a test for; "where" names the section that states it.
 20. **Results are self-describing and shareable**: a public model id (no
     filesystem-shaped strings), the stack and settings that produced the result, no
     endpoint, no key. *(§0, §5.3)*
+21. **The golden stream is a file, not a description.** The reference match is pinned
+    as bytes: the rebuilt core, run under the reference conditions, must reproduce the
+    shipped stream byte-for-byte — the `map` line first, then the beats interleaved per
+    seat — including its degenerate invariants (the match clock structurally 0, all
+    four seats still stone age, no seat ever discovers anything, no winner declared). A
+    port that "fixes" the degeneracy has failed the gate. *(§3.4)*
 
 ---
 
@@ -1695,6 +1808,14 @@ a new stack must *decide*, with the stated context for each:
     design; *which* dialects, and how far the send-then-learn parameter adaptation
     (retries that drop a refused parameter rather than fail the seat) goes, are
     rebuild decisions.
+11. **What the golden's zero clock means for a v2 core.** The reference stream's
+    `matchSeconds` reads 0 on every beat because the recorder's fake clock latches the
+    timeline's start at zero, and the state builder's "no timeline yet" fallback treats
+    0 as absent. The gate keeps the bytes, so a port reproduces 0. The open question is
+    whether the v2 core should additionally distinguish "timeline absent" from
+    "timeline latched at 0", so that the same builder code is also correct on a wall
+    clock: a port that passes the golden alone has not proven its clock in a live
+    match. *(§3.4)*
 
 ---
 
