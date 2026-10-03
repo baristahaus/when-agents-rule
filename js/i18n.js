@@ -2460,17 +2460,21 @@ const I18N_HELP = {
 };
 Object.keys(I18N_HELP).forEach(l => { I18N[l] = Object.assign(I18N[l] || {}, I18N_HELP[l]); });
 const I18N_AUDIO = {
-    en: {'audio.title':'Sound','audio.mute':'Mute','audio.master':'Volume','audio.ambience':'Ambience','audio.effects':'Effects','audio.note':'Live games only. Starts muted on each page load.','audio.unavailable':'Audio could not start. Try enabling it again in a supported browser.'},
-    de: {'audio.title':'Ton','audio.mute':'Stumm','audio.master':'Lautstärke','audio.ambience':'Umgebung','audio.effects':'Effekte','audio.note':'Nur in laufenden Spielen. Nach jedem Neuladen zunächst stumm.','audio.unavailable':'Audio konnte nicht starten. Bitte erneut oder in einem anderen Browser versuchen.'},
-    es: {'audio.title':'Sonido','audio.mute':'Silenciar','audio.master':'Volumen','audio.ambience':'Ambiente','audio.effects':'Efectos','audio.note':'Solo partidas en curso. Cada carga de página empieza en silencio.','audio.unavailable':'No se pudo iniciar el audio. Inténtalo de nuevo en un navegador compatible.'},
-    zh: {'audio.title':'声音','audio.mute':'静音','audio.master':'音量','audio.ambience':'环境音','audio.effects':'音效','audio.note':'仅限正在进行的游戏。每次加载页面时默认静音。','audio.unavailable':'无法启动音频。请重试或使用支持的浏览器。'}
+    en: {'audio.title':'Sound','audio.mute':'Mute','audio.master':'Volume','audio.ambience':'Ambience','audio.effects':'Effects','audio.unavailable':'Audio could not start. Try enabling it again in a supported browser.'},
+    de: {'audio.title':'Ton','audio.mute':'Stumm','audio.master':'Lautstärke','audio.ambience':'Umgebung','audio.effects':'Effekte','audio.unavailable':'Audio konnte nicht starten. Bitte erneut oder in einem anderen Browser versuchen.'},
+    es: {'audio.title':'Sonido','audio.mute':'Silenciar','audio.master':'Volumen','audio.ambience':'Ambiente','audio.effects':'Efectos','audio.unavailable':'No se pudo iniciar el audio. Inténtalo de nuevo en un navegador compatible.'},
+    zh: {'audio.title':'声音','audio.mute':'静音','audio.master':'音量','audio.ambience':'环境音','audio.effects':'音效','audio.unavailable':'无法启动音频。请重试或使用支持的浏览器。'}
 };
 Object.keys(I18N_AUDIO).forEach(l => Object.assign(I18N[l], I18N_AUDIO[l]));
 const I18N_AUDIO_TEST = {
-    en: {'audio.test':'Sound test','audio.testHint':'Samples respect Mute. Uncheck Mute using the speaker below the minimap to listen.','audio.sample.step':'Footstep','audio.sample.snow':'Snow step','audio.sample.hoof':'Hoofbeat','audio.sample.bow':'Bow','audio.sample.impact':'Melee impact','audio.sample.stone':'Building impact','audio.sample.crackle':'Fire crackle','audio.note':'Live games and showcase. Starts muted on each page load.'},
-    de: {'audio.test':'Klänge testen','audio.testHint':'Hörproben beachten Stumm. Zum Anhören Stumm beim Lautsprecher unter der Minikarte ausschalten.','audio.sample.step':'Schritt','audio.sample.snow':'Schnee','audio.sample.hoof':'Hufschlag','audio.sample.bow':'Bogen','audio.sample.impact':'Nahkampf','audio.sample.stone':'Gebäudetreffer','audio.sample.crackle':'Feuerknistern','audio.note':'Spiele und Vorschau. Nach jedem Neuladen zunächst stumm.'},
-    es: {'audio.test':'Probar sonidos','audio.testHint':'Las muestras respetan Silenciar. Desmárcalo con el altavoz bajo el minimapa para escuchar.','audio.sample.step':'Paso','audio.sample.snow':'Paso en nieve','audio.sample.hoof':'Cascos','audio.sample.bow':'Arco','audio.sample.impact':'Golpe','audio.sample.stone':'Golpe a edificio','audio.sample.crackle':'Fuego','audio.note':'Partidas y exhibición. Cada carga de página empieza en silencio.'},
-    zh: {'audio.test':'测试声音','audio.testHint':'样本遵循静音设置。请使用小地图下方的扬声器取消静音以试听。','audio.sample.step':'脚步','audio.sample.snow':'雪地脚步','audio.sample.hoof':'马蹄','audio.sample.bow':'弓箭','audio.sample.impact':'近战命中','audio.sample.stone':'建筑命中','audio.sample.crackle':'火焰噼啪','audio.note':'支持游戏和展示模式。每次加载页面时默认静音。'}
+    // audio.note wins over the copy in I18N_AUDIO above: audio is live in the
+    // showcase too (audio.js previews samples for the showcase seat). The sample
+    // labels the terrain loops below rename (step/snow/hoof) are not listed here —
+    // a first copy of them only made these keys look tunable in two places.
+    en: {'audio.test':'Sound test','audio.testHint':'Samples respect Mute. Uncheck Mute using the speaker below the minimap to listen.','audio.sample.bow':'Bow','audio.sample.impact':'Melee impact','audio.sample.stone':'Building impact','audio.sample.crackle':'Fire crackle','audio.note':'Live games and showcase. Starts muted on each page load.'},
+    de: {'audio.test':'Klänge testen','audio.testHint':'Hörproben beachten Stumm. Zum Anhören Stumm beim Lautsprecher unter der Minikarte ausschalten.','audio.sample.bow':'Bogen','audio.sample.impact':'Nahkampf','audio.sample.stone':'Gebäudetreffer','audio.sample.crackle':'Feuerknistern','audio.note':'Spiele und Vorschau. Nach jedem Neuladen zunächst stumm.'},
+    es: {'audio.test':'Probar sonidos','audio.testHint':'Las muestras respetan Silenciar. Desmárcalo con el altavoz bajo el minimapa para escuchar.','audio.sample.bow':'Arco','audio.sample.impact':'Golpe','audio.sample.stone':'Golpe a edificio','audio.sample.crackle':'Fuego','audio.note':'Partidas y exhibición. Cada carga de página empieza en silencio.'},
+    zh: {'audio.test':'测试声音','audio.testHint':'样本遵循静音设置。请使用小地图下方的扬声器取消静音以试听。','audio.sample.bow':'弓箭','audio.sample.impact':'近战命中','audio.sample.stone':'建筑命中','audio.sample.crackle':'火焰噼啪','audio.note':'支持游戏和展示模式。每次加载页面时默认静音。'}
 };
 Object.keys(I18N_AUDIO_TEST).forEach(l => Object.assign(I18N[l], I18N_AUDIO_TEST[l]));
 for (const [lang,labels] of Object.entries({en:['Chopping','Harvesting','Mining'],de:['Holzhacken','Ernten','Bergbau'],es:['Tala','Cosecha','Minería'],zh:['伐木','采收','采矿']}))

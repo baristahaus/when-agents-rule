@@ -306,7 +306,7 @@ class Game {
 
         // Regenerate the map FIRST (with the chosen difficulty) so resource counts
         // reflect it and the per-TC clearResourcesNear below acts on fresh nodes.
-        this.difficulty = (typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || 'easy';
+        this.difficulty = Game.storedDifficulty();
         this.terrain.difficulty = this.difficulty;
         // Blank means "pick one for me", NOT "run unseeded". Terrain falls through to
         // Math.random when seed is null, so a blank field used to produce a layout that
@@ -480,7 +480,7 @@ class Game {
 
         // Regenerate the map with the chosen difficulty (fresh resources each game,
         // scaled by difficulty) before placing Town Centers / clearing nodes under them.
-        this.difficulty = visualShowcase ? ({summer:'easy',winter:'medium',desert:'hard'}[this._showcaseTerrain] || 'easy') : ((typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || 'easy');
+        this.difficulty = visualShowcase ? ({summer:'easy',winter:'medium',desert:'hard'}[this._showcaseTerrain] || 'easy') : Game.storedDifficulty();
         this.terrain.difficulty = this.difficulty;
         this.terrain.seed = visualShowcase ? 'greek-coast-01' : ((this.ui.setupSeed && this.ui.setupSeed()) || Game.mintSeed());
         this.mapSeed = this.terrain.seed;
@@ -1934,6 +1934,15 @@ class Game {
     // seats think; fairness there comes from every seat reading the same snapshot and
     // every move landing at the same instant (see OpenAIAIManager.flushRound), not from
     // holding the world still.
+    // The one read of the stored difficulty. A value that is not a DIFFICULTY_MODS
+    // key (a stale or hand-edited localStorage) used to index that table to
+    // undefined and ride downstream as NaN multipliers; both setup paths read it
+    // raw, so the rule now lives here once.
+    static storedDifficulty() {
+        const d = (typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || '';
+        return Object.prototype.hasOwnProperty.call(DIFFICULTY_MODS, d) ? d : 'easy';
+    }
+
     // Short, readable, and unmistakably machine-picked so nobody wonders whether they
     // typed it. Any string works — terrain hashes it — so this only has to be unique
     // enough that two matches minutes apart do not collide.
@@ -3087,11 +3096,13 @@ class Game {
 
         this.player.resources.spendResources(cost);
         
-        // Start age upgrade progress (30 seconds base)
+        // The one age-upgrade duration (buildings.js). The literal used to be a
+        // second, unrelated copy of the constant: rebalancing the timer moved the
+        // AI (ai.js) and left the human's upgrade at 30s.
         this.player.currentAgeUpgrade = {
             targetAge: newAge,
             progress: 0,
-            duration: 30000  // 30 seconds for age upgrade
+            duration: (typeof AGE_UPGRADE_TIME === 'number') ? AGE_UPGRADE_TIME : 30000
         };
         this.sound?.notify('command');
 

@@ -89,7 +89,15 @@ class TranscriptAnalyzer {
         all.forEach(r => { r._sec = secOf(r); });
         // A transcript written before matchSeconds existed still opens: fall back to the
         // wall-clock stamp, offset from the first record so the axis starts at zero.
-        const t0 = all.length ? Math.min(...all.map(r => r.at || Infinity)) : 0;
+        // A reduce, not Math.min(...): a long match has more records than the
+        // argument-list limit, and the fallback path is exactly where a huge
+        // legacy transcript lands.
+        let t0 = 0;
+        if (all.length) {
+            t0 = Infinity;
+            for (const r of all) if ((r.at || Infinity) < t0) t0 = r.at || Infinity;
+            if (!Number.isFinite(t0)) t0 = 0;
+        }
         all.forEach(r => { if (r._sec == null) r._sec = Math.max(0, Math.round(((r.at || t0) - t0) / 1000)); });
         all.sort((a, b) => (a._sec - b._sec) || ((a.at || 0) - (b.at || 0)));
         this.order = all;

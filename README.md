@@ -177,7 +177,7 @@ A third mode beside Arena and Campaign, and the other half of the round trip: a 
 
 ![Reading a finished match back in the analyzer](Screenshots/AnalyzeTranscript.png)
 
-<sub><i>Episode 6 reopened in build 819: an existing recorded match rendered with the current engine, with the turn list, saved plan and economy graph. The header retains the original recording's build and prompt version.</i></sub>
+<sub><i>Episode 6 reopened in build 819: an existing recorded match rendered with the current engine, with the turn list, saved plan and economy graph. What is retained is the *catalogue's* record of the original recording (build 781, prompt `agents-rule-v93`); the transcript header itself carries the prompt version but no build.</i></sub>
 
 </div>
 

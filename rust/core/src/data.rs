@@ -115,8 +115,13 @@ pub struct BuildingDef {
     pub required_age: Option<String>,
     #[serde(default)]
     pub requires_tech: Option<String>,
-    #[serde(default)]
     pub build_time: u32,
+    /// Only some defs carry a weapon (the tower).
+    #[serde(default)]
+    pub attack: Option<u32>,
+    /// The tower's reach.
+    #[serde(default)]
+    pub range: Option<f64>,
     #[serde(default)]
     pub description: Option<String>,
 }
@@ -257,6 +262,13 @@ impl Civilization {
         }
     }
 }
+/// The tower's epoch firepower (buildings.js:163-172): how many attackers
+/// a volley answers, and the damage each arrow carries.
+#[derive(Debug, Clone, Copy)]
+pub struct TowerPower {
+    pub arrows: u32,
+    pub attack: f64,
+}
 
 /// The def a civilization actually fields for `id`: its unique override wins
 /// over the shared entry, and unique-only ids (Egypt's horse carriage) resolve
@@ -321,7 +333,7 @@ impl WorldData {
                     .tier
                     .as_deref()
                     .and_then(|t| age_order.iter().position(|a| a == t));
-                if tier_idx.map_or(false, |ti| ti > current_idx) {
+                if tier_idx.is_some_and(|ti| ti > current_idx) {
                     continue;
                 }
                 if !out.iter().any(|x| x == &u.id) {
@@ -373,7 +385,7 @@ impl WorldData {
                 None => continue,
             };
             if let Some(req) = &def.requires_tech {
-                let has = civ.map_or(false, |c| c.tech_tree.contains_key(req));
+                let has = civ.is_some_and(|c| c.tech_tree.contains_key(req));
                 if !has {
                     continue;
                 }
@@ -396,5 +408,28 @@ impl WorldData {
             }
         }
         out
+    }
+
+    /// `towerPower` (buildings.js:170): the per-epoch table, the stone row
+    /// as the fallback for any unknown age.
+    pub fn tower_power(&self, age: &str) -> TowerPower {
+        match age {
+            "neolithic" => TowerPower {
+                arrows: 3,
+                attack: 12.0,
+            },
+            "bronze" => TowerPower {
+                arrows: 4,
+                attack: 15.0,
+            },
+            "iron" => TowerPower {
+                arrows: 5,
+                attack: 20.0,
+            },
+            _ => TowerPower {
+                arrows: 2,
+                attack: 10.0,
+            },
+        }
     }
 }

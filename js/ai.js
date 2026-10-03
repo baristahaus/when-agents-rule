@@ -418,7 +418,9 @@ class AIManager {
         const cost = AGE_COSTS[next];
         if (!cost || !this.canAfford(ai, cost)) return;
         this.spend(ai, cost);
-        ai.currentAgeUpgrade = { targetAge: next, progress: 0, duration: 30000 };
+        // Same duration the human's upgrade pays (buildings.js), not a literal:
+        // the cost two lines up already comes from the shared AGE_COSTS table.
+        ai.currentAgeUpgrade = { targetAge: next, progress: 0, duration: AGE_UPGRADE_TIME };
     }
 
 

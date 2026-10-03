@@ -2,7 +2,9 @@
 
 September 24, 2026. A read-and-run review of the whole repo (~40k lines, 92 tracked
 files), followed by a fix pass on the parts that could be changed without deciding a
-game-balance question on someone else's behalf.
+game-balance question on someone else's behalf. The text below is that September 24
+snapshot, unaltered; what a second pass changed afterwards is in the
+[addendum](#addendum--october-2-2026-the-review-and-polish-pass).
 
 Nothing below is claimed on inference. Every finding was either executed against the
 real shipped code or read at the line it names, and every fix is backed by a test that
@@ -802,3 +804,81 @@ a civ-unique unit are no longer deleted. Matches run longer, `defeated` in the m
 state appears later, and a ranking produced by an older build may have condemned a seat the
 current one keeps alive — every score published before this change came from a different
 elimination rule.
+
+## Addendum — October 2, 2026: the review-and-polish pass
+
+A second read-and-run pass over the same ground. The September record above stands
+unaltered — its file sizes, test counts, and rankings are what they were on the 24th
+(the repo is ~45.3k lines across 128 tracked files now; the node suite is 333 tests,
+all green, before and after every change below).
+
+**Code changed, each with the fact that motivated it:**
+
+- `js/game.js` — the stored difficulty is read through one validating accessor
+  (`Game.storedDifficulty`). A hand-edited or stale `localStorage.difficulty` that is
+  not a `DIFFICULTY_MODS` key used to index to `undefined` and ride downstream as NaN
+  multipliers; both setup paths (match setup, showcase) read it raw.
+- `js/ai.js`, `js/game.js` — the age-upgrade duration comes from `AGE_UPGRADE_TIME`
+  (buildings.js) instead of a fourth-line copy of `30000`: the AI already paid the
+  cost from the shared table but *timed* against a literal, so a rebalance moved one
+  seat's clock and not the other's.
+- `js/analyzer.js` — the fallback transcript's first-timestamp scan is a loop, not
+  `Math.min(...all.map(…))`: the spread blows V8's argument cap on exactly the huge
+  legacy transcripts that reach the fallback path.
+- `js/showcase.js` — `typeof WAR_DEMO_ONLY !== 'undefined'` guard: the bare read
+  threw a `ReferenceError` in any context that loaded showcase code without the
+  demo flag script.
+- `js/fogofwar.js` — the feather blur's `try/catch` could not catch anything (the
+  `filter` setter never throws; an unsupported browser silently keeps the empty
+  string). Replaced with a real one-shot detect: write `blur(1px)`, read it back.
+- `js/i18n.js` — deleted the dead duplicates in `I18N_AUDIO` (`audio.note`,
+  `audio.sample.step/snow/hoof`): `I18N_AUDIO_TEST` is merged after and wins every
+  time. Verified by dumping the effective merged tables for all four languages
+  before and after: byte-identical values.
+- `js/standing-orders.js` — `setStandingOrder` rebinds the manager on every call.
+  `start()` rebuilds `openAIAIManager` per match; the cached `StandingOrders` kept
+  its `travelEtaSec` reporting bound to the *stopped* manager across an in-place
+  restart.
+- `index.html` — cache tags for the seven changed scripts (game.js 920→921, the
+  build badge moves with the pass, i18n 910→921, fogofwar 916→917, ai 782→783,
+  analyzer 781→782, showcase 868→869, standing-orders 904→905).
+
+**Rust (tracked files):** eleven clippy lints cleared — a detached doc-comment
+paragraph in `mapgen.rs`, three `iter().any(==)` → `contains` and two redundant
+`u8 as u8` casts plus two index-loops → iterators in `state.rs`, two `map_or(false, …)`
+→ `is_some_and` in `data.rs`. `cargo test` 5 green, `golden-diff` PASS byte-identical,
+`export_data.cjs` regenerates `world.json` byte-identical, after. The four remaining
+warnings live in the untracked `sim/` work and are left for its owner.
+
+**CI:** a `core` job — `cargo test`, the `golden-diff` against the shipped golden,
+and a byte-identical regeneration of that golden by `record.cjs` itself. The repo's
+strongest claims ran no automation before; every step was executed locally first.
+
+**Docs:** REBUILD_PROPOSAL's browser row said `file://` works; README:102 says the
+opposite and README is right (`fetch` needs HTTP) — corrected. The proposal's "§13
+lists ten open questions" is eleven now — corrected. The "35+ test files" counts are
+left as the historical statement they are: 40 exist. README's "Episode 6 reopened in
+build 819" is reworded to what the bytes show: 819 is the *viewer* build number; the
+catalogue (`samples/index.json`) records the original as build 781 / prompt v93, and
+the transcript header carries no build field at all.
+
+**Golden facts, re-measured:** `record.cjs` regenerates `stream-1m.jsonl` byte-for-byte
+(2,740,072 bytes) — the shipped golden is the current recorder's output. Its 604 blank
+lines are the recorder's own format (the fresh 10-minute recording blanks its 6,004
+content lines the same way), so the file is self-consistent with §3.4's "content
+lines" phrasing and every consumer parses it line-wise. One provenance sentence is
+worth knowing imprecise: the 1-minute file is *not* a byte-prefix of a fresh 10-minute
+recording — the `match` header differs in it (`"minutes":1` vs `10`, ~byte 73), lines
+2–603 are then identical line-for-line. The gate is line-wise ("the `map` line first,
+then the lines in order"), and a port that emits its own 1-minute header reproduces
+the shipped file exactly; the prefix phrasing described *how the bytes were obtained*
+in git history, not an invariant, and nothing in the tracked docs claims it as one.
+The spawn positions land exactly on the 306-unit circle — integer-millimetre
+coordinates, centre-relative, matching §2.1's formula — and every resource node sits
+between 0.25 and 76.0 units of the centre, so §3.4's "~77" is generous, not wrong.
+
+**Untouched by decision:** the untracked `rust/core/src/model.rs` and `match.rs` are
+referenced by nothing — not `lib.rs`, not `sim/` — and do not compile in any target;
+`sim/model.rs` (363 lines, wired through `sim/mod.rs`) covers the same surface and
+reads like the replacement of the two top-level drafts. They are the owner's work in
+progress (Sept 27): delete-or-wire is the owner's call, not a polish pass's.

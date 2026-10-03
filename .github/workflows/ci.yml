@@ -99,6 +99,44 @@ jobs:
       - name: Tests
         run: node --test tests/*.test.cjs
 
+  # The deterministic core's own gate. Nothing here ran automatically before: the
+  # golden-diff and the state pin are the repo's strongest claims ("same seed, same
+  # bytes"), and until now they only moved if someone remembered to cargo test.
+  # ubuntu-24.04 ships a stable Rust toolchain; the crates (serde, serde_json,
+  # indexmap) build from the registry, so the job needs the network and a cache to
+  # stay quick.
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/core/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/core/Cargo.lock') }}
+
+      - name: Tests (unit + the initial-state golden pin)
+        working-directory: rust/core
+        run: cargo test
+
+      # The map line rebuilt from the crate must be byte-identical to the shipped
+      # golden's — the first gate of the port, in CI.
+      - name: Golden diff
+        working-directory: rust/core
+        run: cargo run --release --bin golden-diff -- golden/stream-1m.jsonl
+
+      # Reproducibility of the gate itself: the recorder, run now, must produce
+      # the shipped golden's bytes. If this ever goes red, the golden no longer
+      # describes the game in this repository.
+      - name: The golden regenerates byte-identically
+        run: |
+          node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/stream-1m.jsonl
+          cmp /tmp/stream-1m.jsonl rust/core/golden/stream-1m.jsonl
+
   # The two Playwright suites, nightly and on demand — deliberately not on every push.
   #
   # They are the only regression guard for the escaping and showcase-mode work (a property of

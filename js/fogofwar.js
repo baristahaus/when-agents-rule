@@ -301,12 +301,19 @@ class FogOfWarManager {
         d.save();
         d.clearRect(0, 0, W, W);
         d.imageSmoothingEnabled = true;
-        try { d.filter = `blur(${blurPx}px)`; } catch (e) {}
+        // `filter` is a plain attribute setter: it never throws, and on a
+        // browser without it the assignment just creates an expando that
+        // reads back fine — so a write/read round-trip cannot detect support.
+        // The property's presence on the context is the honest test.
+        if (this._featherOK === undefined) {
+            this._featherOK = ('filter' in d);
+        }
+        if (this._featherOK) d.filter = `blur(${blurPx}px)`;
         d.drawImage(this._scratchCanvas, 0, 0, W, W);
         // Then ramp the margin away, so the plane's own edge has nothing left to
         // show. Four linear gradients; the corners get both and so fade sooner,
         // which is what a corner should do anyway.
-        try { d.filter = 'none'; } catch (e) {}
+        d.filter = 'none';
         d.globalCompositeOperation = 'destination-out';
         const m = Math.round(FogOfWarManager.EDGE_MARGIN_WORLD * pxPerWorld);
         const ramp = (x0, y0, x1, y1, rx, ry, rw, rh) => {

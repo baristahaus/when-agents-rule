@@ -14,4 +14,5 @@
 pub mod data;
 pub mod mapgen;
 pub mod prng;
+pub mod sim;
 pub mod state;

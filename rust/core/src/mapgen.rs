@@ -38,7 +38,6 @@ pub struct Map {
 
 /// The map's own size in world units. The arena runs 800 (game.js:79); the
 /// reference's headless recorder runs the TerrainManager's 200 default.
-
 /// game.js:293-305 — one spawn per arena participant, evenly spaced on a circle.
 pub fn spawn_positions(n: usize) -> Vec<(f64, f64)> {
     let half_size = (400.0) - 40.0; // mapSize 800 / 2 - 40

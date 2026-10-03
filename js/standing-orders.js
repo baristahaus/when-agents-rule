@@ -379,6 +379,9 @@ class StandingOrders {
     }
 }
 Game.prototype.setStandingOrder=function(manager,owner,units,to,options){
+    // start() rebuilds openAIAIManager on every match; an in-place restart
+    // must not leave standing orders reporting through the stopped one.
     if(!this._standingOrders)this._standingOrders=new StandingOrders(this,manager);
+    else this._standingOrders.manager=manager;
     return this._standingOrders.issue(owner,units,to,options);
 };

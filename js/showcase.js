@@ -154,7 +154,7 @@ Game.prototype.focusShowcaseWorkers = function () {
 };
 
 window.addEventListener('load',()=>{
-    if(new URLSearchParams(location.search).get('showcase')==='1' && !WAR_DEMO_ONLY && game && game.renderer) {
+    if(new URLSearchParams(location.search).get('showcase')==='1' && typeof WAR_DEMO_ONLY !== 'undefined' && !WAR_DEMO_ONLY && game && game.renderer) {
         const params=new URLSearchParams(location.search);
         game.startVisualShowcase(params.get('civ'),params.get('terrain'),params.get('age'),params.get('time'));
     }

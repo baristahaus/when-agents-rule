@@ -60,7 +60,7 @@ the input model is":
 
 | Face | Shell | The core | The renderer | The harness | The record | The input model |
 |---|---|---|---|---|---|---|
-| **Browser** (the existing primary) | a static folder, `file://` or a local server | WASM | WebGL2 (a WebGPU path, progressive) | the daemon, or a thin in-page fallback for the zero-config case | the match folder, exported on end | mouse + keyboard, as today |
+| **Browser** (the existing primary) | a static folder over HTTP (`fetch` needs it; `file://` does not work) | WASM | WebGL2 (a WebGPU path, progressive) | the daemon, or a thin in-page fallback for the zero-config case | the match folder, exported on end | mouse + keyboard, as today |
 | **Desktop** (new) | Tauri (Win / macOS / Linux) | native | the same renderer, in the native webview | the daemon | the match folder, **direct file I/O** (no browser download friction) | mouse + keyboard + **gamepad** + multi-monitor + always-on-top |
 | **Headless / server** (new) | one binary, `war-core` | native, single process | none (a null renderer; a match runs unwatched per §11.1) | the daemon | the match folder, on disk | `--serve` (a hosted match: N clients attach), `--batch` (a benchmark matrix), `--record` (a silent ghost match) |
 | **Hosted arena** (new, P4) | the headless binary, `--serve`, over a WebSocket | native | the clients' renderer | the daemon, on the host or on a remote seat's machine | the match folder, canonical on the host | a human on a laptop, an agent on another machine, a spectator anywhere |
@@ -641,7 +641,7 @@ proposal does not pre-commit it.
 
 ## 10. What I need from you (the decisions)
 
-The spec's §13 lists ten open questions a rebuild *must decide*; this proposal answers
+The spec's §13 lists eleven open questions a rebuild *must decide*; this proposal answers
 most of them. Five are load-bearing enough — and costly enough — that I want **your**
 call before P0 starts, because each one changes what "done" means:
 

@@ -265,11 +265,11 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
     let (spawns, resources) =
         mapgen::generate_map(&mut rand, cfg.map_size as i64, cfg.difficulty, cfg.seats);
     let mut workers_per_seat: Vec<Vec<(f64, f64)>> = Vec::with_capacity(cfg.seats);
-    for s in 0..cfg.seats {
+    for spawn in spawns.iter().take(cfg.seats) {
         let mut ws = Vec::with_capacity(3);
         for _ in 0..3 {
-            let x = spawns[s].0 + (rand.next_f64() * 10.0 - 5.0);
-            let z = spawns[s].1 + (rand.next_f64() * 10.0 - 5.0);
+            let x = spawn.0 + (rand.next_f64() * 10.0 - 5.0);
+            let z = spawn.1 + (rand.next_f64() * 10.0 - 5.0);
             ws.push((x, z));
         }
         workers_per_seat.push(ws);
@@ -324,8 +324,8 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
     for n in &by_type[3] {
         add_near(n);
     }
-    for ty in 0..2 {
-        let mut nodes: Vec<&Node> = by_type[ty].iter().collect();
+    for nodes_src in by_type.iter().take(2) {
+        let mut nodes: Vec<&Node> = nodes_src.iter().collect();
         nodes.sort_by(|a, b| {
             let da = (spawn.0 - a.x as f64).hypot(spawn.1 - a.z as f64);
             let db = (spawn.0 - b.x as f64).hypot(spawn.1 - b.z as f64);
@@ -353,7 +353,7 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
         };
         let r = row.clamp(0.0, 6.0) as u8;
         let c = col.clamp(0.0, 6.0) as u8;
-        format!("{}{}", (65 + r) as u8 as char, c + 1)
+        format!("{}{}", (65 + r) as char, c + 1)
     };
     let mut your_base_tiles = serde_json::Map::new();
     your_base_tiles
@@ -365,7 +365,7 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
     for r in 0..7u8 {
         for c in 0..7u8 {
             exploration.insert(
-                format!("{}{}", (65 + c) as u8 as char, r + 1),
+                format!("{}{}", (65 + c) as char, r + 1),
                 serde_json::json!(0),
             );
         }
@@ -595,7 +595,7 @@ fn split_units(world: &WorldData, civ_id: &str) -> serde_json::Map<String, serde
         }
         let structural = blocked_by
             .iter()
-            .any(|b| STRUCTURAL_BLOCKS.iter().any(|s| *s == b.as_str()));
+            .any(|b| STRUCTURAL_BLOCKS.contains(&b.as_str()));
         let target = if structural { &mut blocked } else { &mut open };
         let host = target
             .entry(at.to_string())
@@ -678,7 +678,7 @@ fn buildable_list(
         }
         let structural = blocked_by
             .iter()
-            .any(|b| STRUCTURAL_BLOCKS.iter().any(|s| *s == b.as_str()));
+            .any(|b| STRUCTURAL_BLOCKS.contains(&b.as_str()));
         let mut line = serde_json::json!({
             "type": t,
             "requiredAge": req_age,
@@ -708,7 +708,7 @@ fn buildable_list(
         }
         let structural = blocked_by
             .iter()
-            .any(|b| STRUCTURAL_BLOCKS.iter().any(|s| *s == b.as_str()));
+            .any(|b| STRUCTURAL_BLOCKS.contains(&b.as_str()));
         let mut line = serde_json::json!({
             "type": "wonder",
             "builtAs": w.id,
