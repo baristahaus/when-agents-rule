@@ -46,3 +46,20 @@ decision and its conditions are `docs/DESIGN_SPEC.md` §14; the arithmetic behin
   byte-exact Rust port is the tag `rust-core-final-b1040`, useful only as a second oracle.
 - Do not trust an example's syntax from another Odin version. `reference/build.md` lists what
   this compiler rejects, and three of those four lines came from me guessing wrong.
+
+## Where the next session starts (4 October 2026)
+
+Run `./spike/gates.sh`. Eight gates, all green, and they are the port's contract: vectors, node
+counts, coastline, four map lines, no-FMA, the compiler's own vet set, the pinned corpus.
+
+The next increment is **a state dumper**, not a new ported module. `tools/golden/record.cjs` already
+holds a live game with AI seats, so it can write the per-seat state at t=0 and t=1 (the accessor is
+`observe(controller)` on the seat's AI controller, `js/openai-ai.js:2975`). That yields two fixtures
+that do not exist yet — the opening state, and one tick — and until they exist the turn-1 gate is a
+wish rather than a diff. Re-key ids with `tools/golden/canonicalize-states.cjs` before pinning them,
+and re-run the corpus gate afterwards: the recorder must still reproduce the pinned 1-minute stream
+byte for byte, which is what proves a dumper patch did not disturb the game.
+
+Two things are owed and both are listed in `docs/CORE-REPLAN.md` §13: the Town Center clearance step
+(the record is taken after it, and today's four conditions prove it removed nothing but not that it
+is transcribed), and the leak tracker's real name in this `core:mem`, which nobody has found yet.
