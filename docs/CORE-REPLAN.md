@@ -422,9 +422,17 @@ a style guide nobody reads, `gates.sh` fails in CI whether anybody read the skil
 1. **FP contraction** (§14.3): `llvm-dis` the object file, count `fma` instructions, and
    find the flag or the build target that makes it zero. If nothing does, the determinism
    requirement beats the language preference and the decision reopens, in writing.
-2. **The exact vet flag set** (`-vet-*`, `-strict-style`): the flag names above came from a
-   community index, not from the compiler. Read `odin help check` on day one and record the
-   set that passes on the spike's code, so the CI job and the skill file agree.
+2. **The exact vet flag set** — **closed.** From `odin check --help`, not folklore: `-vet`
+   (with `-vet-unused`, `-vet-unused-variables`, `-vet-unused-imports`, `-vet-shadowing`,
+   `-vet-using-stmt`), `-vet-cast`, `-vet-semicolon`, `-vet-style`, `-vet-tabs`,
+   `-vet-packages:`, `-strict-style`, `-strict-style-packages:`. Gate 4 runs
+   `-vet -vet-unused -vet-shadowing -vet-tabs -strict-style` and requires *empty* output, so a
+   mistyped flag cannot masquerade as a pass (it nearly did: `check` exits 0 while printing
+   `Invalid flag`).
+
+   Two open items replace them, both smaller: the leak tracker's real name in this `core:mem`
+   (my grep used a wrong path — the tarball puts `core/` at the top level, not `base/core/`), and
+   the first real shim cost for the webview, which §14.1's decision 4 says is the revisit trigger.
 
 Everything else in §11 and §12 is verified enough to plan on. These two are the ones an
 optimistic paragraph would have hidden.

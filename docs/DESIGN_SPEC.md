@@ -1941,6 +1941,29 @@ in this document.
   faster core there. That is the true price of decision 2, and the reason §14.1 states it
   as a boundary rather than a limitation.
 
+
+**Closed 4 October 2026, in the same day, by measurement rather than by argument.** The spike at
+`spike/fma/main.odin` is one `a*b+c` with operands taken from the process's own command line, so
+the compiler cannot fold them; `spike/gates.sh` builds it to an object file and counts FMA
+mnemonics against the count of multiplies, so an empty file cannot pass by containing none. At
+`-o:speed`, at `-o:aggressive`, at `-o:aggressive -microarch:x86-64-v4`, and with
+`-target-features:fma` explicitly on top of that: **zero fused instructions, nine multiplies.**
+The multiply and the add stay separate, which is what the reference's two roundings need, so the
+reopen trigger does not fire and the language decision stands. The gate is not a one-off: gate 3
+repeats it on every run, because a compiler release is exactly the kind of thing that would
+change this quietly.
+
+The same day's first artifact also settles the smaller question. `spike/odin/main.odin`
+transcribes `js/simulation/rng.js` — hash, mixing, one mulberry32 step — and prints
+`0xa9b8bccd` and `0x9fd153da`, the two integers `golden/MANIFEST.json` pins. It takes no rule
+brain and no map, and it is where four syntax guesses had to be corrected by the compiler rather
+than by memory (XOR is `~`, not `^`; dereference is postfix; there are no `inout`/`ref` parameter
+modes; `fmt.println` does not interpolate). That is the argument of §14.2 stated in the
+negative: an agent arriving from Rust or JavaScript writes correct-looking Odin that does not
+parse, and finds out in seconds for free. The record of those corrections is
+`skills/odin-core-port/reference/build.md`, which exists so the next agent does not pay for them
+twice.
+
 ### 14.4 What this closes, and what it opens
 
 Closes: §13.7 (the stack boundary), and §11.3's build-step flag. Leaves untouched and still
