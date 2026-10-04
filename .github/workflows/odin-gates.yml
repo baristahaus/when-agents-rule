@@ -1,0 +1,56 @@
+name: odin-gates
+
+# The Odin spike's gates, in CI. Added 2026-10-04, the day the language was chosen (spec §14) and
+# the day the Rust gate came off the workflow — this job is what replaced it, and it is small on
+# purpose: two spike programs, one vector pair, one disassembly count, one corpus check.
+#
+# I have not seen this job go green. It was written on a machine that runs the same four gates
+# green (`./spike/gates.sh`, five lines of output), and a workflow is a claim about a machine I am
+# not sitting at, so it starts as `continue-without: false` on the *steps* I can verify and the
+# first run is the proof. If it goes red on the download, fix the asset name before anything else:
+# it is the one line here that is a guess about GitHub rather than a fact about the code.
+
+on:
+  push:
+    branches: [sync/upstream-b1039, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  ODIN_TAG: dev-2026-09
+  ODIN_ASSET: odin-linux-amd64-dev-2026-09.tar.gz
+
+jobs:
+  gates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache the compiler
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: .tooling/odin
+          key: odin-${{ env.ODIN_TAG }}-linux-amd64
+
+      - name: Install the compiler
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .tooling/odin
+          curl -fsSL -o /tmp/odin.tgz \
+            "https://github.com/odin-lang/Odin/releases/download/${ODIN_TAG}/${ODIN_ASSET}"
+          tar -xzf /tmp/odin.tgz -C /tmp
+          mv /tmp/odin-linux-amd64-*/* .tooling/odin/
+          .tooling/odin/odin version
+
+      - name: Gates
+        run: |
+          export ODIN_BIN="$GITHUB_WORKSPACE/.tooling/odin/odin"
+          ./spike/gates.sh
+
+      # The corpus check inside gates.sh needs the reference rules, which need no build step —
+      # but if that ever stops being true, this is where an `npm ci` belongs.
+      - name: The golden still regenerates byte-identically
+        run: |
+          node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/stream-rec.jsonl
+          node -e 'const f=require("fs"),t=x=>x[x.length-1]===10?x.subarray(0,x.length-1):x,a=t(f.readFileSync("golden/stream-b1040-1m.jsonl")),b=t(f.readFileSync("/tmp/stream-rec.jsonl"));if(Buffer.compare(a,b))throw new Error("golden drift: the recorder no longer reproduces the pinned corpus ("+a.length+" vs "+b.length+" bytes)");console.log("golden reproduces: "+a.length+" bytes");'

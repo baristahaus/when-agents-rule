@@ -28,6 +28,30 @@ matching, because a decimal rendering invites a reader to trust a rounding.
     node -e 'const R=require("./js/simulation/rng.js"),s=R.keyed("golden"),k="s0:start-workers";
              for (let i=0;i<2;i++){const v=R.draw(s,k);console.log(v,"0x"+Math.round(v*4294967296).toString(16));}'
 
+## What the map record actually is, measured 2026-10-04
+
+Before copying anything, the shape, from `golden/map-line-b1040.json` itself:
+
+| field | value |
+|---|---|
+| `size` | **200** (world units; coordinates are integer **millimetres**, so ±59,995 observed) |
+| `spawns` | four seats on the 306-unit circle: `(0,-306000) (306000,0) (0,306000) (-306000,0)` |
+| `resources` | **942** nodes: food **98**, wood **784**, stone **40**, gold **20** |
+| a node | `{t,x,z,a,h}` — first food is `{t:food,x:-53459,z:-49374,a:500,h:500}` |
+
+**The counts are the intermediate gate, and they are cheaper than they look.** 98/784/40/20 come
+from the difficulty table plus the scatter rules, not from the coastline, so a port can assert the
+four counts before it can place a single node. Attempt them first: they fail loudly on a wrong
+table, and they need none of the noise machinery.
+
+**Why the full map is expensive: the coastline pulls in the texture generator.**
+`coastLimitTable()` (terrain.js:39) calls `TexGen.coastSampler(TexGen.TERRAIN_SEED)` and bisects 18
+times per table entry against `COAST_WALK_DIST = 413` with `COAST_WOBBLE`, and four such symbols
+(`coastSampler`, `COAST_WOBBLE`, `TERRAIN_SEED`, `TERRAIN_WORLD`) are the only things terrain.js
+borrows from `js/engine/texgen.js` — **925 lines**. So the port needs that sampler's value-noise,
+not all 925 lines, but it needs it *exactly*, including its `f32` behaviour: the table is a
+`Float32Array`, which is a rounding decision, not an optimization.
+
 ## The gates, in the order they are worth attempting
 
 1. **The two vectors.** A dozen lines of transcription. This is the cheapest possible proof that
