@@ -1,0 +1,30 @@
+{
+ "note": "Byte-exact reference corpus of the rules at parent build 1040. The contract of the RULES, not of any port. Regenerate only by an explicit decision to move the baseline (docs/CORE-REPLAN.md, MERGE-STATE.MD).",
+ "seed": "golden",
+ "difficulty": "medium",
+ "seats": 4,
+ "build": 1040,
+ "files": {
+  "golden/stream-b1040-1m.jsonl": {
+   "sha256": "8611ac58fa2726dbc88d48e94c76e373db4d16cb6b9314219d16e18266c41bc8",
+   "bytes": 2722912
+  },
+  "golden/turn1-b1040.jsonl": {
+   "sha256": "4e015ba9f314609d3f889bed812cb3fd196b3aa23c629f9c2cc8bd62c16872fd",
+   "bytes": 21147
+  },
+  "golden/map-line-b1040.json": {
+   "sha256": "93d89b16927650a4526c277db02f9664c43f77a2cfc23ed878f862e11aed9311",
+   "bytes": 47098,
+   "note": "extracted from the 1-minute stream; 942 resource nodes, integer millimetres"
+  },
+  "samples/golden/initial/golden-initial.jsonl": {
+   "sha256": "97a0a1cb8cebc275bd78991c1717101f296850c2e66dd1d5d9732f325492aaa3",
+   "bytes": 26629752
+  }
+ },
+ "keyedVectors": {
+  "s0:start-workers#0": 0.6629751205909997,
+  "s0:start-workers#1": 0.6242878348566592
+ }
+}

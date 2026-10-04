@@ -60,21 +60,22 @@ the input model is":
 
 | Face | Shell | The core | The renderer | The harness | The record | The input model |
 |---|---|---|---|---|---|---|
-| **Browser** (the existing primary) | a static folder over HTTP (`fetch` needs it; `file://` does not work) | WASM | WebGL2 (a WebGPU path, progressive) | the daemon, or a thin in-page fallback for the zero-config case | the match folder, exported on end | mouse + keyboard, as today |
-| **Desktop** (new) | Tauri (Win / macOS / Linux) | native | the same renderer, in the native webview | the daemon | the match folder, **direct file I/O** (no browser download friction) | mouse + keyboard + **gamepad** + multi-monitor + always-on-top |
-| **Headless / server** (new) | one binary, `war-core` | native, single process | none (a null renderer; a match runs unwatched per §11.1) | the daemon | the match folder, on disk | `--serve` (a hosted match: N clients attach), `--batch` (a benchmark matrix), `--record` (a silent ghost match) |
+| **Browser** (the existing primary — **v1, the parent's to own**) | a static folder over HTTP (`fetch` needs it; `file://` does not work) | the JS rules as shipped — **v2 ships no browser core** (spec §14) | WebGL2 (a WebGPU path, progressive) | the daemon, or a thin in-page fallback for the zero-config case | the match folder, exported on end | mouse + keyboard, as today |
+| **Desktop** (new) | one native binary + a webview we own (Win / macOS / Linux) | native, **Odin** | the same renderer, in the native webview | the daemon | the match folder, **direct file I/O** (no browser download friction) | mouse + keyboard + **gamepad** + multi-monitor + always-on-top |
+| **Headless / server** (new) | one binary, `war-core` | native, single process, **Odin** | none (a null renderer; a match runs unwatched per §11.1) | the daemon | the match folder, on disk | `--serve` (a hosted match: N clients attach), `--batch` (a benchmark matrix), `--record` (a silent ghost match) |
 | **Hosted arena** (new, P4) | the headless binary, `--serve`, over a WebSocket | native | the clients' renderer | the daemon, on the host or on a remote seat's machine | the match folder, canonical on the host | a human on a laptop, an agent on another machine, a spectator anywhere |
 | **Mobile** (later) | the web build, responsive | WASM | the same renderer, read-only | a spectator (no agent seat) | a read-only replay view | a spectator; a full agent seat is **out of scope** (an input model, not a rendering problem) |
 
-**Why Tauri for the desktop** (and not Electron, and not native): Tauri is a *small*
-shell over the OS webview, which means the desktop app is the *same* renderer and the
-*same* UI code as the browser — one codebase, two shells, and the "refined" look (§7) is
-built once. It gets native file dialogs (transcript import/export without a browser
-download), a low-latency audio path, multi-monitor, always-on-top, and gamepad input —
-the four things a spectator actually wants in a long match. Electron was rejected on
-weight and on shipping a second runtime; native (a full re-implementation of the UI in a
-desktop toolkit) was rejected because it forks the UI into two codebases and the whole
-point of B1/B3 is *one* contract with *many* faces.
+**Why Tauri was rejected** (this section recommended it until 4 October 2026). One fact,
+found after the language choice was made: **Tauri's backend is Rust** (spec §14). Under an
+Odin core that is three languages in one product — JS UI, Rust shell, Odin sim — the exact
+opposite of why Odin was picked. The replacement is a webview we own behind one thin C ABI
+(WebView2 / WebKitGTK / WKWebView), served by the same binary, which keeps every reason
+Tauri was attractive: the same web UI, native file dialogs with no browser download, the
+low-latency audio path (`miniaudio`, vendored), multi-monitor, always-on-top and gamepad.
+Electron stays rejected on weight; a full native UI stays rejected as a rewrite of the least
+deterministic part of the product, parked as spec §13.12 for whoever wants it. The real cost
+is honest: three small OS-specific shims, owned here, instead of one dependency.
 
 **Why a headless binary at all**: the spec's headline property is *the match must run
 unwatched* (§11.1). v1 achieves that with a worker-driven clock inside a browser tab that
@@ -84,14 +85,12 @@ match is a process, a record is a folder, and a *corpus* is a batch. That is whe
 "better tracking" and "multiplayer" and "batch benchmarking" all actually live.
 
 **The "no build step" tradeoff, stated:** v1's README claims *runnable straight from a
-folder, zero dependencies* — and the spec correctly flags that as a **product claim, not
-a design law** (§11.3). v2 relaxes it deliberately: the core is compiled (Rust → WASM for
-the web, native for desktop/server), so there is now a build *of the core*. What is
-*preserved* is the promise that matters to the user — **the web build remains a static
-folder you can open and play; no server is required for personal play** (the daemon is
-local and optional in the browser face). What is *dropped* is the claim that nothing in
-the repo is ever compiled. The README claim is re-decided at the end of P2 (§9), and the
-decision is written down, not absorbed.
+folder, zero dependencies*, and the spec flags that as a **product claim, not a design law**
+(§11.3). v2 relaxes it deliberately but **not for the browser**: the web build keeps the claim
+verbatim, because the browser still runs the JS rules unchanged. What is compiled is the
+native core, and only for the faces that want a process — so the v2 README says "one binary,
+no runtime to install" while the page still says "open the folder", and §11.3's flag is
+closed by writing both sentences rather than by arguing about them (spec §14).
 
 ---
 
@@ -114,7 +113,7 @@ flowchart TB
 
   subgraph faces ["The faces (peripheral, disposable)"]
     WEB["Web shell (JS + WASM)"]
-    DESK["Desktop shell (Tauri)"]
+    DESK["Desktop shell (webview)"]
     HEAD["Headless (war-core)"]
     REND["Renderer (WebGL2 / WebGPU)"]
     UI["Spectator UI + analyzer"]
@@ -174,14 +173,17 @@ Read the diagram as **three contracts, not three technologies**:
 
 ## 4. The core (the sim)
 
-**Language: Rust.** The reasons are the ones the spec's open questions already set up:
-the core is the one component a rebuild *cannot* get wrong, and it is the one component
-that must run in three very different places (a browser's WASM, a desktop process, a
-long-running headless server). Rust gives a single source that compiles to all three
-with one memory model, a strong type system for the cost/roster/age tables (the spec's
-"one source of truth for shared constants," §13.8, becomes *a* table, not 26 spellings),
-and a no-GC runtime, which matters for a sim that must step at a fixed cadence for a
-half hour on a mid-tier browser without a frame of jitter.
+**Language: Odin.** Decided 4 October 2026: the record is spec §14 ("No Rust for the
+Wicked"), the arithmetic and the tooling research are `docs/CORE-REPLAN.md`. What changed was
+not Odin's qualities but this section's premise — one compiled language was wanted because
+one source had to reach a browser's WASM, a desktop process and a server. With no browser
+core the premise is gone, and what is left of the case Odin answers directly: no GC, no
+runtime, a C ABI, one build command, a linter in the compiler, a test runner with a memory
+tracker, and a vendored set that covers this product's native needs (`sdl3`/`glfw` for the
+window, `miniaudio` for §8's audio, `nanovg`+`microui` if §7's look is ever wanted outside a
+DOM, `cgltf`/`stb`/`zlib` for content, `lua` for scenarios, `ENet` with `ggpo` for §8's
+hosted arena — rollback netcode for a sim that is already deterministic and byte-replayable,
+which is the half most projects have to build first).
 
 **Considered and rejected, for the record:**
 
@@ -194,9 +196,16 @@ half hour on a mid-tier browser without a frame of jitter.
   to WASM *and* to three desktop OSes *and* a headless server, with a CMake or Makefile
   per target, is a build-system tax the project does not need, and it gives no memory
   safety for the one part of the system that runs unattended for hours.
-- **WASM directly, without a native path.** Rejected because the headless and the
-  server *are* the point of B1/B3; a WASM-only core can run in a browser and in a WASM
-  runtime, but it cannot be the canonical record-keeper of a hosted match.
+- **WASM directly, without a native path.** Rejected because the headless and the server
+  *are* the point of B1/B3; a WASM-only core cannot be the canonical record-keeper of a
+  hosted match.
+- **Rust, as the core language — retired rather than failed** (spec §14.2). The port it
+  replaces still reproduces the reference map byte for byte (942 nodes, 47,097 bytes) and
+  turn 1 on four seats, and stays available as the tagged reference `rust-core-final-b1040`.
+  Retired because it is 7% of the rules written in the highest-review-cost language on the
+  table, and a port nobody is eager to finish is not a foundation. One measurement reopens
+  it: if Odin's object files cannot be kept free of fused multiply-add (spec §14.3),
+  determinism outranks preference, in writing.
 
 **The determinism contract (the golden rule).** The sim is **single-threaded,
 fixed-timestep, seeded, with a fixed-point or deterministic-float discipline** (Rust
@@ -509,7 +518,7 @@ change in light must not make the far edge of the map read wider than the near e
    scout, a cavalry, a priest, a champion; the shared buildings; the four Wonders),
    **embedded in the repo** (a few kilobytes each, a procedural fallback generated at
    load if a model is missing). The *zero-download* claim is preserved for the web (the
-   set is in the folder) and *strengthened* for the desktop (Tauri embeds it). The
+   set is in the folder) and *strengthened* for the desktop (the same binary serves it, so there is nothing to embed). The
    reason this is the #1 lever: a silhouette that reads at unit scale — a scout that
    *looks* like a scout, a Wonder that *looks* like a Wonder — is what separates "a
    simulation" from "a game you want to watch." *(This is the one place the proposal
@@ -567,12 +576,18 @@ sim's frame budget, and the §9 gate checks it on real hardware.
 
 ## 8. Multi-platform delivery, end to end
 
-- **The web** stays a **static folder**: the same "open and play" promise, now a
+- **The web** stays exactly what it is: a **static folder**, running the JS rules it runs
+  today, keeping "open and play" and every §11.3 property. There is no `?core=wasm` flag and
+  no browser core to select (spec §14.1, decision 2): the parent owns that surface, and the
+  golden (§3.4) is what proves the native engine agrees with it.
   compiled core (WASM) + the built renderer + the UI, no server required for personal
   play. During the transition a `?core=wasm` flag selects the core; it defaults to the
   new core at the end of P2, and the README's "no build step" claim is *re-decided and
   written down* at that moment (§2, §11.3).
-- **The desktop** is **Tauri** (Win / macOS / Linux): the *same* web UI in a native
+- **The desktop** is **one native binary around a webview we own** (Win / macOS / Linux):
+  the *same* web UI, native file dialogs (transcript import / export with no browser
+  download), a low-latency audio path (`miniaudio`), multi-monitor, always-on-top and
+  **gamepad** input — without inheriting a second language to get any of it (spec §14.1).
   shell, plus native file dialogs (transcript import / export with no browser download),
   a low-latency audio path, multi-monitor, always-on-top, and **gamepad** input. This
   is the "most polished" face and the one a spectator lives in for a long match.
@@ -616,9 +631,9 @@ sequence is ordered so that the *riskiest* bet (the core port) is first and the
 
 | # | Phase | The bet | The gate (pass criteria) |
 |---|---|---|---|
-| **P0** | **The core** — the Rust sim, the WASM boundary, the rule-based brain ported in | B1 | **The golden diff**: for a fixed seed set, the new core's *state sequence* (the §5.4 serialized form) is **byte-identical** to the shipped JS sim *and* to the shipped sample corpus; the existing 35+ tests pass *against the core through the WASM boundary*; the §12 invariants list is green. |
+| **P0** | **The core** — the Odin sim, native only: the map, then turn 1, then the rule brain | B1 | **The golden diff**, in three gated steps: (a) the **map line** — 942 nodes, 47,097 bytes — byte-identical to `golden/stream-1m.jsonl`; (b) the four **turn-1 states** byte-identical to `golden/turn1-b1040.jsonl`, worker spread and advancing clock included; (c) the **state sequence** (the §5.4 serialized form) byte-identical to the shipped corpus for a fixed seed set. The existing JS suite passes unchanged; the §12 invariants are green; and the build's object file holds **no `fma` instruction** (`llvm-dis`, counted in CI), because contraction changes the answer and the whole claim is the answer. |
 | **P1** | **The trace** — the daemon, the event stream, the match folder, the redaction at export | B2, B3 | A **headless 4-seat match** (no browser, no display) produces a *folder*; the `transcript.jsonl` validates against the v1 schema; the `events.jsonl` is present and, for two runs of the same seed, **diffs to empty**; the `traces/` carry the full raw usage; the *exported* folder has **no key, no endpoint, no cost** (the existing redaction/audit test passes on the new format). |
-| **P2** | **The face** — the Tauri shell, the renderer refinement (§7), the UI polish | the visual | **Playable and recordable on Win, macOS, and Linux**; the §7 visual work is in; the existing **Playwright visual-regression** suite is green; the §7.2 performance target is met on a mid desktop (the same scene at 60 fps, the showcase cap ~3×); the README's "no build step" claim is re-decided and the decision is written into the doc. |
+| **P2** | **The face** — the webview shell, the renderer refinement (§7), the UI polish | the visual | **Playable and recordable on Win, macOS, and Linux**; the §7 visual work is in; the existing **Playwright visual-regression** suite is green; the §7.2 performance target is met on a mid desktop (the same scene at 60 fps, the showcase cap ~3×); the README's "no build step" claim is re-decided and the decision is written into the doc. |
 | **P3** | **The eyes** — the analyzer (web + CLI), the benchmark runner, the OTel export | the analysis | The **A/B view** renders over a two-match corpus (the diff of the decision, the diff of the outcome); the **causal-chain** view answers "why did this kill happen" from `events.jsonl` alone; the **report** command emits a correct per-match and per-corpus document; the **OTel export** is ingested by a standard APM/LLM-observability tool without a new viewer. |
 | **P4** *(optional)* | **The arena** — the hosted `--serve`, a remote agent seat, the spectator feed, the mobile spectator | the multiplayer | A **match with a seat on two machines and a spectator on a third** runs to a declared outcome; the *canonical* `transcript.jsonl` is **identical** to a local run on the same seed (the server is a transparent authority, not a new game); the spectator feed is read-only and the server's input boundary is the schema-validated command. |
 
@@ -655,15 +670,12 @@ call before P0 starts, because each one changes what "done" means:
    want a different language, the §4 determinism contract and the P0 golden-diff gate
    are *language-agnostic* and survive — but the "one source, three targets" property is
    what makes the gate cheap, and Rust is the only language that gives it for free.
-2. **The desktop shell: Tauri — confirm** (vs Electron, vs a native re-implementation).
-   The choice is about the *shell*, not the UI: whichever one, the UI is the same web
-   codebase (that is B1's point). Tauri is the smallest shell that still gives native file
-   I/O, a low-latency audio path, multi-monitor, and gamepad; Electron is the heavier,
-   better-known option, and its cost is shipping a second runtime and a second windowing
-   model; a native re-implementation is the one I would refuse, because it forks the UI
-   into two codebases and re-opens the "renderer is the sim's only consumer" problem we
-   just closed. If you would rather spend P2 elsewhere, the desktop face can *move to
-   P4* without breaking the sequence — it is the one phase whose position is flexible.
+2. **The desktop shell: decided — no Tauri** (spec §14.1, decision 4). Its backend is Rust,
+   so an Odin core under a Tauri shell is three languages in one product. A webview behind a
+   thin C ABI, served by the same binary, keeps the polish and drops the language. Revisit
+   trigger: if the first shim costs more than a few days, reconsider the shell — do not ship
+   three languages by drift.
+
 3. **The tail: is v2 done at P3, or does P4 (the hosted arena + the mobile spectator)
    belong?** The proposal marks P4 *optional* deliberately: everything it adds (a remote
    agent seat, a spectator feed) is an *extension* of the P0–P3 contracts, not a

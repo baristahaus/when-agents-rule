@@ -99,57 +99,24 @@ jobs:
       - name: Tests
         run: node --test tests/*.test.cjs
 
-  # The deterministic core's own gate. Nothing here ran automatically before: the
-  # golden-diff and the state pin are the repo's strongest claims ("same seed, same
-  # bytes"), and until now they only moved if someone remembered to cargo test.
-  # ubuntu-24.04 ships a stable Rust toolchain; the crates (serde, serde_json,
-  # indexmap) build from the registry, so the job needs the network and a cache to
-  # stay quick.
-  core:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/core/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust/core/Cargo.lock') }}
-
-      - name: Tests (unit + the initial-state golden pin)
-        working-directory: rust/core
-        run: cargo test
-
-      # The map line rebuilt from the crate must be byte-identical to the shipped
-      # golden's — the first gate of the port, in CI.
-      - name: Golden diff
-        working-directory: rust/core
-        run: cargo run --release --bin golden-diff -- golden/stream-1m.jsonl
-
-      # Reproducibility of the gate itself: the recorder, run now, must produce
-      # the shipped golden's bytes. If this ever goes red, the golden no longer
-      # describes the game in this repository.
+      # Reproducibility of the contract itself: the recorder, run now, must reproduce the
+      # pinned golden. If this goes red, the corpus no longer describes the game in this
+      # repository, and every claim about a future core being "byte-exact" is unfounded.
+      # A single trailing newline is tolerated; content is compared byte for byte.
       - name: The golden regenerates byte-identically
         run: |
-          node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/stream-1m.jsonl
-          cmp /tmp/stream-1m.jsonl rust/core/golden/stream-1m.jsonl
+          node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/stream-rec.jsonl
+          node -e 'const f=require("fs"),t=x=>x[x.length-1]===10?x.subarray(0,x.length-1):x,a=t(f.readFileSync("golden/stream-b1040-1m.jsonl")),b=t(f.readFileSync("/tmp/stream-rec.jsonl"));if(Buffer.compare(a,b))throw new Error("golden drift: the recorder no longer reproduces the pinned corpus ("+a.length+" vs "+b.length+" bytes)");console.log("golden reproduces: "+a.length+" bytes");'
 
-  # The two Playwright suites, nightly and on demand — deliberately not on every push.
-  #
-  # They are the only regression guard for the escaping and showcase-mode work (a property of
-  # the parsed DOM, which no unit test can reach) and the only thing that looks at what a
-  # player actually sees. They stay off push because each run downloads a ~170 MB browser,
-  # and a check that goes red because a CDN hiccuped trains everyone to ignore the check.
-  # Nightly keeps the signal without holding a push hostage to it; workflow_dispatch is
-  # "run it now, before I ship".
-  #
-  # The commands below are the ones that pass on the machine this file was written on (Node
-  # 22, Playwright 1.49.1, Chromium in software GL through --enable-unsafe-swiftshader, which
-  # both suites already pass themselves). The runner is the one part that cannot be exercised
-  # locally, so the first scheduled run is the real test of this job.
+  # The porting gate lived here as `cargo test` plus a byte-diff of the golden, and it earned
+  # its keep: it caught the worker spread and the off-by-one-second clock, both before review.
+  # The Rust port is retired (docs/specs/REBUILD_SPEC.md §14 — 7% of the rules in the
+  # highest-review-cost language on the table, and a port nobody is eager to finish is not a
+  # foundation). The corpus survived it and moved to `golden/`, hashes pinned in
+  # `golden/MANIFEST.json`; the gate's teeth are now `tests/golden-fixtures.test.cjs`, which
+  # runs in the node job below, and the next core's gate is `docs/CORE-REPLAN.md`. The port
+  # itself is recoverable with `git checkout rust-core-final-b1040`.
+
   browser:
     runs-on: ubuntu-24.04
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
