@@ -195,6 +195,24 @@ lost: `tests/match-determinism.test.cjs` now asserts the keyed properties, inclu
 single stream cannot pass (a draw on another key must not move mine). The parent also fixed a
 typo our side carried (`b.z - b.z` in a distance expression).
 
+**Ported into the core, and where that landed matters.** The re-derived golden placed each
+seat's starting workers a few units from where our core put them, and the reason was exactly
+this entry: the reference draws the spread with `rand(who, 'start-workers')` while the core
+drew it off the terrain stream. So `rust/core/src/prng.rs` now has `KeyedRng` — same hash,
+same `mulberry32(hash(seed|key|n))`, same per-key counter — with vectors taken from
+`js/simulation/rng.js`, including the property the single stream cannot pass. Two files draw
+from it: `state.rs`, which builds the turn-1 state the gate compares, and the gate's own test.
+
+One file does not, and saying so is the point: `rust/core/src/model.rs` carries the same
+change for a while and **is compiled by nothing** — `lib.rs` declares `data`, `mapgen`,
+`prng`, `sim`, `state`, never `model` or `match`. Proof, not inference: replacing that file
+with a line of garbage leaves `cargo build` green. That edit was therefore inert, so it has
+been reverted rather than left as a plausible-looking change in a dead file — the
+delete-or-wire call there belongs to the owner (QUALITY_REVIEW says the same). The same trap
+sits one directory over: `sim/vision.rs::rand_jitter` is wired but uncalled, and its site in
+the rules — `js/game.js:2005`, `rand(unit, 'node-spot')` — is keyed now, so whoever ports
+park-and-spread must port the key with it, not the ±k/2 of a stream draw.
+
 ### S2 — Unit refereeing off the render loop
 
 Our 5d16075 moved separation and building clearance from `animate()` to the simulation clock so

@@ -29,7 +29,7 @@ use serde::Serialize;
 
 use crate::data::{BuildingDef, Cost, UnitDef, WorldData};
 use crate::mapgen::{self, Map, Resource};
-use crate::prng::{KeyedRng, Mulberry32};
+use crate::prng::Mulberry32;
 
 /// What a unit's `harvest_target` points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,10 +276,6 @@ pub struct Match {
     /// `rand` / `randJitter` the sim draws from it, in the reference's
     /// order, in order.
     pub rng: Mulberry32,
-    /// The keyed draws the rules actually use: `Game._rng` (game.js:112). Every rule-side
-    /// value in a match comes from here, not from the terrain stream above, so that a draw
-    /// depends on the seed, the seat and the purpose — never on the draw order.
-    pub key_rng: KeyedRng,
     pub seats: Vec<Seat>,
     pub units: Vec<Unit>,
     pub buildings: Vec<Building>,
@@ -336,7 +332,6 @@ impl Match {
             },
             resources: map_resources,
             rng,
-            key_rng: KeyedRng::new(seed),
             seats: Vec::new(),
             units: Vec::new(),
             buildings: Vec::new(),
@@ -413,17 +408,10 @@ impl Match {
             match_.seats[i].building_ids.push(tc);
 
             for _ in 0..3 {
-                // game.js:659 — `spawn.x + (this.rand(ai, 'start-workers') - 0.5) * 10`, x
-                // then z, both on one key. The key is the SEAT INDEX (`rngOwnerKey`,
-                // game.js:117), not the random player id: an id is still unseeded this early,
-                // and a key must mean the same seat in every run of the match.
-                let key = format!("s{i}:start-workers");
-                let wx = sx + (match_.key_rng.draw(&key) - 0.5) * 10.0;
-                let wz = sz + (match_.key_rng.draw(&key) - 0.5) * 10.0;
                 let w = match_.create_unit(
                     "worker",
-                    wx,
-                    wz,
+                    sx + match_.rand_jitter(10.0),
+                    sz + match_.rand_jitter(10.0),
                     &owner,
                     &civ,
                     "stone",
@@ -436,19 +424,14 @@ impl Match {
         match_
     }
 
-    // -- the match's random -------------------------------------------------
+    // -- the terrain's random ----------------------------------------------
 
-    /// `Game.rand(who, purpose)` (game.js:111) with the key already resolved: the n-th draw
-    /// for that key in this match. There is deliberately no `randJitter` any more — the
-    /// parent's keyed streams superseded our one-seeded-stream port (docs/FORK-DIVERGENCES.md
-    /// S1), and the call sites that wanted jitter now spell the spread out against a purpose,
-    /// exactly as js/game.js and js/openai-ai.js do.
-    pub fn rand_keyed(&mut self, key: &str) -> f64 {
-        self.key_rng.draw(key)
+    /// `game.js:107-115` / `terrain.js:138`: one draw, scaled to `[-j, j]`.
+    pub fn rand_jitter(&mut self, j: f64) -> f64 {
+        self.rng.next() * 2.0 * j - j
     }
 
-    /// The terrain stream itself. Kept because mapgen draws from it and a checkpoint
-    /// comparison needs to be able to rebuild it; NO rule value may read it.
+    /// `this.rand()` — the terrain stream itself.
     pub fn rand(&mut self) -> f64 {
         self.rng.next()
     }
