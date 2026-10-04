@@ -12,7 +12,7 @@
 // matters — a fixture nobody can regenerate is a rumor, not a gate.
 'use strict';
 const test = require('node:test'), assert = require('node:assert/strict');
-const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto'), cp = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const G = f => path.join(root, 'golden', f);
 const manifest = JSON.parse(fs.readFileSync(G('MANIFEST.json'), 'utf8'));
@@ -73,6 +73,29 @@ test('the turn-1 file holds one state per seat, degenerate exactly as §3.4 says
     }
   }
   assert.deepEqual([...seen].sort(), [0, 1, 2, 3]);
+});
+
+test('the turn-1 fixture has a canonical form, and it is the one a port is diffed against', () => {
+  // v1 mints seat ids from Math.random on purpose (a reloaded page must never read the previous
+  // match's transcript), so the captured fixture cannot be byte-reproduced by anything — not a
+  // replay, not a port, not the recorder twice. Without a canonical form the turn-1 gate would be
+  // unpassable rather than hard; with one, the ids are the only thing that differs.
+  const raw = fs.readFileSync(G('turn1-b1040.jsonl'), 'utf8').split('\n').filter(l => l.trim());
+  const canonical = fs.readFileSync(G('turn1-b1040.canonical.jsonl'), 'utf8').split('\n').filter(l => l.trim());
+  assert.equal(canonical.length, raw.length);
+  const again = cp.execFileSync('node', [path.join(root, 'tools/golden/canonicalize-states.cjs'), G('turn1-b1040.jsonl')]).toString();
+  assert.equal(again, canonical.join('\n') + '\n',
+    'the checked-in canonical form has drifted from the raw capture it is derived from');
+  for (const l of canonical) {
+    const r = JSON.parse(l);
+    assert.equal(r.playerId, `seat${r.seat}`, 'a canonical line still carries a session id');
+    assert.equal(r.state.clock.matchSeconds, 1);
+  }
+  for (const l of raw) {
+    const r = JSON.parse(l);
+    assert.notEqual(r.playerId, `seat${r.seat}`,
+      'the raw capture was edited to look canonical — it must stay exactly as recorded, for provenance');
+  }
 });
 
 test('the shipping rules still produce the keyed vectors a new core must match', () => {

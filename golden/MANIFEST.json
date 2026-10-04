@@ -21,6 +21,11 @@
   "samples/golden/initial/golden-initial.jsonl": {
    "sha256": "97a0a1cb8cebc275bd78991c1717101f296850c2e66dd1d5d9732f325492aaa3",
    "bytes": 26629752
+  },
+  "golden/turn1-b1040.canonical.jsonl": {
+   "sha256": "2f67e48cdfc654fa82663e6aa95d714f9c2e75757e0d215e17e05f0a323c3f0d",
+   "bytes": 21075,
+   "note": "turn1-b1040.jsonl with seat ids re-keyed to seat<N>; the form a port compares against, because v1 mints seat ids from Math.random by design"
   }
  },
  "keyedVectors": {
