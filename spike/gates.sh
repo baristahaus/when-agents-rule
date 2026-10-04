@@ -29,6 +29,7 @@ ver="$("$ODIN" version 2>&1 | head -1)"
 say "gate 1  compiler present" "ok — $ver"
 
 mkdir -p spike/bin
+rm -f spike/bin/prng-spike spike/bin/counts spike/bin/coast spike/bin/probe.o
 
 # Gate 2 — the keyed vectors: an Odin transcription of js/simulation/rng.js must print the two
 # integers the golden pins. This is the smallest possible byte-exact test and the one that earns
@@ -57,6 +58,20 @@ if "$ODIN" build spike/counts -out:spike/bin/counts >/tmp/odin-counts.log 2>&1 \
 else
 	say "gate 2b node counts 98/784/40/20" "FAIL"
 	tail -6 /tmp/odin-counts.log
+	fails=$((fails + 1))
+fi
+
+# Gate 2d — the coastline. terrain.js bisects a noise field owned by the texture generator to find
+# where land ends, and node placement is clipped to it, so this is the machinery that could have
+# dropped nodes between the counts gate and the byte-diff. Asserted as f32 bit patterns, because the
+# reference's lattice and table are Float32Array and a six-digit decimal compare is exactly the slop
+# that lets a wrong-coastline port look fine until positions drift.
+if "$ODIN" build spike/coast -out:spike/bin/coast >/tmp/odin-coast.log 2>&1 \
+  && [ -x spike/bin/coast ] && ./spike/bin/coast | grep -q 'COAST GREEN'; then
+	say "gate 2d coast table, f32 bits match" "ok"
+else
+	say "gate 2d coast table" "FAIL"
+	tail -8 /tmp/odin-coast.log
 	fails=$((fails + 1))
 fi
 

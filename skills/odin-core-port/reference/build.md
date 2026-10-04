@@ -41,6 +41,10 @@ and the add stay separate, which is what the reference's two roundings require. 
 
 | guess | reality in dev-2026-09 |
 |---|---|
+| `fmt` width/precision/hex verbs (`{:08x}`, `{:.6}`) | this compiler substitutes `{}` and nothing else; a brace verb comes back as literal text and the value lands at the end of the line, so a gate's own output looks corrupted. `printfln` also warns `%!(NO VERB)`. Build hex by hand (`spike/coast/main.odin` has a small one). |
+| `for i in reverse 0 ..< n` | no `reverse` on ranges; use the C form `for i := n-1; i >= 0; i -= 1`. |
+| mutating a proc parameter | parameters are read-only; copy it (`in:` is a reserved word, so don't reach for that name either). |
+| closures capturing locals in a nested proc | procs are not closures; index the array inline or pass it. |
 | bitwise `^` for XOR (it is deref only; the operator is `~`) | `x ~ y`. Copying the reference's `hashSeed` verbatim fails to parse, with an error pointing at the operand, not the operator. |
 | `inout`/`ref` parameter modes | they do not exist in this compiler — `proc(x: ^u32)`, and read it as `x^`. Modes are a Rust/Go reflex worth unlearning early. |
 | `*p` to read through a pointer | `p^` — the caret is postfix. `*a` is a syntax error ("Operator '*' is not a valid unary operator", suggesting `a^`). For new code prefer `inout`, which needs no deref syntax at all. |
