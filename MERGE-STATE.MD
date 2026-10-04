@@ -185,11 +185,14 @@ five files add, so nothing existing moved. `contract.test.cjs` 7/7, and a two-lo
 `{to,from}` validates clean while `[10]` reports `1 items < minItems 2` and `[1,2,3]`
 reports `3 items > maxItems 2`.
 
-**Push blocked, not failed:** `git push origin share/upstream-contract` fails with
-`ssh: Could not resolve hostname github.com`, four retries over a minute, while other hosts
-still resolve — the same push succeeded an hour earlier on `rebuild/v2`. When DNS returns:
-`git push origin share/upstream-contract`, then open a PR against `asp67/when-agents-rule`
-`main` from that branch. `rebuild/v2` and `main` were already published and need nothing.
+**Published.** The first attempt failed on DNS alone — `ssh: Could not resolve hostname
+github.com`, four retries, while other names still resolved, and no more a mystery an hour
+later when it resolved and the same push went straight through. Both branches are on
+`origin` now: `share/upstream-contract` = `f9be2e6`, `rebuild/v2` = `b4cf4bc`, `main` =
+`33a1f11`. To open it:
+`https://github.com/asp67/when-agents-rule/compare/main...baristahaus:when-agents-rule:share/upstream-contract`.
+Note the branch is deliberately based on `upstream/main`, not on our `main`, so their diff
+shows two commits and nothing fork-shaped.
 
 ## Next, in order
 
