@@ -234,3 +234,85 @@ the fixture move:
 
 Two decisions, then: **does the browser have to run the new core**, and **may I tag, move
 the fixtures and delete `rust/`** — after which the spike is the next thing I do.
+
+## 11. No web — what that actually takes off the table, and what indie Odin people ship on
+
+The web question was answered first (§9, item 2): **no web face for the new core.** That
+single decision does four things at once, and two of them were not obvious from §4–§5.
+
+**What it dissolves:** §4's WASM objection to Odin, which was the whole objection. With no
+browser face, Odin's `js_wasm32` quirks (#5179, the `.obj`/`.o` emcc mismatch, no
+`wasm-bindgen` equivalent) are somebody else's problem. It also dissolves §2's "one renderer
+codebase, two shells" premise, because there is now one shell.
+
+**What it does not dissolve:** the FP-contraction question (§4's blocking unknown), which is
+about native code too and must still be answered by `llvm-dis | grep fma` on the spike's own
+object file. And it does not dissolve the *spec edits*: §2's matrix, §8's `?core=wasm` flag
+and §9's P2 milestone are load-bearing text that option B deletes.
+
+**What indie Odin games ship on — measured today, not from memory.** The ecosystem is small
+and it is worth knowing exactly how small: **18 Odin repositories above 150 stars, 3 above
+1,000** (the compiler, `ols` the language server at 1,196★, and `awesome-odin`). Above 150
+stars you find the compiler, a language server, an awesome-list, `odin-lang/examples`, and
+then the game-relevant ones: `karl2d` (696★, a beginner-friendly 2D library),
+`odin-raylib-hot-reload-game-template` (627★), `odin-http` (447★), `tina` (390★,
+thread-per-core), `Skald` (172★, Elm-style declarative GUI), `odin-godot` (165★),
+`odin-tracy` (159★). So: single-maintainer libraries, mostly, and the honest reading is
+*"you will read the source of what you depend on"* — which is the same posture this repo
+already has with zero npm dependencies.
+
+The more important list is what the **compiler distribution itself vendors** — because that
+is the part that is first-party, and for a native RTS-ish product it is almost the whole
+indie stack, checked from the repository tree today:
+
+    ENet, OpenEXRCore, OpenGL, box2d, box3d, cgltf, commonmark, compress, curl,
+    darwin, directx, egl, fontstash, ggpo, glfw, kb_text_shape, libc-shim, libc, lua,
+    microui, miniaudio, nanovg, portmidi, raylib, sdl2, sdl3, stb, vulkan, wasm, wgpu,
+    windows, x11, zlib
+
+Read that list against the proposal's own wish list and it maps almost line for line:
+
+| the proposal wants | the vendored answer |
+|---|---|
+| low-latency native audio (§8, desktop) | `miniaudio` |
+| a window with GL, on three OSes (§2, §7) | `sdl3` / `glfw` / `raylib`, plus `OpenGL`, `vulkan`, `directx`, `egl` |
+| the "classic RTS look, refined" without a DOM (§7) | `nanovg` + `fontstash` for vector text and shapes, `microui` for immediate-mode panels |
+| a hosted arena with real-time human play (§8, P4) | `ENet` for UDP transport and **`ggpo` — rollback netcode, vendored** |
+| models, textures, archives | `cgltf`, `stb`, `OpenEXRCore`, `zlib`, `compress` |
+| scripting for scenarios/anchors | `lua` |
+| OS APIs, no CMake | `windows`, `darwin`, `x11`, and `libc` / `libc-shim` |
+| being profiled, because a half-hour match must not jitter (§2) | `odin-tracy`, `spall-web` (both above 150★) |
+
+`ggpo` deserves its own sentence, because it turns this decision from a subtraction into an
+addition. We already have the two properties rollback netcode needs and most games have to
+build: a deterministic, seeded, fixed-timestep sim and a full command log that replays
+byte-exactly. A real-time human-vs-human mode — which the proposal only imagines as a
+WebSocket relay — becomes a rollback game for the price of the transport, and the transport
+is vendored too. That is a P4+ idea, not a plan item, but it is the kind of thing that makes
+"no web" a vision rather than a loss.
+
+**The trap this exposes, and it is the one thing §2 of the proposal gets wrong:** the desktop
+shell was chosen as **Tauri**, and **Tauri's backend is Rust**. Choosing an Odin core and
+keeping Tauri buys three languages in one product — JS UI, Rust shell, Odin sim — which is
+the opposite of the simplicity argument that would make Odin attractive in the first place.
+The three real options:
+
+1. **Webview we own** (recommended): the Odin binary serves the existing UI over a local
+   socket and opens a webview through its C API (`webview2` on Windows, `WebKitGTK` on Linux,
+   `WKWebView` on macOS — thin bindings exist, and where they don't, it is one small C ABI).
+   This keeps the DOM renderer and the analyzer — thousands of lines of working JS that no
+   one proposes to rewrite — and makes the desktop face a native process with a browser
+   widget in it, which is what Tauri is, minus the Rust.
+2. **Native UI**: `microui` / `nanovg`, and rewrite the observer and analyzer. Months of work
+   on the least deterministic part of the product, for a look the DOM already gets close to.
+3. **Keep Tauri**: fastest to a polished shell, and it means Rust is in the product forever
+   anyway — in which case §5's option A (keep the Rust core) is the more coherent choice, and
+   we should say so rather than drift into a three-language stack by accident.
+
+Note what option 1 implies about "no web": **the web stops being a *face*, but the web UI
+stays.** The renderer and the analyzer are JS that read a *record* — they do not need to run
+the sim, and the record is the product's spine (§6). The parent's browser game also keeps
+working, in JS, exactly as it does now; our Odin core is the canonical engine for our
+headless and desktop line, and the golden is the treaty between the two engines. Saying
+that in one paragraph in §2 is the honest version of the change, instead of leaving a matrix
+row that says "WASM".
