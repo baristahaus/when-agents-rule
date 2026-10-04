@@ -4,7 +4,7 @@ One page that is always true about where this fork stands against the parent, wr
 that whoever picks it up next (including a future me with no memory) can rebuild the whole
 picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Last updated: build 1040, 4 October 2026, commit `1a10366`-ish (see `git log --oneline -6`).
+Last updated: build 1040, 4 October 2026, at `rebuild/v2` HEAD (`83ac1ce`).
 
 ## The one-paragraph version
 
@@ -34,11 +34,13 @@ v1 (the parent's JS); v2 work lives on `rebuild/v2`.
     upstream https://github.com/asp67/when-agents-rule         (the parent, read-only for us)
 
 - `main` — our **v1** line: 33 fork commits including the pre-sync WIP snapshot. Pushed.
-- `rebuild/v2` — this merge plus the divergence fixes and the re-derived golden. Pushed.
+- `rebuild/v2` — this merge plus the divergence fixes and the re-derived golden. Pushed:
+  `origin/rebuild/v2` = `83ac1ce` (merge → divergence fixes → golden → D6 arity → inert-edit
+  revert). This is the branch v2 work continues on.
 - `save/pre-upstream-sync` = `33a1f11` — the exact pre-merge tree, kept as the undo button.
   `git reset --hard save/pre-upstream-sync` is the documented abort path.
-- `sync/upstream-b1039` — the same commits as `rebuild/v2` under the name the sync work
-  used. Delete once `rebuild/v2` is merged or the choice is recorded.
+- `sync/upstream-b1039` — the branch the sync work ran on; now identical to `rebuild/v2`.
+  Delete when convenient.
 - The parent also has a branch `upstream/next-level`; we do not track it. Ask before
   merging it — it is not in this ledger's history.
 
@@ -149,8 +151,12 @@ ends 0/50/100/50 after exactly `house` and `farm`.
    same alive test the live fog does.
 2. Decide what `js/resim.js` (theirs) and `rust/core` (ours) should be to each other before
    either grows more. Today they are two answers to one question, in one repo.
-3. The replay's own build check: our line should refuse to re-simulate a recording whose
+3. Port park-and-spread with its key: `sim/vision.rs::rand_jitter` is wired and uncalled, and
+   its rule site is `rand(unit, 'node-spot')` now (`js/game.js:2005`). Also decide the fate of
+   the two unwired Rust drafts (`src/model.rs`, `src/match.rs`) — a mutation test
+   (overwrite with garbage, `cargo build` stays green) proves nothing reads them.
+4. The replay's own build check: our line should refuse to re-simulate a recording whose
    `coreHash` it cannot reproduce, and say so, rather than replaying a match it cannot
    explain.
-4. Consider a real file-list audit gate (recorder ↔ `js/manifest.js` ↔ `index.html`), since
+5. Consider a real file-list audit gate (recorder ↔ `js/manifest.js` ↔ `index.html`), since
    the ledger keeps finding drift in exactly that seam.

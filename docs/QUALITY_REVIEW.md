@@ -884,3 +884,84 @@ referenced by nothing — not `lib.rs`, not `sim/` — and do not compile in any
 `sim/model.rs` (363 lines, wired through `sim/mod.rs`) covers the same surface and
 reads like the replacement of the two top-level drafts. They are the owner's work in
 progress (Sept 27): delete-or-wire is the owner's call, not a polish pass's.
+
+## Addendum — October 4, 2026: 156 parent builds merged, and what the checks caught
+
+The fork merged the parent through build 1039 (`43ac04a`), re-applied its own simulation
+fixes on top, and re-derived the golden at build 1040. `MERGE-STATE.MD` at the root is the
+live ledger of that work; `docs/FORK-DIVERGENCES.md` is the per-divergence ledger. This
+addendum records what the *checking* was worth, because that is what this document is for.
+
+**Verdicts, measured.** `npm test` 622/622 (621 before the merge — the merge added one
+file). `cargo test --offline` green: 5 library tests (mapgen ×2, prng ×3) plus the turn-1
+state gate, byte-exact for all four seats. `golden-diff` exit 0, map PASS at 942 nodes and
+47,097 bytes. `record.cjs` regenerates `stream-1m.jsonl` byte for byte at 2,722,912.
+`tests/contract.test.cjs` 7/7. The golden's degeneracies survive 131 builds: every seat ends
+in the stone age, discovers nothing, names no winner, opens 200/200/100/50 and ends
+0/50/100/50 after exactly `house` and `farm`.
+
+**The state gate learned to say where it disagrees.** `state_initial.rs` used to dump two
+pretty-printed 1,400-line states and panic, which means every red run cost an afternoon of
+eye-ball diffing. It now walks the two `serde_json::Value`s and prints the first twelve
+differing paths, in the same shape `tools/golden/compare.cjs` prints for two streams. That
+change is the only reason "how bad is the merge?" had a six-path answer instead of a hunch.
+
+**Two of those six paths were the port, not the fixture.** The starting workers needed
+keyed draws (`KeyedRng` in `rust/core/src/prng.rs`, vectors from `js/simulation/rng.js`,
+including the property that a draw on another key cannot move mine) — the parent's mechanism
+our one-stream port had given up, surfacing as a fixture mismatch exactly as a byte-exact
+gate should. The other was `clock.matchSeconds` 0 → 1, and that one was **our own spec
+being wrong**: §3.4 listed a frozen clock among the golden's degenerate invariants and warned
+a port not to fix it, when builds 934–949 were in fact telling every model a clock of 0
+because two clocks were subtracted and clamped, and build 950 fixed it. §3.4, §13 and
+proposal §9 are corrected in the same commit as the fixtures.
+
+**Two claims I made and the tree contradicted.** Worth writing down, since the value of this
+document is that its numbers are checkable:
+
+- *6,074 tests.* The suite is 622. The larger figure appeared in my own summary of an earlier
+  session and was never measured here; the first run I actually timed said 622.
+- *An inert porting change.* I reported that `model.rs` and `state.rs` draw from `KeyedRng`.
+  `state.rs` does. `model.rs` is in no build target — `lib.rs` declares `data`, `mapgen`,
+  `prng`, `sim`, `state`, never `model` or `match`. The claim was testable, so I tested it:
+  overwriting `src/model.rs` with a line that is not Rust leaves `cargo build` green. The
+  edit is now reverted, because a plausible change in a file nobody compiles is how a port
+  ends up *believed* to be further along than it is. The adjacent real work is recorded in
+  S1: `sim/vision.rs::rand_jitter` is wired, uncalled, and its rule site (`js/game.js:2005`)
+  is keyed now — port the key, not the stream spread.
+
+**A schema change that failed a test before it helped one.** Restoring our
+`minItems`/`maxItems: 2` on `ordersInProgress.to/.from` (D6) made `tests/contract.test.cjs`
+throw, because `tests/lib/schema-check.cjs` deliberately refuses any keyword it would have to
+guess at and did not know those two. That refusal is the design working: a contract validator
+that silently skips a keyword is worse than one that admits it. Length is now checked before
+elements, and probed — `[12,-40]` clean, `[12]` reports `1 items < minItems 2`, `[1,2,3]`
+reports `3 items > maxItems 2`, a short patrol `from` reported too. All 2,901
+`ordersInProgress` entries in the shipped samples are two-long, and both emitters round a
+pair, so nothing that ever ran disagreed with the restored contract.
+
+**The recorder had been simulating a game that no longer existed.** `record.cjs` loaded 12
+files by hand, a list that predates `js/simulation/{rng,math,position-rules}.js` — so the
+fixture every port is measured against was being produced without the seeded draws. It loads
+`js/manifest.js`'s `vm` list now, the same 16 files `index.html` loads and that
+`tests/boot-manifest.test.cjs` already gates. Two checks that this changed nothing except the
+truth of the loader: the `map` line is byte-identical across the re-record (47,098 bytes),
+and the first minute of the new 10-minute recording agrees with the new 1-minute fixture on
+every state line compared (8 lines: clock, worker coordinates, stockpile — 0 differences).
+
+**Silent merge damage, found by diff rather than by markers.** Four parallel workers resolved
+parts of this merge (`/home/barista/zmodern/merge-work/LOG.w*.md`); two of their findings
+carried no conflict markers at all. `game-state-schema.json` held `ordersInProgress` **twice**
+— valid JSON, `JSON.parse` keeps the last, so our block looked present and was inert; the
+repair kept the parent's block and re-added our `from` (verified: one occurrence, `from`
+there). And in `js/ui.js`, a stalled worker had quietly reverted "a metric with no
+denominator is null, not 0", which made three other repairs no-ops and let a silent seat top
+out at 33/100 (verified present; `tests/soundness-scoring.test.cjs` covers it). Both are the
+shape of bug a merge produces and a marker scan misses.
+
+**Not verified here.** The browser suite: `npm run test:browser` stops at `Cannot find module
+'playwright'` in this environment, so nothing in `tests/browser/` was run — that is an absent
+dependency, not a passing result. D5 (replay fog revealing dead owned units in `anApplyFog`)
+stays open and untouched. `js/resim.js`, the parent's JavaScript re-sim, and `rust/core`, our
+Rust one, are still two answers to one question in one repository; the ledger lists deciding
+that as the next piece of architecture work.
