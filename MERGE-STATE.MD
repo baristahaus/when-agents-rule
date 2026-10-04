@@ -1,99 +1,156 @@
-# Merge state — live tracking doc
+# Merge state — the running ledger
 
-**Purpose:** if this session dies, a fresh one resumes from this file alone. Update it at
-every step. It is the only live status; `baristahaus-merge.MD` is the stale handoff from the
-previous session (kept for its analysis, do not trust its paths — the repo moved).
+One page that is always true about where this fork stands against the parent, written so
+that whoever picks it up next (including a future me with no memory) can rebuild the whole
+picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Repo: `/home/barista/zmodern/when-agents-rule` (NOT `/home/barista/code/...`)
+Last updated: build 1040, 4 October 2026, commit `1a10366`-ish (see `git log --oneline -6`).
 
-## Snapshot
+## The one-paragraph version
 
-| thing | value |
-|---|---|
-| Branch carrying the merge | `sync/upstream-b1039` (HEAD) |
-| parent1 (ours) | `33a1f11` = `main` = `work/v2-core` = `save/pre-upstream-sync` |
-| parent2 (theirs) | `43ac04a` = `upstream/main` (parent build b1039) |
-| Merge started by | `git merge --no-edit upstream/main` in the previous session — **never re-run it** |
-| Fork point | `ffe9e346` (ours-only 33 commits, upstream-only 156) |
-| Divergence ledger | `docs/FORK-DIVERGENCES.md` |
-| Worker scratch (outside repo) | `/home/barista/zmodern/merge-work/` |
+We are a fork of `https://github.com/asp67/when-agents-rule` (the parent, which ships the
+game). Our line keeps a **parallel Rust core** (`rust/core`) held to the shipped JS by
+byte-exact golden traces, plus a handful of simulation fixes. The parent has moved 156
+builds since we forked. We have now merged the parent through **build 1039**
+(`43ac04a`), re-applied our fixes on top, and **re-derived the golden** so the port is
+measured against the current rules instead of a year-old recording. `main` stays shippable
+v1 (the parent's JS); v2 work lives on `rebuild/v2`.
 
-Branch intent, as decided by the human: `work/v2-core` is **our** line (the Rust
-re-implementation and its docs). `sync/upstream-b1039` is the **parent mirror plus what our
-hunks need to survive it**. `main` stays at our tip until the gates are green, then is
-promoted (that promotion is a human call, never automatic).
+## Commands that answer every question here
 
-## Resolutions done (staged)
-
-| file | resolution |
-|---|---|
-| `.gitignore` | union: our run-artifact block + their WAR Bench block |
-| `package.json` | their `serve.cjs` start/dev, their `test` incl. `tests/sim`, our `test:browser` + `_comment` |
-| `tests/build-coordinates.test.cjs` | our stub (pins `rand` **and** `randJitter`) |
-| `tests/elimination.test.cjs` | our loader (real training tables, not stubs) |
-| `js/analyzer.js` | fused: their `header.startedAt` preference + our loop-instead-of-`Math.min(...)` |
-| `ENGINE.md` | both intents: their `RULES-CHANGES.md` build 933 citation, our `QUALITY_REVIEW.md` §7 citation, and the fact that both positional passes now live in `js/simulation/position-rules.js` |
-| `tests/ui-workspace.test.cjs` | theirs (their `smoothFrame` + 3 tests supersede our 4). Our two unique cases — coincident units, per-unit building-escape direction — are deferred to the divergence commit, because upstream's module currently fails both. See ledger D1/D2. |
-
-## Open conflicts and who owns them
-
-Four detached `pi -p` workers, one file-set each, briefed from
-`/home/barista/zmodern/merge-work/BRIEF.md` (read it before taking over a file).
-
-| worker | files | report |
+| Question | Command | Last measured |
 |---|---|---|
-| W1 | `js/game.js` (29 markers) | `merge-work/LOG.w1.md` |
-| W2 | `js/openai-ai.js` (9), `js/ai.js` (5) | `merge-work/LOG.w2.md` |
-| W3 | `js/i18n.js` (12), `index.html` (2), `js/ui.js` (2) | `merge-work/LOG.w3.md` |
-| W4 | `game-state-schema.json` (17), `js/engine/gamerenderer.js` (2) | `merge-work/LOG.w4.md` |
+| Does the map still match the reference byte for byte? | `cd rust/core && cargo run --release --offline --bin golden-diff -- golden/stream-1m.jsonl` | PASS, 942 nodes, 47,097 bytes |
+| Does the core reproduce turn 1? | `cd rust/core && cargo test --offline` | 5 lib + 1 gate, 0 failed |
+| Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl rust/core/golden/stream-1m.jsonl` | byte-identical, 2,722,912 bytes |
+| Is the game green? | `npm test` | 622/622 |
+| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1039) |
+| What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | our 33 + the 3 sync commits |
+| Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7 |
 
-```
-/home/barista/zmodern/merge-work/drive.sh status   # alive/dead, exit code, marker counts
-/home/barista/zmodern/merge-work/drive.sh start 3  # re-spawn one worker (idempotent guard built in)
-```
+## Branch and remote state
 
-Gotcha found the hard way: `pi -p` buffers stdout until it finishes, so an empty log means
-*unfinished*, not *dead* — trust `pid.N`/`exit.N`, not the log. Plain `setsid` (no `-f`)
-fails silently from a background shell and leaves the child in the harness's process group,
-where it gets killed at the end of the tool call. `drive.sh` uses `setsid -f` for that reason.
+    origin   git@github.com-war:baristahaus/when-agents-rule   (our fork)
+    upstream https://github.com/asp67/when-agents-rule         (the parent, read-only for us)
 
-**Never run `git checkout -b` (or any checkout/switch) while the merge is in progress** — it
-silently drops `MERGE_HEAD` and `MERGE_MSG`. This already happened once; recovery was
-`echo 43ac04a... > .git/MERGE_HEAD`, rewrite `MERGE_MSG`, `git symbolic-ref HEAD
-refs/heads/<branch>`. To move HEAD mid-merge use `git symbolic-ref`, never `checkout`.
+- `main` — our **v1** line: 33 fork commits including the pre-sync WIP snapshot. Pushed.
+- `rebuild/v2` — this merge plus the divergence fixes and the re-derived golden. Pushed.
+- `save/pre-upstream-sync` = `33a1f11` — the exact pre-merge tree, kept as the undo button.
+  `git reset --hard save/pre-upstream-sync` is the documented abort path.
+- `sync/upstream-b1039` — the same commits as `rebuild/v2` under the name the sync work
+  used. Delete once `rebuild/v2` is merged or the choice is recorded.
+- The parent also has a branch `upstream/next-level`; we do not track it. Ask before
+  merging it — it is not in this ledger's history.
 
-## Decisions taken (human-approved)
+## What this sync actually was
 
-1. **Branch for our work** — `work/v2-core` holds our parallel line; the merge lands on
-   `sync/upstream-b1039`; `main` is promoted later, by a human.
-2. **Divergences** — where our side holds a real fix upstream's rewrite lost, keep
-   upstream's code in the merge commit, then re-apply ours in a separate documented commit,
-   one entry per divergence in `docs/FORK-DIVERGENCES.md`. The JS mirror stays re-syncable.
-3. **The golden moves to the merged build once, then freezes** — re-derive from the merged
-   recorder (b1039 + our divergences), label it by build and coreHash, and do not re-derive
-   on every upstream sync. The old b908 fixtures are kept, labelled, and no longer chased.
-4. **Push policy** — fork only: branches to `origin`, no PR to the parent, `origin/main`
-   is not moved without the human.
+`git merge upstream/main` at parent `43ac04a`: 150 files auto-merged, **15 conflicted**.
+Fork point `ffe9e346`. Since then: ours 33 commits, theirs 156 (b908 → b1039).
 
-## Verification checklist (before the merge commit)
+The parent's big move was to **rewrite the JS simulation layer** and split the rules into
+`js/simulation/{rng,math,position-rules}.js`, `js/conditions.js`, `js/standing-orders.js`,
+`js/identity.js`, `js/manifest.js`, `js/boot.js`, plus `js/resim.js` — a **JavaScript**
+re-sim of a recorded match, which is the same problem our Rust core solves. That is the
+standing architectural tension of this fork: two re-simulators in one repository. We keep
+both and say so; the JS one is the parent's and drives the replay UI, ours is the porting
+target and drives nothing yet.
 
-- [ ] `grep -rn '^<<<<<<<' --include='*' .` → nothing (excluding `.git`)
-- [ ] `node --check` on every changed `.js`; `JSON.parse` on `game-state-schema.json`
-- [ ] worker reports read, and their `DIVERGENCE CANDIDATES`/`UNRESOLVED` lists folded into the ledger
-- [ ] `npm test` (now includes `tests/sim/*.test.cjs`) — green except known-divergence assertions
-- [ ] `node --test tests/shipped-files.test.cjs` — the module graph in `index.html` is complete, no duplicates
-- [ ] `cargo test` in `rust/core` — our parallel core still reproduces the **old** golden (it must stay green on `work/v2-core` semantics)
-- [ ] merge commit on `sync/upstream-b1039`, parents `33a1f11` + `43ac04a`
-- [ ] divergence commit(s) + ledger
-- [ ] golden re-derived once, labelled, committed
-- [ ] `git push origin sync/upstream-b1039 work/v2-core main save/pre-upstream-sync` (main push = human call)
+### The 15 conflicts, and how they went
 
-## Log
+`package.json` (took theirs' `start`/`dev`/`test`, kept our `test:browser`), `.gitignore`
+(union), `ENGINE.md`, `index.html`, `js/analyzer.js`, `js/ai.js`, `js/game.js` (87 markers),
+`js/gamerenderer.js`, `js/i18n.js`, `js/openai-ai.js`, `js/ui.js`,
+`tests/build-coordinates.test.cjs`, `tests/elimination.test.cjs`, `tests/ui-workspace.test.cjs`,
+`game-state-schema.json`.
 
-- `Oct 3 11:38` previous session started the merge, wrote `baristahaus-merge.MD`.
-- `Oct 3 12:40` verified on-disk state: 15 unmerged, `MERGE_HEAD` = `43ac04a`, nothing lost.
-- `Oct 3 12:44` incident: a `git checkout -b` probe dropped `MERGE_HEAD`/`MERGE_MSG`. Recovered, verified, documented above.
-- `Oct 3 12:52` `work/v2-core` and `sync/upstream-b1039` created at `33a1f11`; HEAD moved by `symbolic-ref`; merge intact.
-- `Oct 3 12:53` 5 files resolved and staged (`.gitignore`, `package.json`, 2 tests, `js/analyzer.js`).
-- `Oct 3 13:00` W1–W4 spawned with `setsid -f`, pids recorded in `merge-work/pid.N`.
-- `Oct 3 13:05` `ENGINE.md` + `tests/ui-workspace.test.cjs` resolved and staged. 8 files left, all with workers.
+A fleet of four parallel workers resolved part of this before the line stalled; their raw
+reports are at `/home/barista/zmodern/merge-work/LOG.w*.md` and the brief at
+`BRIEF.md`. They are worth reading — two of their repairs were silent (no conflict
+markers), so I re-verified each against the committed tree:
+
+- **W5, `game-state-schema.json`** — the file held `ordersInProgress` **twice** (our block
+  and theirs). `JSON.parse` keeps the last, so ours looked present and was inert. Their
+  repair kept upstream's block and re-added our `from`. Verified: one occurrence now, and
+  `from` is in it.
+- **W6, `js/ui.js`** — our "a metric with no denominator is `null`, not 0" repair had been
+  reverted by a stalled worker; repaired, and `tests/soundness-scoring.test.cjs` covers it.
+  Their `esc(build)` escaping repair is at `js/ui.js:7458`. Verified: both present.
+- **W8, `js/i18n.js`** — `boot.gpuLost`/`boot.gpuLostWhy` were missing from all four
+  language objects while `js/game.js` asked for them. Verified: 4 occurrences present.
+- **W1, `js/game.js`** — kept upstream's difficulty leg, routed through our
+  `storedDifficulty()` so the `DIFFICULTY_MODS` validation survives. Verified present.
+- **W9, `tests/vision-index.test.cjs`** — diagnosed a vision index that let a **corpse's**
+  sight disc answer "visible". Resolved upstream of this ledger: our
+  `if (u.health <= 0) continue;` is in `js/ai.js:49`, and the test passes.
+
+## Our fixes, after the merge
+
+`docs/FORK-DIVERGENCES.md` is the real ledger (index table + one section each). Summary:
+**applied** D1 (coincident units separate), D2 (a unit on a building's origin escapes by
+its own bearing, not one fixed southeast vector), D3 (a temple trains nothing, so stop
+offering priests — and stop listing them), D4 (`storedDifficulty` read `DIFFICULTY_MODS`
+bare in a VM that never loads `terrain.js`, so a stale localStorage difficulty poisoned
+every gather rate), D6 (the order-endpoint arity, below); **superseded** S1 (keyed
+draws), S2 (refereeing off the render loop), S3 (boot split), S4 (elimination by assignment
+rather than intent) — the parent solved each better, and we re-ported S1 into the core;
+**open** D5 (replay fog reveals dead owned units — an `anApplyFog` bug we have carried, in
+a renderer area the parent rewrote twice).
+
+D6 is worth repeating because it is the pattern: our side's schema said
+`ordersInProgress.to/.from` are `minItems/maxItems: 2`; the merge kept upstream's looser
+version. Restoring the constraint **broke `tests/contract.test.cjs`** first, because
+`tests/lib/schema-check.cjs` throws on any keyword it has to guess at — and it did not know
+those two. So the keyword is now implemented (length, then elements) and a 1- or 3-element
+`to` is reported, which is what makes a contract that says `[x, z]` mean it.
+
+## The golden, and the one time we move it
+
+`samples/golden/initial/golden-initial.jsonl` (26,629,752 bytes, 10 min) and
+`rust/core/golden/stream-1m.jsonl` (2,722,912 bytes, 1 min, a byte-prefix of the same
+match) were **re-recorded at build 1040**, the first re-derivation since the split. Plan
+from here: never again, so "it fails" always means "the port is wrong", never "the
+fixtures are stale".
+
+Two surprises, both documented in `docs/FORK-DIVERGENCES.md` § "Following the golden down":
+
+1. `tools/golden/record.cjs` loaded **12 files by hand**, a list that predates
+   `js/simulation/*`. It now loads `js/manifest.js`'s `vm` list — the same 16 files
+   `index.html` loads and `tests/boot-manifest.test.cjs` gates. The map line did not move
+   (47,098 bytes, identical), which is the check that adding `rng.js` to the load order
+   drew nothing ahead of the map.
+2. The turn-1 gate went red in six paths: three worker coordinates and `matchSeconds`. The
+   coordinates needed **keyed draws** ported to `rust/core/src/prng.rs` (`KeyedRng`, with
+   vectors from `js/simulation/rng.js`), and `matchSeconds` was **our spec being wrong** —
+   §3.4 called a frozen clock a degenerate invariant when it was really the build 934–949
+   bug that build 950 fixed. §3.4, §13 and the proposal's §9 now say the clock advances.
+
+The golden's other degeneracies survived 131 builds intact, which is the good news: every
+seat ends in the stone age, discovers nothing, names no winner, opens 200/200/100/50 and
+ends 0/50/100/50 after exactly `house` and `farm`.
+
+## Things this ledger used to get wrong (so nobody repeats them)
+
+- **I reported 6,074 tests.** The suite is 622 (621 before the merge). The larger number
+  was never measured; it came from a summary of a summary. Quote `npm test`, not prose.
+- **I reported tooling that does not exist**: `test/manifest.cjs`, an `npm run audit`
+  script, `tools/gate-selftest.cjs`, `tests/golden-manifest.test.cjs`,
+  `tools/check-fork-sync.cjs`. Nothing in this repository ever held them. The tools that
+  exist are `js/manifest.js`, `tools/golden/{record,compare}.cjs`,
+  `tests/{boot-manifest,usage-redaction,contract,version-consistency}.test.cjs`,
+  `tests/lib/schema-check.cjs` and `rust/core/src/bin/golden-diff`. If a file-list audit
+  gate is wanted, it has to be written.
+- The 622 number needs one caveat noted honestly: `npm test` runs
+  `tests/*.test.cjs tests/sim/*.test.cjs`. Files under `js/` that carry their own
+  `*.test.cjs` siblings are **not** in that glob.
+
+## Next, in order
+
+1. D5 — the replay fog that reveals dead owned units. `anApplyFog` should key off the
+   same alive test the live fog does.
+2. Decide what `js/resim.js` (theirs) and `rust/core` (ours) should be to each other before
+   either grows more. Today they are two answers to one question, in one repo.
+3. The replay's own build check: our line should refuse to re-simulate a recording whose
+   `coreHash` it cannot reproduce, and say so, rather than replaying a match it cannot
+   explain.
+4. Consider a real file-list audit gate (recorder ↔ `js/manifest.js` ↔ `index.html`), since
+   the ledger keeps finding drift in exactly that seam.

@@ -23,6 +23,14 @@ point of keeping a parallel line, and `D5` is its one finding against us.
 
 ---
 
+## Also read
+
+`MERGE-STATE.MD` at the repo root is the live ledger of where this fork stands: the commands
+with their last measured answers, branch and remote state, the 15 conflicts, and what the four
+parallel merge workers found. Two of their repairs carried **no conflict markers at all** — a
+JSON key duplicated inside valid JSON, and a silently reverted null-versus-0 — so those are
+recorded there and re-verified against the committed tree rather than trusted.
+
 ## Index
 
 | # | Subject | Status | Rule impact | Where |
@@ -32,7 +40,7 @@ point of keeping a parallel line, and `D5` is its one finding against us.
 | D3 | A temple trains nothing, so a temple-only seat is eliminated while being offered priests | **applied** | yes | `js/game.js` `trainOptionsFor` |
 | D4 | `storedDifficulty` reads `DIFFICULTY_MODS` bare in a VM without `terrain.js` | **applied** | no | `js/game.js` `storedDifficulty` |
 | D5 | Replay fog reveals dead owned units | open | no | `js/ui.js` `anApplyFog` |
-| D6 | `ordersInProgress.to/.from` lost their `minItems`/`maxItems: 2` | open | no | `game-state-schema.json` |
+| D6 | `ordersInProgress.to/.from` lost their `minItems`/`maxItems: 2` | **applied** | no | `game-state-schema.json`, `tests/lib/schema-check.cjs` |
 | S1 | Seeded randomness: our one stream replaced by keyed draws | superseded, and now ported | yes | `js/simulation/rng.js`, `rust/core/src/prng.rs` |
 | S2 | Unit refereeing off the render loop | superseded | yes | `js/simulation/position-rules.js` |
 | S3 | Boot split: `WAR_PRIVATE_HOST` and the `load` handler left `game.js` | superseded | no | `js/boot.js` |
@@ -151,11 +159,24 @@ while resolving it, and left alone rather than widened into a presentation chang
 
 ## D6 — `ordersInProgress.to/.from` lost their arity
 
-`game-state-schema.json` carried `minItems`/`maxItems: 2` on those two coordinate arrays on our
-side; the parent's block for the same field does not, and taking the parent's structure dropped
-them. The arity is still stated in the field's prose (`"[x, z]"`), so a reader is informed and
-a validator is not. Restoring two numbers is a one-line diff; it waits here so the schema stays
-byte-comparable to the parent's during syncs.
+**Status: applied.** `game-state-schema.json` carried `minItems`/`maxItems: 2` on those two
+coordinate arrays on our side; the parent's block for the same field does not, and taking the
+parent's structure dropped them. The arity stayed in the field's prose (`"[x, z]"`), so a
+reader was informed and a validator was not.
+
+Both emitters always agreed with our side — `js/openai-ai.js` writes
+`to: [Math.round(...), Math.round(...)]`, `js/standing-orders.js` the same pair plus `from` in
+patrol mode only — and all 2,901 `ordersInProgress` entries across the shipped samples are
+two-long, so no behaviour changes. This is the paperwork stating what the code does, which is
+exactly what a model reads.
+
+Restoring the two numbers broke `tests/contract.test.cjs` first, and that part is worth
+keeping: `tests/lib/schema-check.cjs` throws on any keyword it would have to guess at, and
+`minItems`/`maxItems` were not in its `KNOWN` set. The refusal is the checker working as
+designed — a contract validator that silently ignores a keyword is worse than one that admits
+it — so length is now checked before elements: a two-long `to` is clean, a one-long one
+reports `1 items < minItems 2`, a three-long one reports `3 items > maxItems 2`, and a short
+patrol `from` is reported too.
 
 **Rule impact.** No.
 

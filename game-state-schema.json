@@ -729,6 +729,8 @@
             "items": {
               "type": "integer"
             },
+            "minItems": 2,
+            "maxItems": 2,
             "description": "[x, z] destination — averaged over the group for a one-off order."
           },
           "from": {
@@ -736,6 +738,8 @@
             "items": {
               "type": "integer"
             },
+            "minItems": 2,
+            "maxItems": 2,
             "description": "[x, z] patrol origin — the other end of the route, patrol mode only: the group repeats from ↔ to."
           },
           "secondsRemaining": {

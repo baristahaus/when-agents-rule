@@ -5,7 +5,7 @@
 'use strict';
 const ANNOTATIONS = new Set(['$schema', 'title', 'description', '$defs']);
 const KNOWN = new Set(['type', 'required', 'properties', 'enum', 'const', '$ref', 'oneOf', 'items',
-    'additionalProperties', 'minimum', 'maximum', ...ANNOTATIONS]);
+    'additionalProperties', 'minimum', 'maximum', 'minItems', 'maxItems', ...ANNOTATIONS]);
 
 function typeOf(v) {
     if (v === null) return 'null';
@@ -53,7 +53,18 @@ function check(root, schema, value, at, errors) {
             else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') check(root, schema.additionalProperties, v, at + '.' + k, errors);
         }
     }
-    if (typeOf(value) === 'array' && schema.items) value.forEach((v, i) => check(root, schema.items, v, `${at}[${i}]`, errors));
+    if (typeOf(value) === 'array') {
+        // Length, then elements: a contract that says [x, z] has to say BOTH. `to` and
+        // `from` in ordersInProgress are the pair this exists for — a model told to read a
+        // destination by index can only do that if the array is exactly two long, and a
+        // validator that ignores the length while enforcing the element type is the drift
+        // this checker was written to refuse.
+        if (schema.minItems !== undefined && value.length < schema.minItems)
+            errors.push(`${at}: ${value.length} items < minItems ${schema.minItems}`);
+        if (schema.maxItems !== undefined && value.length > schema.maxItems)
+            errors.push(`${at}: ${value.length} items > maxItems ${schema.maxItems}`);
+        if (schema.items) value.forEach((v, i) => check(root, schema.items, v, `${at}[${i}]`, errors));
+    }
 }
 
 // Returns a list of problems; empty means the value conforms.
