@@ -28,6 +28,46 @@ use std::path::Path;
 use war_core::data::WorldData;
 use war_core::state::{build_initial_state, InitialConfig};
 
+/// The first `limit` paths where two JSON values disagree, as `a.b[3]: built != recorded`.
+/// Same shape as tools/golden/compare.cjs prints for two JS streams, so a divergence reads the
+/// same whoever is looking at it.
+fn first_diffs(a: &serde_json::Value, b: &serde_json::Value, path: &str, limit: usize, out: &mut Vec<String>) {
+    if out.len() >= limit || a == b {
+        return;
+    }
+    match (a, b) {
+        (serde_json::Value::Array(x), serde_json::Value::Array(y)) => {
+            if x.len() != y.len() {
+                out.push(format!("{path}[]: {} entries built, {} recorded", x.len(), y.len()));
+            }
+            for (i, (u, v)) in x.iter().zip(y.iter()).enumerate() {
+                first_diffs(u, v, &format!("{path}[]"), limit, out);
+                if out.len() >= limit {
+                    return;
+                }
+                if u != v && out.len() < limit && !out.iter().any(|e| e.starts_with(&format!("{path}[{i}]"))) {
+                    // arrays whose elements differ in place: name the index once
+                    let _ = i;
+                }
+            }
+        }
+        (serde_json::Value::Object(x), serde_json::Value::Object(y)) => {
+            let mut keys: Vec<&String> = x.keys().chain(y.keys()).collect::<Vec<_>>();
+            keys.sort();
+            keys.dedup();
+            for k in keys {
+                first_diffs(x.get(k).unwrap_or(&serde_json::Value::Null),
+                            y.get(k).unwrap_or(&serde_json::Value::Null),
+                            &format!("{path}.{k}"), limit, out);
+                if out.len() >= limit {
+                    return;
+                }
+            }
+        }
+        _ => out.push(format!("{path}: {a} != {b}")),
+    }
+}
+
 #[test]
 fn initial_states_match_recorded_transcript() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -116,11 +156,17 @@ fn initial_states_match_recorded_transcript() {
         });
 
         if built != *recorded_state {
-            let built_str = serde_json::to_string_pretty(&built).unwrap();
-            let rec_str = serde_json::to_string_pretty(recorded_state).unwrap();
-            eprintln!("--- built (seat {seat}, {}) ---\n{built_str}", civs[seat]);
-            eprintln!("--- recorded ---\n{rec_str}");
-            panic!("turn-1 state for seat {seat} does not match the recorded transcript");
+            // Say WHERE first. Dumping two pretty-printed states buries the one field that
+            // moved in ~1,400 lines each, and this is the gate the whole port is measured by:
+            // a red one that cannot name its divergence costs an afternoon every time.
+            let mut diff = Vec::new();
+            first_diffs(&built, recorded_state, "", 12, &mut diff);
+            panic!(
+                "turn-1 state for seat {seat} ({}): {} path(s) differ from the recorded transcript\n  {}",
+                civs[seat],
+                diff.len(),
+                diff.join("\n  ")
+            );
         }
         eprintln!("seat {seat} ({}): turn-1 state matches the recorded transcript exactly", civs[seat]);
     }

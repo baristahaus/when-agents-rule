@@ -33,7 +33,7 @@ point of keeping a parallel line, and `D5` is its one finding against us.
 | D4 | `storedDifficulty` reads `DIFFICULTY_MODS` bare in a VM without `terrain.js` | **applied** | no | `js/game.js` `storedDifficulty` |
 | D5 | Replay fog reveals dead owned units | open | no | `js/ui.js` `anApplyFog` |
 | D6 | `ordersInProgress.to/.from` lost their `minItems`/`maxItems: 2` | open | no | `game-state-schema.json` |
-| S1 | Seeded randomness: our one stream replaced by keyed draws | superseded | yes | `js/simulation/rng.js` |
+| S1 | Seeded randomness: our one stream replaced by keyed draws | superseded, and now ported | yes | `js/simulation/rng.js`, `rust/core/src/prng.rs` |
 | S2 | Unit refereeing off the render loop | superseded | yes | `js/simulation/position-rules.js` |
 | S3 | Boot split: `WAR_PRIVATE_HOST` and the `load` handler left `game.js` | superseded | no | `js/boot.js` |
 | S4 | An unfinished site counts only while a worker is ASSIGNED to it | superseded | yes | `js/game.js` `isPlayerEliminated` |
@@ -207,6 +207,49 @@ stayed behind in `game.js` — `warContextLost`, ours, called by the GPU-context
 parent does not have — and `js/i18n.js` carries its two keys in all four languages.
 
 ---
+
+## Following the golden down
+
+The golden is a *recorded* match, so a merge that changes any rule changes the bytes, and
+the fixtures must be re-derived. We did that once, at build 1040, and it is worth writing
+down what it took, because nothing in the tree says so.
+
+**The recorder had drifted out of existence.** `tools/golden/record.cjs` loaded its rules
+from a hand-written list of 33 path prefixes. `test/manifest.cjs` — the list `npm run
+audit` uses to prove every source file is covered — had grown three of those directories,
+so the recorder was simulating a world missing `js/simulation/rng.js`, its economy tables,
+its vision, and its commands. It still ran, still produced 604 well-formed lines per
+minute, and was describing a game that had not existed since the split it inherited. The
+recorder now builds its list from the manifest, so the two cannot disagree, and
+`tests/golden-manifest.test.cjs` fails if they ever do again.
+
+**Three gates, and they disagree informatively.** After re-deriving, `cargo test` said the
+turn-1 state for all four seats differed from the recording in exactly six paths, and it
+could finally say so because the gate now prints the first differing paths instead of two
+dumped states. All six were one of two things: `clock.matchSeconds` reading 0 where the
+reference reads 1, and the starting workers standing a few units off.
+
+**The clock was never an invariant.** Spec §3.4 listed "the match clock reads 0 on every
+beat" among the golden's degeneracies and warned a port not to fix it. It was wrong:
+builds 934–949 measured the state's clock from the simulation's start while subtracting the
+timeline's wall-clock origin, and clamped the difference to 0; build 950 fixed it
+(RULES-CHANGES.md). Our inherited golden had been recorded inside that window. §3.4, §13
+and the proposal's §9 now say the clock advances, and a port that still emits 0 is the one
+changing the game.
+
+**The worker jitter was our own divergence, surfacing as a fixture mismatch.** The
+reference spreads starting workers with `rand(who, 'start-workers')` — a keyed draw — while
+the core port drew from the terrain stream, the one-stream design S1 records as superseded.
+`KeyedRng` in `rust/core/src/prng.rs` closes it, with vectors taken from the reference
+implementation including the property the single stream could not offer: an unrelated key
+drawing in between cannot move the value. The map generator keeps its own stream and
+nothing else may read it.
+
+**What did not move.** All four seats still end in the stone age with nothing discovered and
+no winner, opening 200/200/100/50 and ending 0/50/100/50 after exactly two researches
+(`house`, `farm`). That the same degenerate invariants come out of a recorder 131 builds
+later is the best evidence in this merge that the rules we port are still the rules that
+ship.
 
 ## Re-applying at the next sync
 

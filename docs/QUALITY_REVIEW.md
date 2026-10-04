@@ -863,7 +863,9 @@ catalogue (`samples/index.json`) records the original as build 781 / prompt v93,
 the transcript header carries no build field at all.
 
 **Golden facts, re-measured:** `record.cjs` regenerates `stream-1m.jsonl` byte-for-byte
-(2,740,072 bytes) — the shipped golden is the current recorder's output. Its 604 blank
+(2,722,912 bytes at build 1040, re-recorded once when the fork merged the parent's 156
+commits — see docs/FORK-DIVERGENCES.md; the fixture is meant to sit still from here) — the
+shipped golden is the current recorder's output. Its 604 blank
 lines are the recorder's own format (the fresh 10-minute recording blanks its 6,004
 content lines the same way), so the file is self-consistent with §3.4's "content
 lines" phrasing and every consumer parses it line-wise. One provenance sentence is

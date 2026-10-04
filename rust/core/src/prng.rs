@@ -24,16 +24,12 @@ impl Mulberry32 {
     /// The reference reads `ch.charCodeAt(0)` over a code-point iteration, i.e. the
     /// first UTF-16 unit: a plain unit, or the high surrogate of a pair.
     pub fn from_seed(seed: &str) -> Self {
-        let mut h: i32 = 1779033703 ^ (seed.len() as i32);
-        for cp in seed.chars() {
-            let cp32 = cp as u32;
-            let u16 = if cp32 > 0xFFFF { 0xD800 + ((cp32 - 0x10000) >> 10) } else { cp32 };
-            h = (h ^ (u16 as i32)).wrapping_mul(3432918353u32 as i32); // Math.imul coerces both args to int32
-            let lhs = h.wrapping_shl(13);
-            let rhs = ((h as u32).wrapping_shr(19)) as i32; // `h >>> 19`
-            h = lhs | rhs;
-        }
-        let a = h as u32; // `h >>> 0`
+        Mulberry32::from_hashed(hash_seed(seed))
+    }
+
+    /// A stream whose state is already a 32-bit seed — `WarRng.stream(seed, 42)`, which is
+    /// what every keyed draw builds (and the reason the fallback is 42 here too).
+    pub fn from_hashed(a: u32) -> Self {
         let a = if a == 0 { 42 } else { a }; // `|| 42`
         Mulberry32 { a: a as i32 }
     }
@@ -48,6 +44,51 @@ impl Mulberry32 {
         let t2 = (t1.wrapping_add((t1 ^ ((u7 >> 7) as i32)).wrapping_mul(61 | t1))) ^ t1; // (t + imul(t ^ (t >>> 7), 61 | t)) ^ t
         let u14 = t2 as u32;
         ((t2 ^ ((u14 >> 14) as i32)) as u32) as f64 / 4294967296.0
+    }
+}
+
+/// `WarRng.hashSeed` / terrain.js's `_initRand` hash: a string to a 32-bit seed, kept exactly
+/// so a seed that produced a map in the reference still produces that map here.
+pub fn hash_seed(text: &str) -> u32 {
+    let mut h: i32 = 1779033703 ^ (text.len() as i32); // String#length, in UTF-16 units
+    for cp in text.chars() {
+        let cp32 = cp as u32;
+        let u16 = if cp32 > 0xFFFF { 0xD800 + ((cp32 - 0x10000) >> 10) } else { cp32 };
+        h = (h ^ (u16 as i32)).wrapping_mul(3432918353u32 as i32);
+        let lhs = h.wrapping_shl(13);
+        let rhs = ((h as u32).wrapping_shr(19)) as i32;
+        h = lhs | rhs;
+    }
+    h as u32 // `h >>> 0`
+}
+
+/// The keyed draw the shipping rules use (`WarRng.keyed` + `WarRng.draw`,
+/// js/simulation/rng.js). A value depends on the match seed, the key — who drew and what for
+/// — and how many times THAT key has drawn, never on how many draws anything else made.
+/// That last clause is why a replay can be certified seat by seat instead of run in lockstep
+/// with every other seat's noise, and it is what our own one-stream port lacked (see
+/// docs/FORK-DIVERGENCES.md S1: the parent reached the same goal a better way).
+///
+/// The counter is per key and the state is plain data, so a checkpoint can carry it.
+pub struct KeyedRng {
+    seed: String,
+    n: std::collections::HashMap<String, u32>,
+}
+
+impl KeyedRng {
+    /// `WarRng.keyed(mapSeed)`. The reference stringifies with `String(seed)`, and null or
+    /// undefined becomes the empty string — a match with no seed key hashes `|key|0`.
+    pub fn new(seed: &str) -> Self {
+        KeyedRng { seed: seed.to_string(), n: std::collections::HashMap::new() }
+    }
+
+    /// The n-th draw for `key`, in [0, 1). Fresh stream per draw: the stream is cheap and
+    /// sharing one would make the value depend on the order other keys drew in.
+    pub fn draw(&mut self, key: &str) -> f64 {
+        let n = self.n.get(key).copied().unwrap_or(0);
+        self.n.insert(key.to_string(), n + 1);
+        let seed = format!("{}|{}|{}", self.seed, key, n); // state.seed + '|' + key + '|' + n
+        Mulberry32::from_hashed(hash_seed(&seed)).next_f64()
     }
 }
 
@@ -114,5 +155,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    // Vectors from the reference: `node -e "console.log(require('./js/simulation/rng.js')
+    //   .draw(require('./js/simulation/rng.js').keyed('golden'), 's0:start-workers'))"`,
+    // repeated with the counter advanced. These are the draws that place a seat's starting
+    // workers, so the turn-1 golden state cannot be reproduced without them.
+    #[test]
+    fn keyed_draws_match_the_reference_and_do_not_depend_on_other_keys() {
+        let mut k = KeyedRng::new("golden");
+        let first = k.draw("s0:start-workers");
+        let second = k.draw("s0:start-workers");
+        assert!((first - 0.6629751205909997).abs() < 1e-12, "keyed draw 0 was {first}");
+        assert!((second - 0.6242878348566592).abs() < 1e-12, "keyed draw 1 was {second}");
+
+        // The property the single stream could not offer: another key drawing in between
+        // cannot move this key's sequence. tests/match-determinism.test.cjs asserts the same
+        // thing against the shipping rules; this pins that we ported it, not just the values.
+        let mut alone = KeyedRng::new("golden");
+        let mut interleaved = KeyedRng::new("golden");
+        alone.draw("s0:start-workers");
+        interleaved.draw("s0:start-workers");
+        interleaved.draw("s3:scout-target");
+        interleaved.draw("s3:scout-target");
+        assert_eq!(alone.draw("s0:start-workers"), interleaved.draw("s0:start-workers"));
     }
 }

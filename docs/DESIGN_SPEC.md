@@ -584,12 +584,15 @@ must reproduce the file — and the file is a *degenerate* match:
    exactly two researches on every seat — `house` and `farm` (food 200 → 0, wood 200
    → 50) — and has queued a third worker whose cost the now-empty stockpile can no
    longer pay.
-3. **The match clock never moves.** The model-facing `clock.matchSeconds` reads 0 on
-   all 4,800 state lines. The clock is measured from the timeline's start instant,
-   with a "no timeline yet" fallback that answers *now* — and the reference's fake
-   clock starts at zero, so the latched start instant is zero, and zero is
-   indistinguishable from absent. A live match starts from wall-clock milliseconds
-   and reads normally; the reference's clock is a byproduct of its environment. The
+3. **The match clock advances, one second per beat, from 1.** The model-facing
+   `clock.matchSeconds` reads 1..600 across the 10-minute reference's 4,800 state lines.
+   It used to read 0 everywhere, and §3.4 said so — builds 934–949 measured the state's
+   clock from the simulation's start while subtracting the timeline's wall-clock origin,
+   two clocks whose difference was always clamped to 0 (RULES-CHANGES.md, build 950).
+   The recorder's fake clock then looked like the culprit; it was not. The invariant a
+   port must now keep is the ordinary one: seconds that pass in the match appear in the
+   state, and a core that emits 0 on every beat has the bug the parent already fixed.
+   The remaining
    gate keeps the bytes: the file says 0, so a port must say 0.
 4. **Nothing ends it.** No elimination, no Wonder, no victory: the driver spends its
    step budget and the tail records the end as a *time-limit* with no winner — all
@@ -1808,12 +1811,14 @@ a new stack must *decide*, with the stated context for each:
     design; *which* dialects, and how far the send-then-learn parameter adaptation
     (retries that drop a refused parameter rather than fail the seat) goes, are
     rebuild decisions.
-11. **What the golden's zero clock means for a v2 core.** The reference stream's
-    `matchSeconds` reads 0 on every beat because the recorder's fake clock latches the
-    timeline's start at zero, and the state builder's "no timeline yet" fallback treats
-    0 as absent. The gate keeps the bytes, so a port reproduces 0. The open question is
-    whether the v2 core should additionally distinguish "timeline absent" from
-    "timeline latched at 0", so that the same builder code is also correct on a wall
+11. **What the golden's clock means for a v2 core.** This question asked whether a v2
+    core should distinguish "timeline absent" from "timeline latched at 0", because the
+    reference stream read `matchSeconds: 0` on every beat. Build 950 answered it in the
+    shipping rules: the state reads the match clock in real seconds, so the golden now
+    reads 1..600 across its 10 minutes and a port reproduces those. What is still open is
+    the smaller half of the original question — a core should still be able to tell
+    "there is no timeline yet" from "the clock happens to read zero" — because a builder
+    that cannot tell them will answer 0 at the one moment a real match has no clock
     clock: a port that passes the golden alone has not proven its clock in a live
     match. *(§3.4)*
 

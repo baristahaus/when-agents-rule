@@ -190,9 +190,18 @@ function load(f, cutTail) {
   if (cutTail) src = src.split('\nconst WAR_PRIVATE_HOST')[0]; // the showcase classifier is browser-only
   vm.runInContext(src, scope, { filename: f });
 }
-for (const f of ['js/civilizations.js', 'js/units.js', 'js/buildings.js', 'js/resources.js', 'js/i18n.js', 'js/terrain.js', 'js/ai.js']) load(f);
-load('js/game.js', true);
-load('js/engine/texgen.js');
+// One list, from js/manifest.js — the same list the page loads and the fingerprint hashes,
+// and the reason a hand-rolled copy here once stopped mattering: it predated
+// js/simulation/{rng,math,position-rules}.js, so the recorder ran the rules without the
+// seeded draws and the trig that decides positions, and died on `WarMath is not defined` the
+// first time game.js reached for a spawn ring. A golden recorded by a loader that disagrees
+// with index.html is not the reference anything is being ported against.
+// i18n and the transcript writer are not rule files, so the manifest does not name them; the
+// renderer files are not rules either, and come in below with their window bridges.
+load('js/i18n.js');
+load('js/transcript.js');
+for (const f of require(path.join(ROOT, 'js/manifest.js')).vm) load(f);
+load('js/engine/glcore.js');
 // In the browser, window IS the global object, so `window.TexGen = ...` also
 // answers a bare `TexGen` in the next script. A vm context does not: bridge it.
 scope.TexGen = scope.window.TexGen;
@@ -200,7 +209,6 @@ scope.M3D = scope.window.M3D;
 scope.GLCore = scope.window.GLCore;
 load('js/engine/gamerenderer.js');
 scope.EngineRenderer = scope.window.EngineRenderer;
-for (const f of ['js/fogofwar.js', 'js/transcript.js', 'js/openai-ai.js']) load(f);
 
 const Game = vm.runInContext('Game', scope);
 const AIManager = vm.runInContext('AIManager', scope);

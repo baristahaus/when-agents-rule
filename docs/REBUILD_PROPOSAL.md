@@ -624,11 +624,14 @@ sequence is ordered so that the *riskiest* bet (the core port) is first and the
 
 **On the P0 golden diff, in detail.** Its degenerate core is the *golden reference
 match* (spec §3.4): a headless four-seat rule-brain match under fixed conditions,
-shipped as a JSONL stream whose **degenerate invariants are part of the file** — the
-match clock reads 0 on every beat (a byproduct of the recorder's zero wall clock, not a
-bug the port may fix), all four seats end still in the stone age, no seat discovers a
-single tile, and no winner is declared. A port that "fixes" any of those invariants has
-changed the game; the gate measures exactly that it has not.
+shipped as a JSONL stream whose **degenerate invariants are part of the file** — all
+four seats end still in the stone age, no seat discovers a single tile, every seat ends
+on the same stockpile (0/50/100/50) having completed exactly two researches, and no
+winner is declared. A port that "fixes" any of those invariants has changed the game; the
+gate measures exactly that it has not. One item this section used to list — a match clock
+reading 0 on every beat — turned out to be a bug in builds 934–949 rather than an
+invariant, and build 950 fixed it: the golden now carries a clock that advances, and the
+port must follow it. See spec §3.4.
 
 **Branch hygiene.** The work lands on `rebuild/v2`; `main` stays the shippable **v1**
 and is the *baseline every diff is measured against* — the spec's "a contract verified

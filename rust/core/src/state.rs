@@ -20,7 +20,7 @@ use serde::Serialize;
 
 use crate::data::{Cost, WorldData};
 use crate::mapgen;
-use crate::prng::Mulberry32;
+use crate::prng::{KeyedRng, Mulberry32};
 
 /// Everything the builder needs that a seed alone does not decide.
 pub struct InitialConfig<'a> {
@@ -258,18 +258,24 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
     let current_age = "stone";
     let age_idx = world.ages.iter().position(|a| a == current_age).unwrap_or(0);
 
-    // --- The seeded world, then the workers. The map draws first; the two
-    // jitter draws per worker continue the same stream (game.js:344-350:
-    // `spawn.x + this.randJitter(10)`).
+    // --- The seeded world, then the workers. The map draws from the terrain
+    // stream; the workers are spread by KEYED draws (game.js:659:
+    // `spawn.x + (this.rand(ai, 'start-workers') - 0.5) * 10`), which is the one
+    // part of the turn-1 state the map seed alone does not decide. The key names the
+    // seat by INDEX and the purpose, never the random player id (rngOwnerKey,
+    // game.js:117) — an id minted from Math.random cannot be part of a reproducible
+    // draw, and this is the state where that id is not even assigned yet.
     let mut rand = Mulberry32::from_seed(cfg.seed);
     let (spawns, resources) =
         mapgen::generate_map(&mut rand, cfg.map_size as i64, cfg.difficulty, cfg.seats);
+    let mut key_rng = KeyedRng::new(cfg.seed);
     let mut workers_per_seat: Vec<Vec<(f64, f64)>> = Vec::with_capacity(cfg.seats);
-    for spawn in spawns.iter().take(cfg.seats) {
+    for (i, spawn) in spawns.iter().enumerate().take(cfg.seats) {
+        let key = format!("s{i}:start-workers");
         let mut ws = Vec::with_capacity(3);
         for _ in 0..3 {
-            let x = spawn.0 + (rand.next_f64() * 10.0 - 5.0);
-            let z = spawn.1 + (rand.next_f64() * 10.0 - 5.0);
+            let x = spawn.0 + (key_rng.draw(&key) - 0.5) * 10.0;
+            let z = spawn.1 + (key_rng.draw(&key) - 0.5) * 10.0;
             ws.push((x, z));
         }
         workers_per_seat.push(ws);
@@ -514,7 +520,13 @@ pub fn build_initial_state(cfg: &InitialConfig) -> serde_json::Value {
 
     let state = State {
         player,
-        clock: Clock { match_seconds: 0 },
+        // One second, not zero. Builds 934-949 told every model `matchSeconds: 0` on every
+        // turn (docs/RULES-CHANGES.md build 950: two different clocks subtracted and clamped
+        // to zero), and the golden this port is measured against was recorded in that window,
+        // which is why our spec §3.4 could list "the clock reads 0 on every beat" as a
+        // degenerate invariant. Build 950 fixed the clock; the invariant is gone, and a port
+        // that still emits 0 is now the one that changed the game.
+        clock: Clock { match_seconds: 1 },
         epoch,
         resources: resources_obj,
         population,
