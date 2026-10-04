@@ -110,7 +110,7 @@ jobs:
 
   # The porting gate lived here as `cargo test` plus a byte-diff of the golden, and it earned
   # its keep: it caught the worker spread and the off-by-one-second clock, both before review.
-  # The Rust port is retired (docs/specs/REBUILD_SPEC.md §14 — 7% of the rules in the
+  # The Rust port is retired (docs/DESIGN_SPEC.md §14 — 7% of the rules in the
   # highest-review-cost language on the table, and a port nobody is eager to finish is not a
   # foundation). The corpus survived it and moved to `golden/`, hashes pinned in
   # `golden/MANIFEST.json`; the gate's teeth are now `tests/golden-fixtures.test.cjs`, which
