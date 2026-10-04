@@ -2050,6 +2050,11 @@ body.spectator-mode #unitInfo.spectator-card {
 .sum-tag.good { color: #4ecca3; background: rgba(78,204,163,0.12); border-color: rgba(78,204,163,0.35); }
 .sum-tag.warn { color: #f0a500; background: rgba(240,165,0,0.12); border-color: rgba(240,165,0,0.35); }
 .sum-tag.bad { color: #ff6b81; background: rgba(233,69,96,0.14); border-color: rgba(233,69,96,0.4); }
+.sum-cond { font-size: 0.72rem; color: #aeb8cc; margin: 2px 0 6px; font-family: ui-monospace, Consolas, monospace; }
+.summary-conditions { margin: 10px 0; font-size: 0.8rem; color: #aeb8cc; }
+.summary-conditions summary { cursor: pointer; color: #dec594; }
+.summary-conditions p { margin: 6px 0; }
+.sum-cond-rows span { white-space: nowrap; }
 .sum-tag.neutral { color: #aeb8cc; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.1); }
 
 /* Metric grid */
@@ -2076,7 +2081,17 @@ body.spectator-mode #unitInfo.spectator-card {
 }
 
 .summary-legend { text-align: center; color: #8a93a8; font-size: 0.8em; margin: 4px 0 18px; }
-.summary-buttons { display: flex; gap: 14px; justify-content: center; padding-bottom: 30px; }
+.summary-buttons { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: stretch;
+    max-width: 1180px; margin: 0 auto; padding-bottom: 30px; }
+/* One size for every action here. The menu styles they borrow were made for a column of
+   big menu entries: a 300px minimum, and a top margin on .back-btn that sat half the row
+   18px lower than the rest. */
+.summary-buttons .menu-btn { min-width: 0; margin: 0; flex: 0 1 220px; min-height: 48px; padding: 10px 16px;
+    font-size: .8em; letter-spacing: 1px; line-height: 1.25; display: inline-flex; align-items: center; justify-content: center; }
+/* The captions export is a field and a button; framed as one control of the same height. */
+.summary-buttons .sum-vtt { flex: 0 1 auto; min-height: 48px; padding: 0 0 0 12px; gap: 8px; border: 1px solid var(--line);
+    border-radius: 11px; background: linear-gradient(145deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03)); color: var(--muted); }
+.summary-buttons .sum-vtt .menu-btn { flex: 0 0 auto; min-height: 46px; border: none; border-left: 1px solid var(--line); border-radius: 0 10px 10px 0; }
 
 /* ======================================================================
    WONDER VICTORY COUNTDOWN + ANNOUNCEMENT
@@ -2475,6 +2490,8 @@ body.spectator-mode #unitInfo.spectator-card {
 .arena-hint {
     margin: 5px 0 0 23px; color: #8b95ab; font-size: 0.78em; line-height: 1.45;
 }
+/* Under a slot's Style picker: no checkbox to indent past. */
+.arena-hint.slot-style-hint { margin: 5px 0 0; }
 
 /* Age glyph sitting atop its marker; staggered by seat so simultaneous
    advances stay readable. */
@@ -2596,7 +2613,9 @@ body.demo-only .an-src { display:inline-block; padding:5px 12px; white-space:now
 body.demo-only .an-src:hover { background:var(--gold); color:#1a1205; }
 
 /* Rows, not columns: action on top, reading underneath, seam between. */
-.an-body { flex:1 1 auto; min-height:0; display:grid; grid-template-rows:52% 6px 1fr; }
+.an-body { flex:1 1 auto; min-height:0; display:grid; grid-template-rows:52% 6px auto 1fr; }
+.an-timeline-bar { display:flex; align-items:center; gap:10px; padding:6px 12px 0; font-size:.8rem; }
+.an-timeline-bar .an-timeline-label { display:flex; align-items:center; gap:6px; flex:1 1 auto; }
 .an-stage { position:relative; min-height:0; overflow:hidden; background:#0a1218; }
 .an-viewport { position:absolute; inset:0; }
 .an-viewport > * { width:100% !important; height:100% !important; }
@@ -2604,6 +2623,9 @@ body.demo-only .an-src:hover { background:var(--gold); color:#1a1205; }
     gap:6px; flex-wrap:wrap; max-width:calc(100% - 20px); z-index:3;
     background:rgba(8,14,20,0.6); border-radius:6px; padding:4px 7px; backdrop-filter:blur(2px); }
 .an-cap-txt { font-size:0.68em; color:#9ab; }
+.an-cap-txt.is-bad { color:#f0a080; }
+#anResimRange { width:clamp(120px, 22vw, 320px); accent-color:#c9a45c; }
+#anResimSpeed { font:inherit; font-size:0.72em; }
 
 
 /* The inspect card. Top-right so it never covers the HUD toggles bottom-left. */
@@ -2982,7 +3004,6 @@ body[data-reading="compact"] { --text-reading:.8125rem; --text-detail:.75rem; }
 .an-workspace-tools select { min-height:32px; max-width:160px; padding:4px 6px;
     border:1px solid rgba(255,255,255,.22); border-radius:5px;
     background:var(--bg-0); color:var(--text); font:inherit; }
-.an-workspace-tools .an-timeline-label { flex:1 1 220px; }
 .an-timeline-label input { flex:1; min-width:80px; accent-color:var(--gold); }
 #anTimelinePosition { font-variant-numeric:tabular-nums; color:var(--muted); }
 .an-seam:focus-visible { z-index:5; background:var(--gold); }
@@ -3017,3 +3038,170 @@ body[data-reading="compact"] { --text-reading:.8125rem; --text-detail:.75rem; }
 .tv-nav button:disabled { opacity:.45; cursor:default; }
 .tv-nav button:focus-visible { outline:2px solid #d5bb81; outline-offset:2px; }
 #tvRange { flex:1; color:#c0bdab; text-align:center; font-size:.75em; white-space:nowrap; }
+
+/* Chronicle captions (review #11): one line under the status bar, one at a time. The
+   global reduced-motion rule above already stills the fade; nothing here flashes. */
+.chronicle-caption {
+    position: fixed; top: 66px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; pointer-events: none; max-width: min(760px, calc(100vw - 32px));
+    padding: 6px 16px; border-radius: 6px; font-size: 0.86em; line-height: 1.35; text-align: center;
+    color: #e8eef7; background: rgba(10, 14, 30, 0.86); border: 1px solid rgba(78, 204, 163, 0.28);
+    backdrop-filter: blur(3px); opacity: 0;
+}
+.chronicle-caption[data-weight="3"] { border-color: rgba(233, 196, 106, 0.7); }
+.chronicle-caption .chr-t { color: #8fa3b8; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.chronicle-caption.chr-in { animation: chr-fade 5s ease forwards; }
+@keyframes chr-fade { 0% { opacity: 0; } 6% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+
+/* Intent layer (review #11): arrows and reasons over the 3-D view. Nothing here takes
+   input; the fade is the only motion, and the global reduced-motion rule leaves it. */
+.intent-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+.intent-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.intent-bubble {
+    position: absolute; transform: translate(-50%, calc(-100% - 18px)); width: max-content; max-width: 260px;
+    padding: 5px 9px 5px 11px; border-radius: 4px; font-size: 0.74em; line-height: 1.3;
+    /* Parched parchment at 80%: sun-bleached in one corner, browned toward another,
+       a darker rim where the edges have dried. The text on it is fully opaque. */
+    color: #1b130a;
+    background:
+        radial-gradient(ellipse at 22% 18%, rgba(255, 244, 210, 0.35), transparent 62%),
+        radial-gradient(ellipse at 88% 92%, rgba(139, 94, 42, 0.28), transparent 58%),
+        linear-gradient(172deg, rgba(233, 214, 166, 0.8), rgba(212, 184, 128, 0.8));
+    border: none; border-left: 5px solid var(--seat, #4ecca3);
+    box-shadow: inset 0 0 7px rgba(105, 70, 28, 0.45), 0 2px 7px rgba(0, 0, 0, 0.35);
+}
+.intent-bubble .intent-reason { display: block; margin-top: 2px; }
+/* The call after the model's name: the log's icon for the action and what was called. */
+.intent-bubble .intent-call { font-weight: 600; white-space: nowrap; margin-left: 2px; }
+.lb-objective { font-size: 0.72em; color: #cfd8e3; margin: 2px 0 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lb-list.collapsed .lb-objective { display: none; }
+.intent-bubble .intent-refused { color: #9c2412; font-weight: bold; }
+
+/* Broadcast mode (review #11): the operator's furniture goes, a scoreboard and lower
+   thirds come. The slate is the only flash, and it is skipped for reduced motion. */
+/* The minimap keeps its controls in broadcast mode: zoom, follow and the rest (b1003) and
+   the seat knobs beside it that choose whose map knowledge it shows (b1009) -- they are
+   how a broadcast is steered by hand. */
+body.broadcast-mode #spectatorHUD, body.broadcast-mode #spectatorLeaderboard, body.broadcast-mode #aiDecisionLog,
+body.broadcast-mode #transcriptViewer, body.broadcast-mode #unitInfo,
+body.broadcast-mode .lb-flyout { display: none !important; }
+/* The inspect card comes back while something is picked (b1034): a click on a unit, a
+   building or a resource is a question the broadcast answers, then the card goes. */
+body.broadcast-mode #unitInfo.spectator-card.has-subject { display: block !important; }
+/* The bar's speed control, moved beside the clock: a small version of it. */
+.broadcast-board .sb-speed-wrap { margin-left: -4px; }
+.broadcast-board .sb-speed-wrap > .sb-end { padding: 6px 10px; border-radius: 6px; font-size: 0.86em; background: rgba(10, 14, 30, 0.88); }
+.broadcast-board {
+    /* Full width with the contents centred: a left: 50% box shrinks to half the screen
+       and wrapped the row long before it was full. */
+    position: fixed; top: 12px; left: 16px; right: 16px; z-index: 1001; pointer-events: none;
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px;
+    color: #eef3f8; font-size: 0.9em;
+}
+/* The rebuilt part of the board (b1013); it lays out as if its cards sat on the board. */
+.broadcast-board .bb-cards { display: contents; }
+.broadcast-board .bb-clock { padding: 6px 12px; border-radius: 6px; background: rgba(10, 14, 30, 0.88); font-variant-numeric: tabular-nums; font-weight: 700; }
+.broadcast-board .bb-seat { padding: 6px 12px; border-radius: 6px; background: rgba(10, 14, 30, 0.88); border: 1px solid rgba(255, 255, 255, 0.12); white-space: nowrap; }
+.broadcast-board .bb-seat.out { opacity: 0.45; text-decoration: line-through; }
+.broadcast-board .bb-seat { display: inline-flex; flex-direction: column; gap: 2px; }
+.broadcast-board .bb-sub { font-size: 0.82em; color: #b8c6d6; display: flex; align-items: center; gap: 4px; }
+/* The seat's colour down the left, as on the bubbles; its place as the leaderboard's medallion. */
+.broadcast-board .bb-seat { border-left: 5px solid var(--seat, rgba(255, 255, 255, 0.12)); }
+.broadcast-board .bb-rank { width: 18px; height: 18px; font-size: 0.85em; margin-right: 2px; }
+.broadcast-board .bb-rank.rank-1 { background: linear-gradient(145deg, #ffe27a, #f0a500); }
+.broadcast-board .bb-rank.rank-2 { background: linear-gradient(145deg, #eef2f7, #b5c0cf); }
+.broadcast-board .bb-rank.rank-3 { background: linear-gradient(145deg, #e2a26a, #b9702f); color: #fff; }
+.broadcast-board .bb-think { margin-left: auto; padding-left: 8px; display: inline-flex; }
+.broadcast-board .bb-think .dot { width: 7px; height: 7px; border-radius: 50%; background: #4ecca3; animation: thinkPulse 1.1s ease-in-out infinite; }
+.broadcast-board .bb-civ { color: #d9e2ec; margin-right: 4px; }
+.broadcast-board .bb-age { color: #9fb3c8; font-size: 0.86em; }
+.broadcast-board .bb-n { font-variant-numeric: tabular-nums; margin-left: 4px; }
+.broadcast-board .bb-advised { margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 0.8em; color: #1a1406; background: #e9c46a; }
+.broadcast-wonder {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 1001; pointer-events: none;
+    min-width: min(520px, calc(100vw - 32px)); padding: 10px 18px; border-radius: 8px; text-align: center;
+    color: #fff; background: rgba(10, 14, 30, 0.9); border: 2px solid var(--seat, #e9c46a); font-size: 1.15em; font-weight: 700;
+}
+.broadcast-wonder .bw-track { height: 8px; margin-top: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.broadcast-wonder .bw-fill { height: 100%; background: var(--seat, #e9c46a); }
+body.broadcast-mode .chronicle-caption { top: auto; bottom: 40px; left: 32px; transform: none; text-align: left; font-size: 1.1em; padding: 10px 18px; max-width: min(900px, calc(100vw - 64px)); border-left: 4px solid #4ecca3; }
+body.broadcast-mode .chronicle-caption[data-weight="3"] { border-left-color: #e9c46a; }
+.broadcast-board .broadcast-ctls { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; pointer-events: auto; }
+.broadcast-board .broadcast-exit { pointer-events: auto; padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18); color: #fff; }
+/* Icon only and small: they sit beside the way out, not competing with it. */
+.broadcast-board .broadcast-ctl { pointer-events: auto; padding: 4px 7px; min-width: 0; border-radius: 6px; font-size: 0.85em; line-height: 1;
+    border: 1px solid rgba(255, 255, 255, 0.18); color: #fff; background: rgba(10, 14, 30, 0.88); }
+.broadcast-board .broadcast-ctl.sb-on { background: linear-gradient(145deg, #35b58c, #1f8d6b); }
+/* The band of light runs behind the broadcast caption it announces (bottom left, see
+   body.broadcast-mode .chronicle-caption), not across the middle of the picture. Scaled with
+   the UI size like the caption, which sits at bottom: 40px under the same zoom. */
+.broadcast-slate { position: fixed; left: 0; right: 0; bottom: calc(22px * var(--ui-scale, 1)); height: calc(88px * var(--ui-scale, 1));
+    z-index: 999; pointer-events: none; opacity: 0;
+    background: linear-gradient(90deg, rgba(233, 196, 106, 0.45), rgba(233, 196, 106, 0.22) 45%, transparent 85%); }
+.broadcast-slate.go { animation: slate 0.6s ease-out 1; }
+@keyframes slate { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
+.sum-vtt { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85em; }
+.sum-vtt input { width: 5em; }
+
+/* Moment links and chapters (review #11). */
+.an-ch-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 6px; }
+.an-ch-offset { font-size: 0.72em; color: #9ab; display: inline-flex; align-items: center; gap: 4px; }
+.an-ch-offset input { width: 4.5em; }
+
+/* Tale of the tape (review #11). */
+.an-tale { margin: 0 0 8px; font-size: 0.8em; }
+.an-tale summary { cursor: pointer; font-weight: 600; color: #cfd8e3; }
+.an-tale-scroll { overflow-x: auto; }
+.an-tale-table { border-collapse: collapse; margin-top: 6px; }
+.an-tale-table th, .an-tale-table td { padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); text-align: left; white-space: nowrap; }
+.an-tale-table th[scope="row"] { color: #9ab; font-weight: normal; }
+.an-tale-table .tt-none { color: #5c6a78; }
+.an-tale-table .tt-warn { color: #e9c46a; }
+
+/* Live seat-health strip (review #11). */
+.lb-health { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.7em; color: #aebccc; margin: 1px 0 3px; font-variant-numeric: tabular-nums; }
+.lb-health .warn { color: #e9c46a; }
+.lb-health .bad { color: #f0a080; }
+.lb-list.collapsed .lb-health { display: none; }
+
+/* Strategic zoom layer (review #12). */
+.intent-svg .strat-n { fill: #fff; stroke: rgba(0,0,0,0.75); stroke-width: 3px; paint-order: stroke; font-weight: 700; font-family: inherit; }
+.intent-svg .strat-battle { fill: rgba(255,90,60,0.18); stroke: #ff5a3c; stroke-width: 2; stroke-dasharray: 5 4; }
+.intent-svg .strat-pole { stroke: #fff; stroke-width: 2; stroke-linecap: round; opacity: 0.5; }
+.intent-svg .strat-pole-halo { stroke: rgba(0,0,0,0.55); stroke-width: 4; stroke-linecap: round; opacity: 0.5; }
+.intent-svg .strat-foot { fill: #fff; stroke: rgba(0,0,0,0.6); stroke-width: 1.2; opacity: 0.5; }
+.intent-svg .strat-flag { opacity: 0.8; }
+.intent-svg .strat-cloth { fill: none; stroke: rgba(0,0,0,0.5); stroke-width: 1; stroke-linejoin: round; }
+.intent-bubble.summary .intent-reason { font-style: italic; }
+
+/* UI size (the graphics card at the minimap). The panels over the map scale as whole
+   pieces -- type, spacing, icons -- and the map itself keeps its full resolution. The
+   bubbles scale around the point they stand on, so their anchoring does not move. */
+:root { --ui-scale: 1; }
+#topHUD, #opponentsBar, #bottomHUD, #transcriptViewer, #minimap, #wonderTimer,
+#spectatorHUD, #spectatorLeaderboard, #aiDecisionLog, #unitInfo, #mmFog, .menu-panel,
+.broadcast-board, .broadcast-wonder, .chronicle-caption { zoom: var(--ui-scale); }
+/* The decision log fills the window's height; under zoom that height is counted in its
+   own shrunken units, so it is divided back out, or the log would end at 72 %. */
+.ai-decision-log { height: calc(100vh / var(--ui-scale) - 28px); }
+.ai-decision-log.collapsed { max-height: calc(100vh / var(--ui-scale) - 28px); }
+/* The same for every limit taken from the window: the space it reserves (the minimap
+   under the leaderboard, the side panels beside the transcript) is scaled too, so the
+   window is divided back out. Otherwise a smaller leaderboard scrolled exactly where
+   the full-size one did, with room to spare below it. */
+.spectator-leaderboard { max-height: calc(100vh / var(--ui-scale) - 462px); }
+/* (Its spectator-mode limit lives in antiquity.css, which loads last; divided there.) */
+.tv { max-width: calc(100vw / var(--ui-scale) - 700px); max-height: calc(100vh / var(--ui-scale) - 180px); }
+.intent-bubble { transform-origin: 50% 100%; }
+.intent-bubbles .intent-bubble { transform: translate(-50%, calc(-100% - 18px)) scale(var(--ui-scale)); }
+/* A plan (b1000): on the edge of the view, pinned by its top-left corner (the overlay
+   places it), the whole plan -- objective and every step. */
+.intent-bubbles .intent-bubble.intent-plan { transform: scale(var(--ui-scale)); transform-origin: 0 0; max-width: 320px; }
+.intent-plan .intent-objective { display: block; margin-top: 3px; font-weight: 600; }
+.intent-plan .intent-steps { margin: 3px 0 0; padding-left: 1.4em; }
+.intent-plan .intent-steps li { margin: 1px 0; }
+/* A seat's calls that all point out of view: one card, one line per call. */
+.intent-bubble.merged .intent-line { display: block; margin-top: 3px; }
+.intent-bubble.merged .intent-line + .intent-line { padding-top: 3px; border-top: 1px solid rgba(105, 70, 28, 0.3); }
+.intent-bubble.merged .intent-line .intent-call { margin-left: 0; }
+.intent-bubble.merged .intent-line.summary .intent-reason { font-style: italic; }

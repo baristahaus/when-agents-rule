@@ -21,10 +21,13 @@ const scope = {
   localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, document: undefined,
 };
 vm.createContext(scope);
-for (const f of ['js/civilizations.js', 'js/units.js', 'js/buildings.js', 'js/resources.js', 'js/i18n.js'])
+// One list, from js/manifest.js — upstream's answer to every harness keeping its own, and the
+// reason this file died on `WarMath is not defined`: the hand-rolled list predated
+// js/simulation/{math,rng}.js. game.js has no page tail any more (start-up moved to
+// js/boot.js), so the whole file loads in this bare VM and nothing is cut with a split.
+vm.runInContext('globalThis.window = globalThis', scope);   // texgen's module pattern
+for (const f of ['js/manifest.js'].concat(require('../js/manifest.js').vm))
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), scope, { filename: f });
-vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'game.js'), 'utf8')
-  .split('\nconst WAR_PRIVATE_HOST')[0], scope, { filename: 'js/game.js' });
 
 const Game = vm.runInContext('Game', scope);
 

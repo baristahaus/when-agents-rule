@@ -2,10 +2,10 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 function setup(arrows=1){
  const scope={console:{log(){}},BUILDING_DEFS:{town_center:{},tower:{}},towerPower:()=>({attack:10,arrows}),setTimeout:()=>{},Math};vm.createContext(scope);
  const read=p=>fs.readFileSync(path.join(__dirname,'../js/',p),'utf8');
- vm.runInContext(read('game.js').split('\nconst WAR_PRIVATE_HOST')[0],scope);
+ vm.runInContext(read('simulation/rng.js'),scope);vm.runInContext(read('simulation/math.js'),scope);vm.runInContext(read('game.js'),scope);
  vm.runInContext(read('openai-ai.js'),scope);vm.runInContext(read('standing-orders.js'),scope);
  const Game=vm.runInContext('Game',scope),Manager=vm.runInContext('OpenAIAIManager',scope);
- const g=Object.create(Game.prototype),m=Object.create(Manager.prototype),owner={id:'a',units:[],buildings:[]},enemy=[];
+ const g=Object.create(Game.prototype);g.clock=Game.newClock();const m=Object.create(Manager.prototype),owner={id:'a',units:[],buildings:[]},enemy=[];
  let id=0;const unit=(type='warrior',x=0,z=0,speed=1)=>({id:'u'+(++id),handle:id,type,unitType:type==='priest'?'support':'infantry',owner:'a',x,z,speed,health:100,maxHealth:100,attack:type==='priest'?0:10,range:type==='priest'?3:1,_orderToken:1});
  Object.assign(g,{getAllUnits:()=>owner.units.concat(enemy),getAllBuildings:()=>[],clampSlot:(x,z)=>({x,z}),clampToMap:(x,z)=>({x,z}),
   renderer:{units:owner.units,updateUnitPosition(){},flashHit(){},spawnProjectile(){}},aiManager:{aiPlayers:[owner],isVisibleTo:(_,x,z)=>owner.units.some(u=>Math.hypot(u.x-x,u.z-z)<=30)},
@@ -606,4 +606,113 @@ test('sub-pixel range errors cannot freeze the attack timer on the spot',()=>{
   for(let i=0;i<40;i++)h.g.updateCombat(50);
   assert.equal(e.health,9980);assert.equal(u.isMoving,false);
  }
+});
+
+// An order on a Wonder outranks everything but retaliation (29 Sep 2026: armies sent at a
+// Wonder ground through every villager and house on the way). The control run with an
+// ordinary building as the target shows the same route DOES draw the army off.
+function wonderRoute(isWonder){
+ const h=setup(),u=h.unit('warrior',0,0,2);h.owner.units.push(u);
+ const house={owner:'b',type:'town_center',x:22,z:4,health:100,maxHealth:100};
+ const villager=Object.assign(h.rival(30,-3),{type:'worker',attack:0});
+ const target={id:'monument',owner:'b',type:isWonder?'monument':'town_center',isWonder,x:70,z:0,health:5000,maxHealth:5000};
+ h.g.getAllBuildings=()=>[house,target];
+ const group=h.issue('march',{x:70,z:0},{target});
+ return {h,u,house,villager,target,group};
+}
+test('an army ordered at a Wonder passes villagers and houses on the way and strikes the Wonder',()=>{
+ const c=wonderRoute(false);
+ for(let i=0;i<300&&c.target.health===5000;i++)c.h.step(100,true);
+ assert.ok(c.house.health<100||c.villager.health<10000,'control: an ordinary assault is drawn off by what it passes');
+ const w=wonderRoute(true);
+ for(let i=0;i<400&&w.target.health===5000;i++){w.h.step(100,true);
+  assert.ok(w.u.attackTarget==null||w.u.attackTarget===w.target,'only the Wonder is a target, at '+i*100+'ms');}
+ assert.ok(w.target.health<5000,'the Wonder was reached and struck');
+ assert.equal(w.house.health,100,'the house was left alone');assert.equal(w.villager.health,10000,'the villager was left alone');
+});
+test('on a Wonder run the army still answers an attacker, then returns to the Wonder; once it falls the assault goes on',()=>{
+ const w=wonderRoute(true);w.h.step(300,true);
+ const raider=w.h.rival(8,2);w.h.g.noteRetaliation(w.u,raider);
+ assert.equal(w.u.attackTarget,raider,'retaliation still comes first');
+ raider.health=0;w.h.step(150);
+ assert.equal(w.u.attackTarget,null,'not the house or the villager after the raider');
+ for(let i=0;i<400&&w.target.health===5000;i++)w.h.step(100,true);
+ assert.ok(w.target.health<5000,'back on the Wonder');assert.equal(w.house.health,100);
+ w.target.health=0;w.house.x=w.u.x+3;w.house.z=w.u.z;w.h.step(150);
+ assert.equal(w.u.attackTarget,w.house,'with the Wonder down, the ordinary assault resumes nearby');
+});
+
+// Retaliation on the Platform (29 Sep 2026, a live match replayed): towers reach 18 and a
+// soldier sees 15, and groups can be spread across the map. Four ways an army ignored or
+// yo-yoed with what was shooting it.
+test('a tower firing from beyond sight is answered, and stays the focus after it stops firing',()=>{
+ const h=setup(),a=h.unit(),b=h.unit('warrior',-2);h.owner.units.push(a,b);
+ h.g.aiManager.isVisibleTo=(_,x,z)=>h.owner.units.some(u=>u.health>0&&Math.hypot(u.x-x,u.z-z)<=15);   // WAR's foot sight
+ const target={id:'barracks',type:'town_center',owner:'b',x:0,z:4,health:5000,maxHealth:5000};
+ const tower={id:'tower',type:'tower',owner:'b',x:17,z:0,health:1000,range:18};h.g.getAllBuildings=()=>[target,tower];
+ h.issue('march',{x:0,z:4},{target});h.step();
+ assert.equal(h.g.aiManager.isVisibleTo(h.owner,tower.x,tower.z),false,'the tower is out of sight');
+ h.g.updateTowerAttack(1500);
+ assert.equal(a.attackTarget,tower,'the hit gives the tower away');
+ h.step(4500);   // longer than a moving attacker stays revealed, with no more volleys
+ assert.equal(a.attackTarget,tower,'a tower cannot move: still the focus');assert.equal(b.attackTarget,tower);
+});
+
+test('a moving attacker out of sight is revealed by its hits only for a few seconds',()=>{
+ const h=setup(),u=h.unit();h.owner.units.push(u);
+ h.g.aiManager.isVisibleTo=()=>false;
+ const shooter=h.rival(10);h.issue('march',{x:50,z:0});h.g.noteRetaliation(u,shooter);
+ assert.equal(u.attackTarget,shooter,'the shot gives it away');
+ h.step(3150);
+ assert.equal(u.attackTarget,null,'without more shots it is lost again in the fog');
+});
+
+test('in a group spread wide, a soldier answering its attacker is not recalled by the far middle',()=>{
+ const h=setup(),near=h.unit('warrior',0,0,1),far1=h.unit('warrior',-300,0),far2=h.unit('warrior',-300,3);h.owner.units.push(near,far1,far2);
+ h.g.aiManager.isVisibleTo=()=>true;
+ h.issue('march',{x:40,z:0});const archer=Object.assign(h.rival(18,0),{range:12,speed:0.01});
+ h.g.noteRetaliation(near,archer);
+ assert.equal(near.attackTarget,archer);
+ assert.equal(far1.attackTarget,null,'a member 300 away is not pulled across the map');
+ for(let i=0;i<40;i++){h.step(150,true);assert.equal(near.attackTarget,archer,'held at '+i*150+'ms');}
+ assert.ok(far1.attackTarget!==archer&&far2.attackTarget!==archer,'nor does the far wing join from 300 away');
+});
+
+test('a soldier answering a retreating attacker is still leashed to where it took up the fight',()=>{
+ const h=setup(),u=h.unit('warrior',0,0,1);h.owner.units.push(u);
+ h.g.aiManager.isVisibleTo=()=>true;
+ h.issue('march',{x:0,z:0});const raider=Object.assign(h.rival(10,0),{speed:0.01});h.g.noteRetaliation(u,raider);
+ assert.equal(u.attackTarget,raider);
+ raider.x=120;h.step(1200);   // it ran far beyond the chase radius from where the fight began
+ assert.equal(u.attackTarget,null,'not lured across the map');
+});
+
+test('a retaliating soldier charges out of the formation and rejoins it once the threats are gone',()=>{
+ const h=setup(),a=h.unit('warrior',0,0,2),b=h.unit('warrior',0,3,2),slow=h.unit('warrior',-3,0,1);h.owner.units.push(a,b,slow);
+ h.g.aiManager.isVisibleTo=()=>true;
+ h.issue('march',{x:150,z:0},{matchSpeed:'slowestUnit'});h.step(300);
+ assert.ok(a.formationGroup,'marching in formation');assert.equal(a.marchSpeed,1,'at the slowest member\'s pace');
+ const raider=Object.assign(h.rival(a.x+14,a.z+8),{speed:0.01});h.g.noteRetaliation(a,raider);
+ assert.equal(a.attackTarget,raider);assert.equal(a.formationGroup,null,'out of the formation');assert.equal(a.marchSpeed,null,'at its own speed');
+ const x0=a.x,z0=a.z;h.step(300,true);
+ assert.ok(Math.hypot(a.x-x0,a.z-z0)>0.3*3*1.5,'it charges faster than the formation pace allows');
+ raider.health=0;h.step(300,true);
+ assert.equal(a.attackTarget,null);
+ assert.ok(a.formationGroup,'back in the formation');assert.equal(a.marchSpeed,1,'back at the formation\'s pace');
+});
+
+// 1 Oct 2026: a priest kept a stand while its patient had moved less than 1 -- a soldier
+// shuffling 0.7 in a fight left it 10.5 away, a hair outside its reach, healing no one.
+test('a priest re-plans its stand when a shuffling patient drifts out of reach',()=>{
+ const h=setup(),w=h.unit('warrior',0,0),p=h.unit('priest',-14,0,2);w.health=40;h.owner.units.push(w,p);
+ h.g.aiManager.isVisibleTo=()=>true;
+ h.issue('march',{x:0,z:0});
+ for(let i=0;i<40;i++)h.step(150);
+ const reach=h.g.healingRange(),standGap=()=>Math.hypot(p.targetX-w.x,p.targetZ-w.z);
+ assert.equal(p._formationPatient,w,'the wounded soldier is its patient');
+ assert.ok(standGap()<=reach-.2,'its stand reaches the patient: '+standGap().toFixed(2));
+ const dx=w.x-p.targetX,dz=w.z-p.targetZ,d=Math.hypot(dx,dz)||1;w.x+=dx/d*.8;w.z+=dz/d*.8;   // shuffles away
+ assert.ok(standGap()>reach-.2,'the old stand no longer reaches it');
+ h.step(300);
+ assert.ok(standGap()<=reach-.2,'re-planned to reach it again: '+standGap().toFixed(2));
 });

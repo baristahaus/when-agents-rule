@@ -3,16 +3,30 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+// Recorded matches are not deployed everywhere (the platform server has none), so a
+// test that reads them reports as skipped there rather than as a failure.
+const HAS_SAMPLES = require('node:fs').existsSync(require('node:path').join(__dirname, '..', 'samples', 'index.json'));
+const NEEDS_SAMPLES = { skip: !HAS_SAMPLES && 'samples/ not present' };
+if (!HAS_SAMPLES) { require('node:test')('recorded match checks', NEEDS_SAMPLES, () => {}); return; }
 const root = path.resolve(__dirname, '..');
 const catalogue = JSON.parse(fs.readFileSync(path.join(root, 'samples/index.json'), 'utf8')).matches;
 
 function setup(fetcher) {
-    const scope = vm.createContext({fetch: fetcher, console, t: k => k, document: {getElementById: () => null}});
+    // The real message path. The analyzer has no visible unit card, so errors must
+    // reach the page-level notice; this test used to stub showErrorMessage, which is
+    // why it never saw them being written into a 0x0 element.
+    const errors = [];
+    const notice = {hidden: true, className: '', setAttribute() {}, addEventListener() {},
+        set textContent(v) { errors.push(v); }, get textContent() { return errors[errors.length - 1]; }};
+    const unitInfo = {getClientRects: () => []};
+    const elements = {appNotice: notice, unitInfo};
+    const scope = vm.createContext({fetch: fetcher, console, t: k => k, setTimeout: () => 0, clearTimeout() {},
+        document: {getElementById: id => elements[id] || null}});
     vm.runInContext(fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8') + '\nthis.UI = UIManager;', scope);
     const ui = Object.create(scope.UI.prototype);
     ui.anFillSamplePicker = () => {};
-    ui.errors = [];
-    ui.showErrorMessage = message => ui.errors.push(message);
+    ui.errors = errors;
+    ui.notice = notice;
     return ui;
 }
 
@@ -53,11 +67,15 @@ test('catalogue outage reports a failure instead of opening an unrelated game', 
     ui.anLoadSample = () => assert.fail('unexpected fallback');
     await ui.anLoadLinkedMatch('match-20260907-120324');
     assert.equal(ui.errors.length, 1);
+    assert.equal(ui.notice.hidden, false);
 });
 
 test('startup opens links locally and publicly while preserving normal defaults', () => {
-    const source = fs.readFileSync(path.join(root, 'js/game.js'), 'utf8');
-    const boot = source.slice(source.lastIndexOf("window.addEventListener('load',"));
+    // Browser start-up lives in js/boot.js (review #6 step 8).
+    const source = fs.readFileSync(path.join(root, 'js/boot.js'), 'utf8');
+    const at = source.lastIndexOf("window.addEventListener('load',");
+    assert.ok(at >= 0, 'the load handler is in boot.js');
+    const boot = source.slice(at);
     for (const [demo, query, expected] of [
         [true, '?match=match-20260907-120324', ['open', 'match-20260907-120324']],
         [false, '?match=match-20260909-211941', ['open', 'match-20260909-211941']],

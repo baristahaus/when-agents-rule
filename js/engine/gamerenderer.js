@@ -1,12 +1,10 @@
 // EngineRenderer — the game's renderer, in-house since M6 (it replaced the
 // Three.js GameRenderer as a drop-in at M4, and the old path is now retired):
-// same public methods, same entity bookkeeping, drawn by our own WebGL
-// pipeline: locked dimetric camera, procedural textures,
-// EngineBuildings/EngineUnits compositions, fog plane. animate() only draws.
-// It also owns two positional passes that mutate unit coordinates — same-owner
-// separation and building clearance — which run from simulateStep(dt) on the
-// game's simulation clock, NOT from the render loop (see the comment there and
-// docs/QUALITY_REVIEW.md §7 for what that cost when it was the other way round).
+// same public methods and entity bookkeeping, drawn by our own WebGL pipeline.
+// It decides nothing about the game: separation and building clearance, which
+// once ran here, are rules in the simulation step (js/simulation/position-rules.js).
+// Locked dimetric camera,
+// procedural textures, EngineBuildings/EngineUnits compositions, fog plane.
 //
 // Compatibility shims (the freeze line, documented in ENGINE.md):
 // - this.renderer = { domElement, setSize, render } — input.js binds events to
@@ -33,16 +31,12 @@
     // Raising it also lengthens the wheel's zoom-out in play, which is the point: the
     // cap is what a reader hits when they try to see the whole board and cannot.
     const MIN_HALF = 10, MAX_HALF = 520;
+    // A director close-up frames one unit (b1010): closer than the user may zoom.
+    const CLOSE_MIN_HALF = 0.8;
     // Shared by worker lanterns and settlement lights (including their housings).
     // Twice the former 300-unit cutoff, with the same proportional fade curve.
     const lightDetailFade = (distance, halfH) =>
         Math.max(0,Math.min(1,(600-distance)/180,(600-halfH)/210));
-    // A deterministic 8-way spread. Both refereeing passes below have to deal with two
-    // things standing on the SAME point, where there is no direction between them to push
-    // along: this picks one from the index so coincident units fan out instead of agreeing
-    // on the same escape vector. Index-derived, never random — a replayed or backgrounded
-    // match has to referee identically to a watched one.
-    const FAN = (k) => ((k % 8) * Math.PI) / 4;
     // Scene ambient. Lives here rather than inline at the draw call because the
     // sea colour beyond the map has to be derived from the SAME value — two
     // copies drifting apart is exactly what put a visible seam at the horizon.
@@ -54,6 +48,9 @@
           TERRAIN_WORLD = TexGen.TERRAIN_WORLD,
           TERRAIN_LAND = TexGen.TERRAIN_LAND;
     const BSCALE = 0.78;         // engine building set → game footprint scale
+    // Wonders are drawn 1.5x (the rules' Game.WONDER_SCALE, which this file cannot read:
+    // the Platform viewer loads the renderer without game.js). Keep the two equal.
+    const WONDER_SCALE = 1.5;
 
 
     class EngineRenderer {
@@ -135,7 +132,18 @@
             this.prog = GLCore.compileProgram(this.gl, EngineAtmosphere.vertex, EngineAtmosphere.fragment);
             this.shadowProg = GLCore.compileProgram(this.gl, EngineAtmosphere.shadowVertex, EngineAtmosphere.shadowFragment);
             this.sunDir = M().normalize([-0.65, 0.72, 0.36]);
-            this.visualStyle = 'cinematic';
+            // Lighting: 'classic' (Simple), 'cinematic' (Atmospheric) or 'film' (Cinematic:
+            // Atmospheric plus bloom, burning buildings and rubble). Remembered per browser.
+            let style = null;
+            try { style = localStorage.getItem('warLightStyle'); } catch (e) {}
+            this.visualStyle = ['classic', 'cinematic', 'film'].includes(style) ? style : 'cinematic';
+            this._rubble = [];
+            // A viewer who asked for less motion gets steady flames and no rising embers.
+            this._reducedMotion = false;
+            try {
+                const mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+                if (mq) { this._reducedMotion = mq.matches; if (mq.addEventListener) mq.addEventListener('change', e => { this._reducedMotion = e.matches; }); }
+            } catch (e) {}
             this._shadowTarget = null;
             this._lightMatrix = M().identity();
             this._shadowStrength = 0;
@@ -175,6 +183,13 @@
 
             this._buildTextures('summer');
             this.animate();
+        }
+
+        setVisualStyle(value) {
+            if (!['classic', 'cinematic', 'film'].includes(value)) return;
+            this.visualStyle = value;
+            if (value !== 'film') this._rubble.length = 0;
+            try { localStorage.setItem('warLightStyle', value); } catch (e) {}
         }
 
         // ---- materials -------------------------------------------------------
@@ -272,6 +287,9 @@
                 field: T(TexGen.field(144, 128, 'rows')),
                 field_dirt: T(TexGen.field(144, 128, 'dirt')),
                 field_patchy: T(TexGen.field(144, 128, 'patchy')),
+                field_furrows: T(TexGen.field(144, 128, 'furrows')),
+                crop_rice: T(TexGen.crop('rice', 145), { clamp: true }),
+                crop_wheat: T(TexGen.crop('wheat', 146), { clamp: true }),
                 shadow: T(TexGen.shadowBlob(), { clamp: true }),
                 mote: T(TexGen.softMote(), { clamp: true }),
                 cloth: T(TexGen.cloth(155)),
@@ -328,7 +346,7 @@
         // frame.
         _meshFootprint(parts, key) {
             if (this._footprint.has(key)) return this._footprint.get(key);
-            let ex = 0, ez = 0;
+            let ex = 0, ez = 0, ey = 0;
             for (const p of parts) {
                 if (p.blend || p.tex === 'shadow' || p.visualOnly) continue; // the contact shadow isn't structure
                 const gen = EngineMesh[p.kind];
@@ -339,11 +357,13 @@
                     const x = P[i], y = P[i + 1], z = P[i + 2];
                     const wx = Math.abs(m[0] * x + m[4] * y + m[8] * z + m[12]);
                     const wz = Math.abs(m[2] * x + m[6] * y + m[10] * z + m[14]);
+                    const wy = m[1] * x + m[5] * y + m[9] * z + m[13];
                     if (wx > ex) ex = wx;
                     if (wz > ez) ez = wz;
+                    if (wy > ey) ey = wy;
                 }
             }
-            const fp = { ex, ez };
+            const fp = { ex, ez, ey };
             this._footprint.set(key, fp);
             return fp;
         }
@@ -368,6 +388,59 @@
             t.z = Math.min(half, Math.max(-half, t.z));
         }
 
+        // A director's pose onto the camera: a cut snaps, anything else eases. A close-up
+        // (b1010) may come closer than the user's zoom (CLOSE_MIN_HALF), aims at chest
+        // height (lookY), and follows its subject tightly: at that frame a unit walking
+        // at the usual easing would leave the picture in under a second.
+        applyPose(shot, deltaTime) {
+            const want = Math.max(shot.closeup ? CLOSE_MIN_HALF : MIN_HALF, Math.min(MAX_HALF, shot.halfH));
+            const lookY = shot.lookY || 0;
+            if (shot.cut) {
+                // The cut IS the feature. No travel, no ease, no sailing
+                // across whatever happens to lie between two subjects --
+                // which is what made half of a recorded match dead air.
+                this.cameraTarget.x = shot.x; this.cameraTarget.z = shot.z;
+                this._halfH = want;
+                this._yaw = shot.yaw;
+                this._pitch = shot.pitch;
+                this._lookY = lookY;
+                if (shot.eye) this.aimFromEye(shot.eye);
+                return;
+            }
+            const k = Math.min(1, deltaTime * 1.6), kt = shot.closeup ? Math.min(1, deltaTime * 8) : k;
+            this.cameraTarget.x += (shot.x - this.cameraTarget.x) * kt;
+            this.cameraTarget.z += (shot.z - this.cameraTarget.z) * kt;
+            if (shot.eye) { this._lookY = lookY; this.aimFromEye(shot.eye); return; }
+            this._halfH += (want - this._halfH) * k;
+            this._lookY = (this._lookY || 0) + (lookY - (this._lookY || 0)) * k;
+            // Shortest way round the circle. Eased raw, a camera at 350
+            // degrees easing toward 10 takes the 340-degree route and
+            // spins the whole board to travel twenty.
+            let d = shot.yaw - this._yaw;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            this._yaw += d * k;
+            this._pitch += (shot.pitch - this._pitch) * k;
+        }
+
+        // A camera standing still (b1019): yaw, pitch and distance that put the eye at
+        // `eye` while looking at the current target. The frame's height follows the
+        // distance (fixed field of view), so a subject walking away gets smaller, as it
+        // would to a camera on a tripod. Nearer than the close-up limit the eye gives way,
+        // and the pitch stops short of straight down, where lookAt degenerates.
+        aimFromEye(eye) {
+            const t = this.cameraTarget, ly = this._lookY || 0;
+            const dx = eye[0] - t.x, dz = eye[2] - t.z, h = Math.hypot(dx, dz);
+            if (h > 1e-6) this._yaw = Math.atan2(dx, dz);
+            this._pitch = Math.min(1.2, Math.atan2(eye[1] - ly, h));
+            const dist = Math.hypot(h, eye[1] - ly);
+            this._halfH = Math.max(CLOSE_MIN_HALF, Math.min(MAX_HALF, dist * Math.tan(10 * Math.PI / 180)));
+        }
+
+        // Which way a unit is drawn facing (radians about Y; +Z turned by it). The
+        // director reads it to stand a close-up in front of the unit.
+        unitFacing(u) { return (this._unitDir && this._unitDir.get(u)) || 0; }
+
         _computeCam() {
             this._clampTarget();
             const m3 = M();
@@ -379,7 +452,7 @@
             const tanHalf = Math.tan(FOVY / 2);
             const dist = this._halfH / tanHalf;
             const FAR = dist + 2200;
-            const cam = m3.dimetricView(this.cameraTarget.x, this.cameraTarget.z, dist, this._yaw, this._pitch);
+            const cam = m3.dimetricView(this.cameraTarget.x, this.cameraTarget.z, dist, this._yaw, this._pitch, this._lookY || 0);
             const v = cam.view;
             this._cam = {
                 view: v, eye: cam.eye, dir: cam.dir,
@@ -724,6 +797,13 @@
             if(!this._flagTextures)this._flagTextures=new Map();
             const key=JSON.stringify([seat,tint,unit]);
             if(this._flagTextures.has(key))return this._flagTextures.get(key);
+            const tex=GLCore.createTextureFromCanvas(this.gl,this._flagCanvas(seat,tint,unit),{clamp:true});
+            this._flagTextures.set(key,tex);return tex;
+        }
+
+        // The flag's cloth: the cloth texture in the seat's colour with its badge printed on
+        // it. A building's flag is 0.85 x 0.55, so the badge is widened to stay round there.
+        _flagCanvas(seat,tint,unit=false) {
             const c=document.createElement('canvas');c.width=256;c.height=unit?256:128;
             const ctx=c.getContext('2d');ctx.drawImage(TexGen.cloth(155),0,0,256,c.height);
             ctx.globalCompositeOperation='multiply';
@@ -731,10 +811,56 @@
             ctx.globalCompositeOperation='source-over';
             if(typeof drawTeamBadgeOnCanvas==='function'&&seat!=null){
                 ctx.save();ctx.translate(128,c.height/2);if(!unit)ctx.scale((256/.85)/(128/.55),1);
-                drawTeamBadgeOnCanvas(ctx,seat,0,0,unit?128:60,true);ctx.restore();
+                drawTeamBadgeOnCanvas(ctx,seat,0,0,unit?128:60,true);
+                ctx.restore();
             }
-            const tex=GLCore.createTextureFromCanvas(this.gl,c,{clamp:true});
-            this._flagTextures.set(key,tex);return tex;
+            return c;
+        }
+
+        // The military icon used everywhere else (the leaderboard, the results, battle
+        // markers), centred on the origin at `size` pixels, with a soft shadow to lift it
+        // off the cloth.
+        _drawMilitaryIcon(ctx,size) {
+            ctx.font=`${size}px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif`;
+            ctx.textAlign='center';ctx.textBaseline='middle';
+            ctx.fillStyle='#000';   // opaque: a colour glyph is drawn at the fill's alpha
+            ctx.shadowColor='rgba(0,0,0,.75)';ctx.shadowBlur=size*.12;
+            ctx.fillText('⚔️',0,size*.04);
+            ctx.shadowColor='transparent';
+        }
+
+        // The building flag of a seat as an image URL, for drawing outside the 3-D view
+        // (the strategic map). The same cloth, colour and badge as on its flag poles, 20%
+        // darker: out there it is unlit, and at full brightness it outshone the lit world.
+        // `swords` adds the military icon in the upper-left corner, clear of the badge (an
+        // army's flag).
+        flagImageURL(owner,civilization,seat,swords=false) {
+            const def=typeof getCivilization==='function'?getCivilization(civilization):null;
+            const civColor=def&&def.color;
+            const tint=this._tintOf(window.WarIdentity?WarIdentity.color(owner,civilization,seat,civColor):civColor);
+            if(!this._flagURLs)this._flagURLs=new Map();
+            const key=JSON.stringify([seat,tint,!!swords]);
+            if(this._flagURLs.has(key))return this._flagURLs.get(key);
+            // A short blob: URL rather than a data: URL, since it is set on every frame.
+            const c=this._flagCanvas(seat,tint,false),ctx=c.getContext('2d');
+            ctx.fillStyle='rgba(0,0,0,.2)';ctx.fillRect(0,0,c.width,c.height);
+            if(swords){
+                ctx.save();ctx.translate(40,34);ctx.scale((256/.85)/(128/.55),1);
+                this._drawMilitaryIcon(ctx,52);ctx.restore();
+            }
+            const bin=atob(c.toDataURL('image/png').split(',')[1]);
+            const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+            const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
+            this._flagURLs.set(key,url);return url;
+        }
+
+        // The flag's wave, as the cloth shader folds it (atmosphere.js): at `u` of the way
+        // from the pole (0..1), the fold as a fraction of the flag's length. Still unless
+        // the graphics quality is High, like the flags themselves.
+        flagFold(u,phase=0) {
+            if(this.graphicsQuality!=='cinematic')return 0;
+            const len=.85*BSCALE,t=(this.game?._environmentSeconds||0)%Math.PI;
+            return Math.sin(u*len*7-t*2+phase)*u*len*.09/len;
         }
 
         _badgeTints(seat, fallback) {
@@ -753,7 +879,9 @@
             this.units.push(unit);
             const engineType = unit.unitType === 'support' ? 'priest'
                 : (EngineUnits.META[unit.unitType] ? unit.unitType : 'infantry');
-            const tint = this._tintOf(unit.color);
+            // Seat-true (review #12): the civilization's colour, or the seat's when two
+            // seats share a civilization (js/identity.js).
+            const tint = this._tintOf(window.WarIdentity ? WarIdentity.color(unit.owner, unit.civilization, unit.seat, unit.color) : unit.color);
             const bdef = (typeof getTeamBadge === 'function') ? getTeamBadge(unit.seat) : null;
             const badge = this._badgeTints(unit.seat, tint);
             const options={civ:unit.civilization,unit:unit.type,badge:bdef?bdef.shape:null,
@@ -797,12 +925,13 @@
             const civ = (typeof getCivilization === 'function') ? getCivilization(building.civilization) : null;
             const civColor = (civ && civ.color) ? civ.color : building.color;
             building.color = civColor;
-            const tint = this._tintOf(civColor);
+            const tint = this._tintOf(window.WarIdentity ? WarIdentity.color(building.owner, building.civilization, building.seat, civColor) : civColor);
+            const bs = BSCALE * (building.isWonder ? WONDER_SCALE : 1);
             const world = m3.multiply(
                 m3.multiply(
                     m3.translation(building.x, 0, building.z),
                     m3.rotationY(building.rotationY || 0)),
-                m3.scaling(BSCALE, BSCALE, BSCALE));
+                m3.scaling(bs, bs, bs));
             let parts, shellIdx = -1;
             if (building.underConstruction) {
                 // The rising shell previews the FINAL height — it used to top out
@@ -825,11 +954,14 @@
                 const type = known ? building.type : (building.isWonder ? 'wonder' : 'house');
                 parts = EngineBuildings.parts(type, { age: building.age, civ: building.civilization });
             }
-            const eb = { opaque: [], blended: [], shell: null, world };
+            const eb = { opaque: [], blended: [], shell: null, world, bs };
             const grassFoot = this._meshFootprint(parts, `${building.type}|${building.age}|${building.civilization}|${!!building.underConstruction}`);
             const ca = Math.abs(Math.cos(building.rotationY || 0)), sa = Math.abs(Math.sin(building.rotationY || 0));
-            building._grassFootprint = { ex: (grassFoot.ex*ca + grassFoot.ez*sa)*BSCALE + 1,
-                ez: (grassFoot.ex*sa + grassFoot.ez*ca)*BSCALE + 1 };
+            building._grassFootprint = { ex: (grassFoot.ex*ca + grassFoot.ez*sa)*bs + 1,
+                ez: (grassFoot.ex*sa + grassFoot.ez*ca)*bs + 1 };
+            // Where a fire can sit: inside the walls, below the roof line (Cinematic).
+            building._fireBox = { ex: (grassFoot.ex*ca + grassFoot.ez*sa)*bs, ez: (grassFoot.ex*sa + grassFoot.ez*ca)*bs,
+                ey: (grassFoot.ey || 4)*bs };
             parts.forEach((p, i) => {
                 const entry = {
                     buf: this._buf(p.kind, p.args), tex: this.tex[p.tex],
@@ -907,6 +1039,40 @@
             building.mesh = null;
         }
 
+        // ---- presentation smoothing -------------------------------------------------
+        // The simulation moves in fixed 50 ms steps (Game.stepOnce), twenty a second, while
+        // frames come at the display's rate. Each step start is noted here, and a frame is
+        // drawn that far between the last two steps (Game.simAlpha). Presentation only:
+        // the world itself is never moved, and the analyzer, which shows recorded
+        // positions, is never smoothed.
+        beginSimStep() {
+            const prev = this._stepFrom || (this._stepFrom = new WeakMap());
+            for (const u of this.units) {
+                let p = prev.get(u);
+                if (!p) prev.set(u, p = { x: 0, z: 0 });
+                p.x = u.x; p.z = u.z;
+            }
+        }
+        _smoothUnits(alpha) {
+            const prev = this._stepFrom;
+            if (!prev) return null;
+            const shown = [];
+            for (const u of this.units) {
+                const p = prev.get(u);
+                if (!p) continue;                                   // born this step
+                const dx = u.x - p.x, dz = u.z - p.z;
+                if (dx === 0 && dz === 0) continue;
+                if (dx * dx + dz * dz > 25) continue;               // a jump, not a walk: no slide
+                shown.push(u, u.x, u.z);
+                u.x = p.x + dx * alpha;
+                u.z = p.z + dz * alpha;
+            }
+            return shown;
+        }
+        _restoreUnits(shown) {
+            for (let i = 0; i < shown.length; i += 3) { shown[i].x = shown[i + 1]; shown[i].z = shown[i + 2]; }
+        }
+
         onBuildingCompleted(building) {
             if (!building) return;
             this._composeBuilding(building);
@@ -915,24 +1081,6 @@
         rebuildBuildingMesh(building) {
             if (!building) return;
             this._composeBuilding(building);
-        }
-
-        completeProduction(building) {
-            building.isProducing = false;
-            building.productionProgress = 0;
-            if (building.productionType) {
-                const unit = createUnit(building.productionType, building.x, building.z + 3,
-                    building.owner, building.civilization,
-                    building.owner === 'player' ? game.player.age : 'stone');
-                this.addUnit(unit);
-                building.productionQueue.shift();
-                if (building.productionQueue.length > 0) {
-                    building.isProducing = true;
-                    building.productionType = building.productionQueue[0];
-                    building.productionDuration = 5000;
-                    building.productionProgress = 0;
-                }
-            }
         }
 
         // ---- deaths & effects --------------------------------------------------
@@ -953,6 +1101,13 @@
         }
 
         killBuilding(building) {
+            // Cinematic: soot and stones stay where it stood, for a few minutes of match time.
+            if (this.visualStyle === 'film' && !building.underConstruction && building._fireBox) {
+                const fb = building._fireBox;
+                this._rubble.push({ x: building.x, z: building.z, r: Math.max(1.5, Math.min(7, Math.max(fb.ex, fb.ez))),
+                    born: this.game?._environmentSeconds || 0, seed: EngineFx.seedOf(building.id || (building.x + ',' + building.z)) });
+                if (this._rubble.length > 40) this._rubble.shift();
+            }
             this._ghostFrom(building, 'building');
             this.removeBuilding(building);
             building.healthBar = null;
@@ -972,23 +1127,43 @@
                 active: true, t: 0, dur: Math.max(0.16, dist / 42),
                 sx: from.x, sy: from.y, sz: from.z, tx: to.x, ty: to.y, tz: to.z,
                 arc: kind === 'stone' ? 2.0 : 3.0,
-                tint: kind === 'stone' ? [0.6, 0.64, 0.68] : [0.48, 0.32, 0.19],
-                scale: kind === 'stone' ? 0.24 : 0.09
+                tint: kind === 'stone' ? [0.6, 0.64, 0.68] : kind === 'fireArrow' ? [0.3, 0.2, 0.12] : [0.48, 0.32, 0.19],
+                scale: kind === 'stone' ? 0.24 : 0.09,
+                fire: kind === 'fireArrow'   // Fire Arrows: a flame rides the tip
             });
         }
 
+        // The damage wave's own cooldown: one per ~35-unit cell per second. Every hit asks
+        // for one (flashHit, below); game.notifyCombat still calls in on its 5 s rules-side
+        // gate, and both pass through here, so the two never double up. Kept in the renderer
+        // because it is presentation only -- in game.js it would move the rules hash.
+        static get DAMAGE_PING_COOLDOWN_MS() { return 1000; }
+        // One colour for whatever is picked -- a unit, a building, a resource node (b1037):
+        // pale yellow. The green it used to be is a seat's colour.
+        static get SELECT_TINT() { return [1, 0.93, 0.62]; }
         spawnBattleRing(x, z) {
+            const cells = this._pingCells || (this._pingCells = new Map());
+            const key = Math.round(x / 35) + ':' + Math.round(z / 35), now = performance.now();
+            if (now - (cells.get(key) ?? -Infinity) < EngineRenderer.DAMAGE_PING_COOLDOWN_MS) return;
+            cells.set(key, now);
+            if (cells.size > 256) for (const [k, t] of cells) if (now - t > 5000) cells.delete(k);
             let r = this._rings.find(q => !q.active);
             if (!r) {
-                if (this._rings.length >= 8) return;
+                if (this._rings.length >= 12) return;
                 r = {};
                 this._rings.push(r);
             }
-            Object.assign(r, { active: true, t: 0, dur: 0.9, x, z });
+            // A ping on a building (it is placed at the target) starts at the walls and runs
+            // out from there; from the centre, the first half of the wave was inside them.
+            const b = this.buildings.find(q => q.health > 0 && Math.abs(q.x - x) < 0.5 && Math.abs(q.z - z) < 0.5);
+            const fp = b && b._grassFootprint, r0 = fp ? Math.max(fp.ex, fp.ez) : 4;
+            Object.assign(r, { active: true, t: 0, dur: 2.4, x, z, r0 });   // the age-up wave's length
         }
 
         flashHit(entity) {
-            if (entity) entity._flashUntil = performance.now() + 130;
+            if (!entity) return;
+            entity._flashUntil = performance.now() + 130;
+            this.spawnBattleRing(entity.x, entity.z);   // a hit is a damage wave, within its cooldown
         }
 
         // Pooled dust burst: N billboarded motes scattering under gravity.
@@ -1022,6 +1197,7 @@
         }
 
         clearScene() {
+            this.selectedNode = null;
             if(this._flagTextures){this._flagTextures.forEach(tex=>this.gl.deleteTexture(tex));this._flagTextures.clear();}
             this.resetEffects();
             this.units.forEach(u => { u._engine = null; u.mesh = null; });
@@ -1085,6 +1261,19 @@
                 x: (ndcX + 1) / 2 * this.canvas.clientWidth,
                 y: (1 - ndcY) / 2 * this.canvas.clientHeight
             };
+        }
+
+        // A point behind the eye has no place on screen, but it has a direction: behind
+        // the viewer is below the view, to the left or right as it lies. Returned far
+        // below the bottom edge on that side, for anything that pins a label to the edge
+        // (the intent bubbles). Drawing still uses worldToScreen, which says null.
+        offscreenDirection(x, y, z) {
+            const c = this._cam || this._computeCam();
+            const v = c.view;
+            const vx = v[0] * x + v[4] * y + v[8] * z + v[12];
+            const vz = v[2] * x + v[6] * y + v[10] * z + v[14];
+            const ndcX = Math.max(-1.5, Math.min(1.5, (vx / Math.max(0.5, Math.abs(vz))) / (c.tanHalf * c.aspect)));
+            return { x: (ndcX + 1) / 2 * this.canvas.clientWidth, y: this.canvas.clientHeight * 3 };
         }
 
         getWorldPositionFromScreen(screenX, screenY) {
@@ -1184,12 +1373,15 @@
             if (!def) return false;
             const halfSize = (this.terrain ? this.terrain.size : 800) / 2 - 5;
             if (x < -halfSize || x > halfSize || z < -halfSize || z > halfSize) return false;
+            const isWonder = def.type === 'wonder';
             for (const building of this.buildings) {
                 const dist = Math.hypot(building.x - x, building.z - z);
-                const need = (building.type === 'town_center' || building.isWonder) ? 11 : 9;
+                const base = (building.type === 'town_center' || building.isWonder) ? 11 : 9;
+                // The rules' gap when they are loaded (Game.buildingGap: Wonders and
+                // tower spacing); the plain one where they are not.
+                const need = (typeof Game !== 'undefined' && Game.buildingGap) ? Game.buildingGap(base, buildingType, isWonder, building) : base;
                 if (dist < need) return false;
             }
-            const isWonder = def.type === 'wonder';
             if (this.game && typeof this.game.isTooCloseToResource === 'function') {
                 if (this.game.isTooCloseToResource(x, z, buildingType, isWonder)) return false;
             } else if (this.terrain && this.terrain.resources) {
@@ -1499,7 +1691,22 @@
             return pct > 0.6 ? [0.18, 0.85, 0.25] : (pct > 0.3 ? [0.95, 0.82, 0.2] : [0.9, 0.25, 0.2]);
         }
 
+        // When the seats change -- a match starts and its seats arrive one by one, or the
+        // analyzer shows another recording -- a civilization can become shared or stop
+        // being so. Everything is re-tinted once then, never per frame.
+        _refreshIdentity() {
+            if (!window.WarIdentity) return;
+            const sig = WarIdentity.seats().map(s => s.id + ':' + s.civ + ':' + s.seat).join('|');
+            if (sig === this._identitySig) return;
+            const first = this._identitySig === undefined;
+            this._identitySig = sig;
+            if (first) return;
+            for (const u of [...this.units]) if (u._engine) this.addUnit(u);
+            for (const b of this.buildings) if (b._engine) this._composeBuilding(b);
+        }
+
         _assembleFrame(tSec, dt, bb) {
+            this._refreshIdentity();
             const m3 = M();
             const dl = this._dl;
             dl.opaque.length = 0; dl.blended.length = 0; dl.bars.length = 0;
@@ -1566,7 +1773,46 @@
             const ambientTime=this.game?._environmentSeconds||0;
             const lightTime=this.game?._showcaseCivilization?(this.game._showcaseLightSeconds||0):ambientTime;
             const lampNight=window.EngineAtmosphere.daylight(lightTime,[1,1,1],[1,1,1],this._theme).night;
-            let hearths=0, courtyards=0;
+            let hearths=0, courtyards=0, burning=0;
+            // An age-up wave (review #12): the moment the director starts its comparison
+            // sweep, a golden ring runs out from that seat's Town Center. Not in Simple
+            // lighting and not in a recording; a still glow for a viewer who asked for less
+            // motion.
+            // A re-simulated replay moves as a match does, so it gets its waves too, from
+            // its own seats (ageSource, b1032); null while it jumps, and the ages seen are
+            // forgotten so a landing does not wave for everything skipped.
+            const ageSeats = this.ageSource ? this.ageSource() : (this.game?.aiManager ? this.game.aiManager.aiPlayers : null);
+            if (this.ageSource && !ageSeats) this._ageSeen = null;
+            if (this.visualStyle !== 'classic' && (!this.replayMode || this.resimPlaying) && ageSeats) {
+                const ages = this._ageSeen || (this._ageSeen = new Map());
+                for (const ai of ageSeats || []) {
+                    const was = ages.get(ai.id);
+                    ages.set(ai.id, ai.age);
+                    if (was === undefined || was === ai.age) continue;
+                    const tc = (ai.buildings || []).find(b => b.type === 'town_center' && b.health > 0);
+                    if (tc) (this._ageWaves || (this._ageWaves = [])).push({ x: tc.x, z: tc.z, born: now,
+                        tint: this._tintOf(window.WarIdentity ? WarIdentity.color(ai.id, ai.civilization, ai.seat) : 0xe9c46a) });
+                }
+                this._ageWaves = (this._ageWaves || []).filter(w => now - w.born < 2400);
+                for (const w of this._ageWaves) {
+                    const k = (now - w.born) / 2400, fade = Math.sin(Math.PI * Math.min(1, k * 1.4)) * (1 - k);
+                    if (this._cull(w.x, w.z, 40)) continue;
+                    const r = this._reducedMotion ? 10 : 4 + 38 * Math.sqrt(k);
+                    dl.blended.push({ buf: ringBuf, tex: this.tex.mote, tint: [1, 0.82, 0.4], alpha: 0.55 * fade, additive: true,
+                        model: m3.multiply(m3.translation(w.x, 0.08, w.z), m3.scaling(r, 1, r)) });
+                    dl.blended.push({ buf: ringBuf, tex: this.tex.mote, tint: w.tint, alpha: 0.35 * fade, additive: true,
+                        model: m3.multiply(m3.translation(w.x, 0.1, w.z), m3.scaling(r * 0.6, 1, r * 0.6)) });
+                }
+            }
+            if (this.visualStyle === 'film' && this._rubble.length) {
+                const boxBuf = this._buf('box', [1, 1, 1]);
+                this._rubble = this._rubble.filter(r => ambientTime - r.born < EngineFx.RUBBLE_SECONDS && ambientTime >= r.born);
+                for (const r of this._rubble) {
+                    if (this._cull(r.x, r.z, r.r + 2)) continue;
+                    if (this.game?.fogOfWar && !this.game.fogOfWar.isPositionVisible(r.x, r.z)) continue;   // explored or in sight
+                    EngineFx.rubble(r, ambientTime, { m3, bb, quad, ringBuf, boxBuf, tex: this.tex, dl });
+                }
+            }
             // buildings
             for (const b of this.buildings) {
                 const eb = b._engine;
@@ -1579,7 +1825,7 @@
                 if(eb.flagParts) {
                     const angle=this.graphicsQuality==='cinematic'?.12*Math.sin(ambientTime*1.7+b.x*.1)+.04*Math.sin(ambientTime*3.1+b.z*.1):0;
                     const flag=m3.multiply(eb.flagAnchor,m3.rotationY(angle));
-                    const cloth=this.graphicsQuality==='cinematic'?[flag[12],flag[14],flag[0]/BSCALE,flag[2]/BSCALE]:null;
+                    const cloth=this.graphicsQuality==='cinematic'?[flag[12],flag[14],flag[0]/(eb.bs||BSCALE),flag[2]/(eb.bs||BSCALE)]:null;
                     for(const p of eb.flagParts){p.entry.model=m3.multiply(flag,p.local);p.entry.cloth=cloth;}
                 }
                 if(this.graphicsQuality==='cinematic'&&detailFade>0&&!(b._fade!=null&&b._fade<1)) {
@@ -1641,22 +1887,31 @@
                 for (const en of eb.blended) dl.blended.push(en);
                 }
                 const hpct = b.health / b.maxHealth;
-                const by = (b.isWonder ? 10 : 6) * BSCALE + 1.2;
+                // Cinematic: a damaged building smokes, then burns, then blazes. Only
+                // where the viewer can see, and never more than twelve at once.
+                if (this.visualStyle === 'film' && !b.underConstruction && hpct < 0.7 && b._fireBox && burning < 12
+                    && !(b._fade != null && b._fade < 1)
+                    && (!this.game?.fogOfWar || this.game.fogOfWar.isPositionVisible(b.x, b.z))) {
+                    burning++;
+                    const lights = EngineFx.burning(b, hpct, ambientTime, this._reducedMotion, { m3, bb, quad, ringBuf, tex: this.tex, dl, eye: this._cam && this._cam.eye });
+                    if (lights) for (const en of eb.opaque) en.localLights = en.localLights ? EngineFx.mergeLights(en.localLights, lights) : lights;
+                }
+                const by = (b.isWonder ? 10 * WONDER_SCALE : 6) * BSCALE + 1.2;
                 if (!b.underConstruction && hpct < 0.999) pushBar(b.x, by, b.z, 4.6, hpct, this._barColor(hpct));
                 if (b.type === 'farm' && !b.underConstruction && b.maxFoodAmount > 0) {
                     pushBar(b.x, 3.1, b.z, 3.4, b.foodAmount / b.maxFoodAmount, [0.85, 0.66, 0.2]);
                 }
                 if (b.selected || (this.game && this.game.selectedBuilding === b)) {
                     dl.blended.push({
-                        buf: ringBuf, tex: this.tex.ring, tint: [0.35, 0.95, 0.55],
-                        model: m3.multiply(m3.translation(b.x, 0.1, b.z), m3.scaling(6, 1, 6))
+                        buf: ringBuf, tex: this.tex.ring, tint: EngineRenderer.SELECT_TINT,
+                        model: m3.multiply(m3.translation(b.x, 0.1, b.z), m3.scaling(b.isWonder ? 9 : 6, 1, b.isWonder ? 9 : 6))
                     });
                 }
                 if (b.isWonder && !b.underConstruction) { // pulsing claim ring
                     dl.blended.push({
                         buf: ringBuf, tex: this.tex.ring, tint: this._tintOf(b.color),
                         alpha: 0.35 + 0.25 * Math.sin(tSec * 2),
-                        model: m3.multiply(m3.translation(b.x, 0.12, b.z), m3.scaling(8.4, 1, 8.4))
+                        model: m3.multiply(m3.translation(b.x, 0.12, b.z), m3.scaling(8.4 * WONDER_SCALE, 1, 8.4 * WONDER_SCALE))
                     });
                 }
                 if (b.type === 'town_center' && !b.underConstruction) {
@@ -1709,8 +1964,24 @@
                     }
                 }
                 this._unitPrev.set(u, { x: u.x, z: u.z });
-                const anim = (u.isHarvesting || u.isBuilding) ? 'harvest' : (u.isMoving ? 'walk' : 'idle');
-                const pose = EngineUnits.pose(ue.type, anim, tSec, ue.phase);
+                // Strides follow the ground actually covered (a jump -- a respawn, a seek
+                // in a replay -- is not a stride).
+                const moved = prev ? Math.hypot(u.x - prev.x, u.z - prev.z) : 0;
+                if (moved < 3) ue.stride = (ue.stride || 0) + moved;
+                // A priest channels while its heal ticks (the rules' heal-effect timer moves).
+                if (u._healFxTimer !== ue.healFx) { if (ue.healFx !== undefined) ue.channelUntil = now + 300; ue.healFx = u._healFxTimer; }
+                // Strike-synced (review #12): a fighter in range swings on the rules' own
+                // attack timer, so the blow lands with the damage. The analyzer holds a
+                // single frame: a recorded board is a moment, not a loop.
+                const fighting = u.isAttacking && !u.isMoving && facingTarget;
+                const anim = (u.isHarvesting || u.isBuilding) ? 'harvest'
+                    : fighting ? (ue.type === 'ranged' ? 'shoot' : ue.type === 'priest' ? 'channel' : 'attack')
+                    : (ue.type === 'priest' && now < (ue.channelUntil || 0)) ? 'channel'
+                    : (u.isMoving ? 'walk' : 'idle');
+                const still = !!this.replayMode && !this.resimPlaying;   // the re-simulated replay moves, so it animates
+                const pose = EngineUnits.pose(ue.type, anim, still ? 0 : tSec, ue.phase, {
+                    strike: fighting ? (still ? 0.5 : ((u.attackTimer || 0) / 1000) % 1) : null,
+                    stride: still ? 0 : ue.stride });
                 const spin = m3.rotationY(dir);
                 const world = m3.multiply(m3.translation(u.x, pose.bob, u.z), spin);
                 const flat = m3.multiply(m3.translation(u.x, 0, u.z), spin);
@@ -1760,7 +2031,7 @@
                     // that behaves differently from the one next to it is its own bug.
                     const r = ue.type === 'cavalry' ? 1.5 : 1.05;
                     dl.blended.push({
-                        buf: ringBuf, tex: this.tex.ring, tint: [0.35, 0.95, 0.55],
+                        buf: ringBuf, tex: this.tex.ring, tint: EngineRenderer.SELECT_TINT,
                         model: m3.multiply(m3.translation(u.x, 0.08, u.z), m3.scaling(r, 1, r))
                     });
                 }
@@ -1844,20 +2115,81 @@
                     model: m3.multiply(m3.translation(x, y, z),
                         m3.multiply(m3.rotationY(yaw), m3.scaling(p.scale, p.scale, 1.2)))
                 });
+                if (p.fire) {
+                    // A small flame at the tip, and its light: orange body, yellow core.
+                    const tx = x + Math.sin(yaw) * 0.62, tz = z + Math.cos(yaw) * 0.62;
+                    const f = this._reducedMotion ? 1 : 1 + 0.2 * Math.sin(now * 0.04 + p.sx);
+                    for (const [w, tint, alpha] of [[0.42 * f, [1, 0.42, 0.08], 0.85], [0.2 * f, [1, 0.86, 0.42], 0.95]])
+                        dl.blended.push({ buf: quad, tex: this.tex.mote, tint, alpha, additive: true,
+                            model: m3.multiply(m3.multiply(m3.translation(tx, y + 0.04, tz), bb), m3.scaling(w, w * 1.25, 1)) });
+                }
             }
 
-            // battle-ring pings (drawn after fog so they show through it)
+            // Intent marks (review #11): what the models just ordered, laid on the ground in
+            // perspective like a selection ring -- a ring at each target, a dashed path from
+            // the units with an arrowhead, a cross over a refused one. The UI supplies them.
+            const marks = this.intentMarks ? this.intentMarks() : null;
+            if (marks && marks.length) {
+                const bar = this._buf('box', [1, 1, 1]);
+                const flat = (x, z, yaw, len, wid, tint, alpha) => dl.blended.push({ buf: bar, tex: this.tex.white, tint, alpha,
+                    model: m3.multiply(m3.translation(x, 0.12, z), m3.multiply(m3.rotationY(yaw), m3.scaling(wid, 0.02, len))) });
+                for (const mk of marks) {
+                    const tint = this._tintOf(parseInt(String(mk.color).slice(1), 16));
+                    const r = mk.marker ? 5 : 2.4, to = mk.to;
+                    dl.blended.push({ buf: ringBuf, tex: this.tex.ring, tint, alpha: mk.alpha,
+                        model: m3.multiply(m3.translation(to.x, 0.14, to.z), m3.scaling(r, 1, r)) });
+                    if (mk.refused) for (const yaw of [Math.PI / 4, -Math.PI / 4]) flat(to.x, to.z, yaw, r * 1.3, 0.3, tint, mk.alpha);
+                    if (!mk.from) continue;
+                    const dx = to.x - mk.from.x, dz = to.z - mk.from.z, dist = Math.hypot(dx, dz);
+                    if (dist < r + 2) continue;
+                    const ux = dx / dist, uz = dz / dist, yaw = Math.atan2(ux, uz);
+                    // The whole path, however long; only the dashes in view are drawn. A cap of
+                    // 90 dashes cut long paths off at ~200 units, which read as an arrow ending
+                    // in mid-field once the camera followed the unit along it.
+                    const start = 1.2, end = dist - r - 0.3, step = 2.3, dash = 1.4;
+                    for (let s = start; s + dash <= end; s += step) {
+                        const px = mk.from.x + ux * (s + dash / 2), pz = mk.from.z + uz * (s + dash / 2);
+                        if (!this._cull(px, pz, 2)) flat(px, pz, yaw, dash, 0.24, tint, mk.alpha);
+                    }
+                    // The arrowhead, at the ring's edge, pointing in.
+                    const ex = mk.from.x + ux * end, ez = mk.from.z + uz * end;
+                    for (const side of [0.55, -0.55]) {
+                        const bx = -(ux * Math.cos(side) - uz * Math.sin(side)), bz = -(ux * Math.sin(side) + uz * Math.cos(side));
+                        flat(ex + bx * 0.65, ez + bz * 0.65, Math.atan2(bx, bz), 1.3, 0.24, tint, mk.alpha);
+                    }
+                }
+            }
+
+            // The resource node picked for the info card (b1036): the intent marks' ring, in
+            // pale yellow. No seat wears that colour, so it is never read as anyone's order;
+            // wide enough to take in a stone or gold deposit. Gone with the node.
+            const node = this.selectedNode;
+            if (node && !(node.amount > 0)) this.selectedNode = null;
+            else if (node) {
+                const rim = { stone: 2.1, gold: 1.9, food: 1.45, wood: 0.9 }[node.type] || 1.2, r = Math.max(2.4, rim + 1.3);
+                dl.blended.push({ buf: ringBuf, tex: this.tex.ring, tint: EngineRenderer.SELECT_TINT, alpha: 0.95,
+                    model: m3.multiply(m3.translation(node.x, 0.15, node.z), m3.scaling(r, 1, r)) });
+            }
+
+            // Damage pings (a unit or building hit), drawn after the fog so they show through
+            // it. Exactly the age-up wave, in red: the same ring, the same 2.4 s pulse out
+            // and fade, the same reach -- from the walls, for a building. The flat textured
+            // ring before it read as a sticker on the ground. Kept in every lighting style;
+            // a still ring for a viewer who asked for less motion.
             this._ringEntries = [];
             for (const r of this._rings) {
                 if (!r.active) continue;
                 r.t += dt;
                 const k = r.t / r.dur;
                 if (k >= 1) { r.active = false; continue; }
-                const s = (1 + k * 9);
-                this._ringEntries.push({
-                    buf: ringBuf, tex: this.tex.ring, tint: [1, 0.35, 0.24],
-                    model: m3.multiply(m3.translation(r.x, 0.7, r.z), m3.scaling(s, 1, s))
-                });
+                const fade = Math.sin(Math.PI * Math.min(1, k * 1.4)) * (1 - k);
+                const r0 = r.r0 || 4;
+                const s = this._reducedMotion ? r0 + 6 : r0 + 38 * Math.sqrt(k);
+                const si = r0 + (s - r0) * 0.6;   // the inner ring trails it, also from the walls
+                this._ringEntries.push({ buf: ringBuf, tex: this.tex.mote, tint: [1, 0.22, 0.16], alpha: 0.55 * fade, additive: true,
+                    model: m3.multiply(m3.translation(r.x, 0.7, r.z), m3.scaling(s, 1, s)) });
+                this._ringEntries.push({ buf: ringBuf, tex: this.tex.mote, tint: [0.85, 0.1, 0.08], alpha: 0.35 * fade, additive: true,
+                    model: m3.multiply(m3.translation(r.x, 0.72, r.z), m3.scaling(si, 1, si)) });
             }
 
             // building placement ghost
@@ -1996,118 +2328,6 @@
             return true;
         }
 
-        // Positional refereeing: separation between friends, and the ring around every
-        // building a unit may not stand in. Both mutate unit coordinates, so they are
-        // SIMULATION — they just used to live in animate() below, which meant a hidden tab
-        // (game.js drives tick() from a Worker there, and no frame is ever painted) played
-        // out the rest of a match with no separation and no building clearance, and the same
-        // seed refereed differently on a 30Hz machine than on a 144Hz one. dt is the
-        // caller's simulation sub-step in milliseconds: Game.simulateStep already slices real
-        // elapsed time into ≤100ms quanta whether or not anything is being drawn, which is
-        // what makes this independent of frame painting.
-        //
-        // NOTE: no unit MOVEMENT happens here. An earlier "kept bit-identical" port carried
-        // over a legacy mover that advanced every non-player unit a SECOND time (game.js
-        // integrates at 3×speed/s, this added 1× more), so AI armies ran 33% hot on plain
-        // moves and — because it steered toward a STALE targetX/Z during attack-marches —
-        // dragged them 33% slow. Infantry visibly outpaced cavalry. game.js
-        // (updateUnitMovement / updateWorkerTasks / updateCombat) is the single source of
-        // movement, and this only referees where units may stand.
-        //
-        // Separation applies ONLY between units of the SAME owner — an enemy is not a wall.
-        // All-pairs separation meant a charging unit had to out-shove the entire enemy front
-        // to reach anything: the mover advances ~0.072/frame at speed 1.5 while each
-        // neighbour pushes ~0.018 back, so six defenders (0.108) simply repelled it and it
-        // never landed a blow, however the LLM ordered it. Enemies interpenetrate now and
-        // melee always connects; the cost is that opposing armies merge instead of holding a
-        // front line, which is the deliberate trade.
-        //
-        // dt-SCALED: the push used to be a flat per-FRAME amount, so a 144Hz display
-        // separated ~2.4x harder than a 60Hz one — the framerate silently tuned the combat.
-        // Normalised to 60Hz so the constants keep their old meaning, and capped so one long
-        // step cannot fling anyone. The cap is why a hidden match is refereed *close* to a
-        // visible one rather than exactly: at the Worker's 250ms ticks the ≤100ms quanta hit
-        // the 3x cap, where a 60fps tab accumulates the same push in 60 small steps.
-        simulateStep(dt) {
-            // A transcript is a snapshot: presentation must not push its recorded entities
-            // apart or out of buildings between turns.
-            if (this.replayMode) return;
-            const SEPARATION_DIST = 1.2, SEPARATION_FORCE = 0.03;
-            const sepK = Math.min(3, Math.max(0, dt / 1000) * 60);
-            for (let i = 0; i < this.units.length; i++) {
-                for (let j = i + 1; j < this.units.length; j++) {
-                    const a = this.units[i], b = this.units[j];
-                    if (a.owner !== b.owner) continue; // an enemy is not a wall
-                    const dx = b.x - a.x, dz = b.z - a.z;
-                    const dist = Math.sqrt(dx * dx + dz * dz);
-                    if (dist < SEPARATION_DIST) {
-                        // EXACTLY coincident units used to be skipped (dist > 0.01), which is
-                        // not the rare case the guard was written for: a plain move command
-                        // snaps every unit aimed at the same destination onto the same
-                        // coordinate, and the building escape below used to drop them all on
-                        // one point too. Such a stack never came apart again — measured: eight
-                        // units at one point, seven seconds of a running match, minimum
-                        // separation still 0.000. With no direction between them, take one.
-                        let nx, nz;
-                        if (dist > 0.01) { nx = dx / dist; nz = dz / dist; }
-                        else { const ang = FAN(i + j * 5); nx = Math.cos(ang); nz = Math.sin(ang); }
-                        const push = (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK;
-                        a.x -= nx * push; a.z -= nz * push;
-                        b.x += nx * push; b.z += nz * push;
-                    }
-                }
-            }
-            const UNIT_BUILDING_CLEARANCE = 4.5;
-            // Wonders are far bigger than ordinary buildings (largest footprint: the 13×13
-            // pyramid — faces at 5.07, corners at 7.17 world units), so the flat 4.5 let
-            // units walk straight THROUGH them. One uniform radius for ALL wonders keeps the
-            // four civs balanced. Attackability is unaffected: combatants are exempt from the
-            // push below, and ranged reach (7.5+) out-ranges the zone anyway.
-            const WONDER_CLEARANCE = 7.0;
-            this.units.forEach((unit, unitIndex) => {
-                // A marcher that has NOT yet acquired a target still ghosts every building:
-                // the radial clearance rings around a packed base overlap into channels it
-                // cannot thread, and it used to pin against them and slide along the walls
-                // forever instead of closing in — "can't reach the barracks from the side".
-                if (unit.isAttacking && !unit.attackTarget && unit.attackMove) return;
-                this.buildings.forEach(building => {
-                    if (building.type === 'farm') return;
-                    if (unit.task === 'building' && unit.buildTarget === building) return;
-                    if (unit.task === 'repairing' && unit.repairTarget === building) return;
-                    // Ghost through the ONE building you're attacking, so melee can close on
-                    // it — the same per-target shape as the build/repair exemptions above.
-                    // This used to exempt a combatant from EVERY building on the map, so the
-                    // instant a unit retaliated it lost all clearance and its own squadmates'
-                    // separation shoved it bodily THROUGH the nearest wall. Two pushes, one
-                    // exempting fighters and one exempting nobody, disagreeing.
-                    if (unit.isAttacking && unit.attackTarget === building) return;
-                    const clr = building.isWonder ? WONDER_CLEARANCE : UNIT_BUILDING_CLEARANCE;
-                    const dx = unit.x - building.x, dz = unit.z - building.z;
-                    const dist = Math.sqrt(dx * dx + dz * dz);
-                    // DEAD CENTRE is the one place this push could not reach. The old guard
-                    // was `dist > 0.01`, meant to avoid dividing by zero, and it meant a unit
-                    // standing exactly on a building's origin was left there forever — inside
-                    // the mesh, permanently. Not a rare spot: a plain move snaps onto its
-                    // destination exactly, so anything aimed at a building's coordinates lands
-                    // on 0.00 and stops being pushed at the instant it most needs to be.
-                    // game.clampSlot has always handled this case ("dead centre: any direction
-                    // out"); the continuous push simply never learned it.
-                    if (dist <= 0.01) {
-                        // "Any direction out" — but it was always the SAME direction (+x), so
-                        // every unit inside dead centre landed on one point of the ring and
-                        // then sat in each other, exactly where separation cannot reach.
-                        const ang = FAN(unitIndex);
-                        unit.x = building.x + Math.cos(ang) * clr;
-                        unit.z = building.z + Math.sin(ang) * clr;
-                    } else if (dist < clr) {
-                        const push = (clr - dist) * 0.05 * sepK; // dt-scaled, like the pass above
-                        unit.x += (dx / dist) * push;
-                        unit.z += (dz / dist) * push;
-                    }
-                });
-            });
-        }
-
         animate() {
             // Stopped for good once the context is gone: drawing into a dead one is cost
             // with no product at the end of it.
@@ -2121,40 +2341,21 @@
 
             // spectator action camera: ease toward the director's subject
             // (locked dimetric view — the old cinematic orbit is gone by design)
-            if (typeof game !== 'undefined' && game && game._actionCam && game.spectatorMode && game.gameStarted) {
-                const shot = game.directorPose ? game.directorPose() : null;
-                if (shot) {
-                    const want = Math.max(MIN_HALF, Math.min(MAX_HALF, shot.halfH));
-                    if (shot.cut) {
-                        // The cut IS the feature. No travel, no ease, no sailing
-                        // across whatever happens to lie between two subjects --
-                        // which is what made half of a recorded match dead air.
-                        this.cameraTarget.x = shot.x; this.cameraTarget.z = shot.z;
-                        this._halfH = want;
-                        this._yaw = shot.yaw;
-                        this._pitch = shot.pitch;
-                    } else {
-                        const k = Math.min(1, deltaTime * 1.6);
-                        this.cameraTarget.x += (shot.x - this.cameraTarget.x) * k;
-                        this.cameraTarget.z += (shot.z - this.cameraTarget.z) * k;
-                        this._halfH += (want - this._halfH) * k;
-                        // Shortest way round the circle. Eased raw, a camera at 350
-                        // degrees easing toward 10 takes the 340-degree route and
-                        // spins the whole board to travel twenty.
-                        let d = shot.yaw - this._yaw;
-                        while (d > Math.PI) d -= Math.PI * 2;
-                        while (d < -Math.PI) d += Math.PI * 2;
-                        this._yaw += d * k;
-                        this._pitch += (shot.pitch - this._pitch) * k;
-                    }
-                }
+            // Who sets the camera: the live director, or a pose source someone else
+            // installed (the analyzer's director over a re-simulated replay, b1010).
+            const live = typeof game !== 'undefined' && game && game._actionCam && game.spectatorMode && game.gameStarted && game.directorPose;
+            const shot = this.poseSource ? this.poseSource() : (live ? game.directorPose() : null);
+            if (shot) this.applyPose(shot, deltaTime);
+            else if ((this._lookY || 0) > 0.001 || this._halfH < MIN_HALF) {
+                // Leaving a close-up: back to the ground and the user's zoom range.
+                const k = Math.min(1, deltaTime * 2);
+                this._lookY = (this._lookY || 0) * (1 - k);
+                if (this._halfH < MIN_HALF) this._halfH += (MIN_HALF - this._halfH) * k;
             }
 
-            // No simulation here any more. The two passes that used to sit in this spot —
-            // same-owner separation and building clearance — mutate unit positions and moved
-            // to simulateStep() above, where Game.simulateStep() calls them per simulation
-            // sub-step. Leaving them here meant a backgrounded match ran to its end without
-            // either, because nothing is ever painted to trigger the frame.
+            // Unit separation and building clearance used to run here, once per drawn
+            // frame. They are rules, so they run in the simulation step now
+            // (js/simulation/position-rules.js, called from Game.tick).
 
             // draw ------------------------------------------------------------
             const gl = this.gl;
@@ -2165,7 +2366,15 @@
                 game._director.measureCoverage(this, Date.now());
             }
             const bb = M().billboard(cam.view);
-            this._assembleFrame(now / 1000, deltaTime, bb);
+            // Draw between the last two simulation steps (see beginSimStep). The frame's
+            // geometry is built from unit positions in _assembleFrame and nowhere after,
+            // so the smoothed positions exist only for that call, and the true ones are
+            // back before anything else can read them -- even if building the frame throws.
+            const alpha = (!this.replayMode && this.game && this.game.gameStarted && this.game.simAlpha)
+                ? this.game.simAlpha() : 1;
+            const shown = alpha < 1 ? this._smoothUnits(alpha) : null;
+            try { this._assembleFrame(now / 1000, deltaTime, bb); }
+            finally { if (shown) this._restoreUnits(shown); }
             this._syncFog();
             const atmosphere = window.EngineAtmosphere.daylight(
                 this.game?._showcaseCivilization ? (this.game._showcaseLightSeconds || 0) : (this.game?._environmentSeconds || 0),
@@ -2217,6 +2426,10 @@
             gl.uniform1i(this.prog.uniforms.uGroundDetail,3);
             gl.uniform1f(this.prog.uniforms.uPebbleGround,this.graphicsQuality === 'cinematic' && this._theme !== 'winter' ? 1 : 0);
             gl.uniform1f(this.prog.uniforms.uGrayGravel,this._theme === 'desert' ? 0 : 1);
+            // Lit snow and sand came out of the tone curve at 0.97 and 0.96 in their
+            // brightest channel -- past the top of the bloom's knee (0.78-0.96), so full
+            // bloom on near-white ground. These gains bring noon ground to about 0.88.
+            gl.uniform1f(this.prog.uniforms.uGroundGain,this._theme === 'winter' ? 0.89 : (this._theme === 'desert' ? 0.91 : 1));
             gl.uniform4fv(this.prog.uniforms.uGroundCover,this._groundCover || [0,0,0,0]);
             gl.activeTexture(gl.TEXTURE0);
 
@@ -2250,6 +2463,17 @@
             draw(this._dl.blended);
             if (this._fogEntry) draw([this._fogEntry]);
             if (this._ringEntries && this._ringEntries.length) draw(this._ringEntries);
+            // Cinematic: a soft halo on what is brightest, a little more at night. After the
+            // fog, so hidden ground cannot glow; before the bars, so they never do.
+            if (this.visualStyle === 'film' && window.EngineBloom) {
+                if (this._bloom === undefined) this._bloom = EngineBloom.create(gl);
+                if (this._bloom && this._bloom.apply(this.W, this.H, 0.22 + 0.3 * atmosphere.night)) {
+                    gl.useProgram(this.prog);
+                    gl.enable(gl.BLEND);
+                    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+                    gl.depthMask(false);
+                }
+            }
             gl.disable(gl.DEPTH_TEST); // bars read over everything, like the old sprites
             draw(this._dl.bars);
             gl.enable(gl.DEPTH_TEST);

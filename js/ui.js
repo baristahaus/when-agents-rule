@@ -184,8 +184,27 @@ class UIManager {
             layout,
             split: Number.isFinite(saved.split) ? Math.max(20, Math.min(80, saved.split)) : 52,
             text: saved.text === 'compact' ? 'compact' : 'comfortable',
-            rate: [0.5, 1, 2, 4].includes(saved.rate) ? saved.rate : 1
+            rate: [0.5, 1, 2, 4].includes(saved.rate) ? saved.rate : 1,
+            // One switch for the story layer (review #11): the intent marks with their
+            // reasons, and the chronicle captions. An older saved "captions off" is ignored.
+            intent: saved.intent !== false,
+            // UI size (the graphics card at the minimap): the HUD at 100 / 85 / 72 %, for
+            // small screens where it crowds the map.
+            uiScale: ['regular', 'medium', 'small'].includes(saved.uiScale) ? saved.uiScale : 'regular',
+            // Broadcast mode is how a watched match opens (b1011); analyze mode -- the
+            // decisions log, the leaderboard, the controls -- is a click away, and the
+            // last choice is kept.
+            broadcast: saved.broadcast !== false
         };
+    }
+    static get UI_SCALES() { return { regular: 1, medium: 0.85, small: 0.72 }; }
+    setUiScale(value) {
+        if (!UIManager.UI_SCALES[value]) return;
+        this.viewPreferences().uiScale = value;
+        this.saveViewPreferences();
+        this.applyViewPreferences();
+        const sel = document.querySelectorAll('#cameraControls .camera-popover select')[2];
+        if (sel) sel.value = value;
     }
 
     saveViewPreferences() {
@@ -195,10 +214,12 @@ class UIManager {
     applyViewPreferences() {
         const p = this.viewPreferences();
         document.body.dataset.reading = p.text;
+        const root = document.documentElement;
+        if (root && root.style) root.style.setProperty('--ui-scale', String(UIManager.UI_SCALES[p.uiScale] || 1));
         const body = document.getElementById('anBody');
         if (body) {
             body.dataset.layout = p.layout;
-            body.style.gridTemplateRows = p.split + '% 6px minmax(0, 1fr)';
+            body.style.gridTemplateRows = p.split + '% 6px auto minmax(0, 1fr)';
         }
         const seam = document.getElementById('anSeam');
         if (seam) seam.setAttribute('aria-valuenow', Math.round(p.split));
@@ -234,10 +255,15 @@ class UIManager {
         else this.anRender();
     }
 
+    anScrubPreview(value) {
+        const a = this.analyzer, out = document.getElementById('anTimelinePosition');
+        if (a && out) out.textContent = t('view.position', { n: Number(value) + 1, total: a.order.length });
+    }
     anScrub(value) {
         const index = Number(value);
         if (!Number.isInteger(index) || !this.analyzer) return;
         this.anStopPlay();
+        if (this.anResimSeekEntry(index)) return;
         this.analyzer.seek(index);
         this.anRender();
         const slider = document.getElementById('anTimeline');
@@ -256,8 +282,20 @@ class UIManager {
             tools.innerHTML = `<label>${esc(t('view.layout'))}<select id="anLayout" onchange="game.ui.anSetLayout(this.value)">${options(['balanced','watch','read','compare','custom'])}</select></label>
                 <label>${esc(t('view.text'))}<select id="anReadingSize" onchange="game.ui.setReadingSize(this.value)">${options(['comfortable','compact'])}</select></label>
                 <label>${esc(t('view.replayRate'))}<select id="anReplayRate" onchange="game.ui.anSetReplayRate(this.value)">${[0.5,1,2,4].map(n => `<option value="${n}">${n.toLocaleString(getUiLang())}</option>`).join('')}</select></label>
-                <label class="an-timeline-label">${esc(t('view.timelineAll'))}<input id="anTimeline" type="range" min="0" step="1" onchange="game.ui.anScrub(this.value)"></label>
+`;
+            // The timeline sits above the panels it moves through (the decisions, the log,
+            // the charts), not up here among the view settings.
+            const bar = document.getElementById('anTimelineBar');
+            // Held while dragged (b1032): a replay redraws the panels every frame, and the
+            // thumb was put back under the pointer each time.
+            if (bar) bar.innerHTML = `<label class="an-timeline-label">${esc(t('view.timelineAll'))}<input id="anTimeline" type="range" min="0" step="1"
+                onpointerdown="game.ui._anScrubbing = true" oninput="game.ui.anScrubPreview(this.value)" onchange="game.ui._anScrubbing = false; game.ui.anScrub(this.value)"></label>
                 <output id="anTimelinePosition" for="anTimeline"></output>`;
+            if (!this._anScrubRelease) {
+                this._anScrubRelease = () => { this._anScrubbing = false; };
+                document.addEventListener('pointerup', this._anScrubRelease, true);
+                document.addEventListener('pointercancel', this._anScrubRelease, true);
+            }
         }
         const p = this.viewPreferences(), a = this.analyzer;
         document.getElementById('anLayout').value = p.layout;
@@ -265,6 +303,7 @@ class UIManager {
         document.getElementById('anReplayRate').value = p.rate;
         const slider = document.getElementById('anTimeline');
         slider.max = a.order.length - 1;
+        if (this._anScrubbing) return;
         slider.value = a.cursor;
         const position = t('view.position', { n: a.cursor + 1, total: a.order.length });
         slider.setAttribute('aria-valuetext', position);
@@ -274,6 +313,18 @@ class UIManager {
     renderCameraControls() {
         const box = document.getElementById('cameraControls');
         if (!box) return;
+        // The two cards (camera options, sound) close on any press outside them, as a
+        // menu does, not only on their own toggle. Capture phase, so the map canvas
+        // swallowing its own pointer events cannot keep a card open; opening one card
+        // closes the other the same way.
+        if (!this._cameraCardsDismiss) {
+            this._cameraCardsDismiss = e => {
+                document.querySelectorAll('#cameraControls details.camera-more[open]').forEach(d => {
+                    if (!d.contains(e.target)) d.open = false;
+                });
+            };
+            document.addEventListener('pointerdown', this._cameraCardsDismiss, true);
+        }
         const analyzer = document.getElementById('analyzeScreen');
         const dock = document.getElementById(analyzer && analyzer.classList.contains('active') ? 'anCameraDock' : 'mapToolsDock');
         if (dock && box.parentElement !== dock) dock.appendChild(box);
@@ -299,18 +350,21 @@ class UIManager {
         box.innerHTML = ['overview','selection','zoomIn','zoomOut'].map(button).join('')
             + `<details class="camera-more"><summary title="${esc(t('art.cameraOptions'))}" aria-label="${esc(t('art.cameraOptions'))}">${svg(icons.more)}</summary>
                 <div class="camera-popover"><div class="camera-secondary">${(watching?['reset','turnLeft','turnRight']:['pan','reset','turnLeft','turnRight']).map(button).join('')}</div>
-                <label>${esc(t('art.quality'))}<select onchange="game.ui.setGraphicsQuality(this.value)">${['low','balanced','cinematic'].map(k=>`<option value="${k}">${esc(t('art.'+k))}</option>`).join('')}</select></label>
-                <label>${esc(t('art.light'))}<select onchange="game.renderer.visualStyle=this.value"><option value="cinematic">${esc(t('art.atmospheric'))}</option><option value="classic">${esc(t('art.simple'))}</option></select></label></div></details>`;
+                <label>${esc(t('art.quality'))}<select onchange="game.ui.setGraphicsQuality(this.value)">${['cinematic','balanced','low'].map(k=>`<option value="${k}">${esc(t('art.'+k))}</option>`).join('')}</select></label>
+                <label title="${esc(t('art.lightTip'))}">${esc(t('art.light'))}<select onchange="game.renderer.setVisualStyle ? game.renderer.setVisualStyle(this.value) : (game.renderer.visualStyle=this.value)"><option value="film">${esc(t('art.film'))}</option><option value="cinematic">${esc(t('art.atmospheric'))}</option><option value="classic">${esc(t('art.simple'))}</option></select></label>
+                <label title="${esc(t('art.uiSizeTip'))}">${esc(t('art.uiSize'))}<select onchange="game.ui.setUiScale(this.value)">${['regular','medium','small'].map(k=>`<option value="${k}">${esc(t('art.ui_'+k))}</option>`).join('')}</select></label></div></details>`;
         if(wasOpen) box.querySelector('details').open=true;
         box.querySelector('select').value = this.game.renderer.graphicsQuality || 'balanced';
         box.querySelectorAll('select')[1].value = this.game.renderer.visualStyle || 'cinematic';
+        box.querySelectorAll('select')[2].value = this.viewPreferences().uiScale;
         if (this.game.sound) {
+            this.wireMuteKey();
             const levels = this.game.sound.levels;
             box.insertAdjacentHTML('beforeend', `<details class="camera-more audio-controls">
-                <summary title="${esc(t('audio.title'))}" aria-label="${esc(t('audio.title'))}">${svg('M3 9h4l5-4v14l-5-4H3z M16 8a6 6 0 0 1 0 8 M19 5a10 10 0 0 1 0 14')}</summary>
+                <summary class="audio-summary" title="${esc(t('audio.title') + ' (M)')}" aria-label="${esc(t('audio.title'))}">${svg(this.soundIconPath())}</summary>
                 <div class="camera-popover audio-popover">
                     <label>${esc(t('audio.mute'))}<input type="checkbox" ${!this.game.sound.enabled?'checked':''} onchange="game.ui.toggleSound(this)"></label>
-                    ${['master','ambience','effects'].map(key=>`<label>${esc(t('audio.'+key))}<input aria-label="${esc(t('audio.'+key))}" type="range" min="0" max="100" value="${Math.round(levels[key]*100)}" oninput="game.sound.setLevel('${key}',Number(this.value)/100)"></label>`).join('')}
+                    ${['master','ambience','effects','work','movement'].map(key=>`<label>${esc(t('audio.'+key))}<input aria-label="${esc(t('audio.'+key))}" type="range" min="0" max="100" value="${Math.round(levels[key]*100)}" oninput="game.sound.setLevel('${key}',Number(this.value)/100)"></label>`).join('')}
                     <p class="audio-note">${esc(t('audio.note'))}</p><p class="audio-error" role="status"></p>
                 </div></details>`);
         }
@@ -321,7 +375,35 @@ class UIManager {
         input.disabled = true;
         try { await this.game.sound.setEnabled(!input.checked); error.textContent = ''; }
         catch (_) { error.textContent = t('audio.unavailable'); }
-        finally { input.checked = !this.game.sound.enabled; input.disabled = false; }
+        finally { input.checked = !this.game.sound.enabled; input.disabled = false; this.refreshSoundIcon(); }
+    }
+
+    // The speaker says whether sound is on: waves when it plays, a cross when muted.
+    soundIconPath() {
+        return this.game.sound && this.game.sound.enabled
+            ? 'M3 9h4l5-4v14l-5-4H3z M16 8a6 6 0 0 1 0 8 M19 5a10 10 0 0 1 0 14'
+            : 'M3 9h4l5-4v14l-5-4H3z M16 9l6 6 M22 9l-6 6';
+    }
+    refreshSoundIcon() {
+        document.querySelectorAll('.audio-summary path').forEach(p => p.setAttribute('d', this.soundIconPath()));
+        document.querySelectorAll('.audio-popover input[type="checkbox"]').forEach(c => { c.checked = !(this.game.sound && this.game.sound.enabled); });
+    }
+    // M mutes and unmutes, wherever the game is, except while typing (review #12).
+    wireMuteKey() {
+        if (this._muteKeyWired) return;
+        this._muteKeyWired = true;
+        document.addEventListener('keydown', e => {
+            if ((e.key !== 'm' && e.key !== 'M') || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+            const el = e.target;
+            if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+            const sound = this.game.sound;
+            if (!sound) return;
+            e.preventDefault();
+            sound.setEnabled(!sound.enabled)
+                .then(() => this.showNotice(t(sound.enabled ? 'audio.onNotice' : 'audio.offNotice'), 'info'),
+                      () => this.showNotice(t('audio.unavailable'), 'error'))
+                .finally(() => this.refreshSoundIcon());
+        });
     }
 
     setGraphicsQuality(value) {
@@ -465,6 +547,8 @@ class UIManager {
         set('setupStep2H', campaign ? 'cmp.step2.h' : 'ar.step2.h');
         set('setupStep2P', campaign ? 'cmp.step2.p' : 'ar.step2.p');
         set('setupStartBtn', campaign ? 'cmp.start' : 'ar.start');
+        const quick = document.getElementById('quickMatchBtn');
+        if (quick) quick.style.display = campaign ? 'none' : '';
     }
 
     // Render the setup options row: a participant/opponent count picker for both
@@ -513,6 +597,8 @@ class UIManager {
         }
         const rt = document.getElementById('setupRoundTimeout');
         if (rt) rt.value = this.roundTimeoutSeconds();
+        const ls = document.getElementById('setupLockstep');
+        if (ls) ls.value = String(this.lockstepSliceMs() || '');
         this.syncRoundTimeoutEnabled();
     }
 
@@ -523,15 +609,30 @@ class UIManager {
 
     turnBasedEnabled() { return !!(this._arenaConfig && this._arenaConfig.turnBased); }
 
+    // Lockstep, an option of turn-based: world milliseconds per round, or null (off).
+    lockstepSliceMs() {
+        const v = this._arenaConfig && this._arenaConfig.lockstepSliceMs;
+        return (typeof Game !== 'undefined' && Game.lockstepSliceMs) ? Game.lockstepSliceMs(v) : (Number(v) > 0 ? Number(v) : null);
+    }
+    setLockstep(v) {
+        if (!this._arenaConfig) return;
+        this._arenaConfig.lockstepSliceMs = Number(v) > 0 ? Number(v) : null;
+        this.saveSetup();
+    }
+
     // The deadline is only meaningful in turn-based mode, so the input follows the
     // checkbox rather than sitting there implying it does something in real time.
     syncRoundTimeoutEnabled() {
-        const rt = document.getElementById('setupRoundTimeout');
-        if (!rt) return;
         const on = this.turnBasedEnabled();
-        rt.disabled = !on;
-        const wrap = rt.closest('.arena-subfield');
-        if (wrap) wrap.classList.toggle('is-off', !on);
+        // Both subfields belong to turn-based: the deadline, and lockstep, which needs
+        // rounds to freeze the world between.
+        for (const id of ['setupRoundTimeout', 'setupLockstep']) {
+            const el = document.getElementById(id);
+            if (!el) continue;
+            el.disabled = !on;
+            const wrap = el.closest('.arena-subfield');
+            if (wrap) wrap.classList.toggle('is-off', !on);
+        }
     }
 
     // Seconds a seat gets to answer before the round resolves without it. Stored in
@@ -671,7 +772,7 @@ class UIManager {
             availableModelContext: {},          // model id -> context length, from the last test (runtime only)
             _status: null,
             _expanded: false,
-            auth: { type: 'none', key: '', username: '', password: '', headers: [], accessToken: '', tokenUrl: '', clientId: '', clientSecret: '', scope: '' }
+            auth: { type: 'none', key: '', username: '', password: '', headers: [], accessToken: '', refreshToken: '', tokenExp: 0, authorizeUrl: '', tokenUrl: '', clientId: '', scope: '' }
         };
     }
 
@@ -829,12 +930,14 @@ class UIManager {
         if (m.maxContext == null) m.maxContext = null;
         m.availableModelContext = {}; // runtime-only; never trust stored values
         m.auth = Object.assign({}, def.auth, m.auth || {});
+        delete m.auth.clientSecret;   // the client-credentials form left in b1024
         if (!Array.isArray(m.auth.headers)) m.auth.headers = [];
         // Runtime-only fields must never be restored from storage: a connection's
         // test result (the green ✓ / red ✗ badge) is meaningless across reloads, so
         // always start with a clean, untested status.
         m._status = null;
         m._expanded = false; // always start collapsed for a clean overview
+        this.settleReasoning(m);
         return m;
     }
 
@@ -961,7 +1064,7 @@ class UIManager {
         const models = (this._arenaConfig && this._arenaConfig.models) || [];
         return models.some(m => {
             const a = m.auth || {};
-            if ((a.key || a.password || a.accessToken || a.clientSecret || '').trim && (a.key || a.password || a.accessToken || a.clientSecret || '').trim()) return true;
+            if ((a.key || a.password || a.accessToken || a.refreshToken || '').trim && (a.key || a.password || a.accessToken || a.refreshToken || '').trim()) return true;
             return Array.isArray(a.headers) && a.headers.some(h => h && (h.value || '').trim());
         });
     }
@@ -1134,6 +1237,8 @@ class UIManager {
     renderArenaLibrary() {
         const list = document.getElementById('modelLibraryList');
         if (!list) return;
+        const picker = document.getElementById('libPresetPicker');
+        if (picker) { picker.innerHTML = this.presetOptionsHtml(); picker.setAttribute('aria-label', t('ar.addPreset')); }
         const models = this._arenaConfig.models;
         const rows = this.orderedModels();
         const bar = document.getElementById('libSortBar');
@@ -1227,8 +1332,32 @@ class UIManager {
         const _prov = (typeof OpenAIAIManager !== 'undefined') ? OpenAIAIManager.resolveProvider(m) : 'openai';
         const _setF = `game.ui.setModelField(${m.id},'reasoning',this.value)`;
         const _opt = (v, label, sel) => `<option value="${v}" ${String(sel) === String(v) ? 'selected' : ''}>${label}</option>`;
-        let reasoningControl, reasoningHintKey;
-        if (_prov === 'openai') {
+        let reasoningControl, reasoningHintKey, reasoningHintVars = {};
+        // What the server reported for THIS model (b1028); a different model or address
+        // means it has not been asked yet, and the old control stands until it is.
+        const th = this.thinkingFor(m);
+        // A budget reads as tokens; Google's -1 lets the model decide.
+        const _lvl = v => /^-1$/.test(v) ? t('ar.thinkAuto') : /^\d+$/.test(v) ? t('ar.thinkTokens', { n: v }) : v;
+        if (th) {
+            if (!th.source || th.unsupported) {
+                // Disabled and saying so (asp67, b1030). Nothing is sent from here: a
+                // value set before is moved to the extra request body (settleReasoning).
+                reasoningHintKey = !th.source ? 'ar.thinkNotProvidedHint' : 'ar.thinkNoneHint';
+                reasoningHintVars = { src: th.source };
+                reasoningControl = `<select disabled><option>${t('ar.thinkNotSupported')}</option></select>`;
+            } else {
+                reasoningHintKey = th.send === 'anthropic' ? 'ar.reasoningHintAnthropic' : th.send === 'google' ? 'ar.reasoningHintGoogle' : 'ar.thinkFromHint';
+                reasoningHintVars = { src: th.source };
+                const def = th.def ? t('ar.thinkDefault', { v: _lvl(th.def) }) : t('ar.reasoningOff');
+                // A budget typed before the dropdown existed stays one of its choices.
+                const offValue = th.canOff ? (th.send === 'google' ? '0' : 'off') : null;
+                const levels = th.levels.concat(m.reasoning && /^-?\d+$/.test(m.reasoning) && !th.levels.includes(String(m.reasoning))
+                    && String(m.reasoning) !== offValue ? [String(m.reasoning)] : []);
+                reasoningControl = `<select onchange="${_setF}">${_opt('', e(def), m.reasoning)}${
+                    levels.map(v => _opt(e(v), e(_lvl(v)), m.reasoning)).join('')}${
+                    th.canOn ? _opt('on', t('ar.reasoningOn'), m.reasoning) : ''}${offValue ? _opt(offValue, t('ar.reasoningNo'), m.reasoning) : ''}</select>`;
+            }
+        } else if (_prov === 'openai') {
             reasoningHintKey = 'ar.reasoningHintOpenai';
             // Both dialects on one control: the effort words reach OpenAI's own reasoning
             // models, on/off reaches a Qwen behind vLLM or SGLang. Which one is sent
@@ -1240,9 +1369,6 @@ class UIManager {
             reasoningHintKey = 'ar.reasoningHintOllama';
             reasoningControl = `<select onchange="${_setF}">${_opt('', t('ar.reasoningOff'), m.reasoning)}${
                 _opt('on', t('ar.reasoningOn'), m.reasoning)}${_opt('off', t('ar.reasoningNo'), m.reasoning)}</select>`;
-        } else {
-            reasoningHintKey = _prov === 'google' ? 'ar.reasoningHintGoogle' : 'ar.reasoningHintAnthropic';
-            reasoningControl = `<input type="number" step="256" min="${_prov === 'google' ? -1 : 1024}" value="${e(m.reasoning)}" oninput="${_setF}" placeholder="${t('ar.reasoningOff')}">`;
         }
         // Two Anthropic rules that a request cannot satisfy silently. Said here, on the
         // card, rather than discovered as a 400 mid-match — or worse, as a temperature
@@ -1269,7 +1395,7 @@ class UIManager {
         const sub = e(m.model || m.endpoint || t('ar.notConfigured'));
         const advanced = this._modelAdvanced || (this._modelAdvanced = new Map());
         const advancedOpen = advanced.has(m.id) ? advanced.get(m.id)
-            : !!(extraBodyErr || thinkingConflicts || rejectedNames.length);
+            : !!(extraBodyErr || rejectedNames.length);
         return `
         <div class="model-card ${expanded ? 'expanded' : 'collapsed'}">
             <div class="model-card-header">
@@ -1315,6 +1441,7 @@ class UIManager {
             ${this.renderAuthFields(m)}
             <div class="model-test-row">
                 <button class="test-btn" onclick="game.ui.testArenaModel(${m.id})">${t('ar.test')}</button>
+                <button class="test-btn" onclick="game.ui.checkArenaModel(${m.id})" title="${e(t('ar.checkTip'))}">${t('ar.check')}</button>
                 ${status}
             </div>
             ${capLine}
@@ -1343,6 +1470,12 @@ class UIManager {
                 <div class="arena-field" style="flex:0 0 170px"><label>${t('ar.fModelLang')}</label>
                     <select onchange="game.ui.setModelField(${m.id},'language',this.value)">${langOpts}</select></div>
             </div>
+            <div class="model-select-row sampling-row">
+                <div class="arena-field" style="flex:0 0 230px"><label>${t('ar.fReasoning')}${rejectedTag('omitReasoning')}</label>
+                    ${reasoningControl}</div>
+            </div>
+            <p class="auth-hint">${t(reasoningHintKey, reasoningHintVars)}</p>
+            ${thinkingConflicts}
             <p class="auth-hint">${t('ar.maxTokensHint')}</p>
             <p class="auth-hint">${t('ar.contextBudgetHint')}</p>
             <label class="ctx-mini-toggle"><input type="checkbox" ${m.minimizeTokens ? 'checked' : ''} onchange="game.ui.setModelBool(${m.id},'minimizeTokens',this.checked)"> ${t('ar.minimizeTokens')}</label>
@@ -1372,12 +1505,6 @@ class UIManager {
             <p class="auth-hint">${t('ar.samplingHint')}</p>
             <p class="auth-hint">${t('ar.samplingExtraHint')}</p>
             ${rejectedNote}
-            <div class="model-select-row sampling-row">
-                <div class="arena-field" style="flex:0 0 230px"><label>${t('ar.fReasoning')}${rejectedTag('omitReasoning')}</label>
-                    ${reasoningControl}</div>
-            </div>
-            <p class="auth-hint">${t(reasoningHintKey)}</p>
-            ${thinkingConflicts}
             <div class="model-select-row"><div class="arena-field">
                 <label>${t('ar.fExtraBody')}</label>
                 <textarea class="extra-body${extraBodyErr ? ' is-bad' : ''}" rows="2" spellcheck="false"
@@ -1430,19 +1557,33 @@ class UIManager {
             </div>`;
         }
         if (a.type === 'oauth') {
-            return `<div class="auth-grid">
-                <div class="arena-field full"><label>${t('ar.fToken')}</label>
-                    <input type="text" class="secret-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" value="${e(a.accessToken)}" oninput="game.ui.setAuthField(${m.id},'accessToken',this.value)" placeholder="${t('ar.fTokenPh')}"></div>
-                <div class="auth-divider">${t('ar.oauthOr')}</div>
+            // A button, not credentials (b1024). OpenRouter needs nothing else; any other
+            // server needs the three values its admin hands out, and to know our callback.
+            const openRouter = OpenAIAIManager.isOpenRouter(m.endpoint);
+            const session = a.accessToken
+                ? `<span class="test-status ok">${t('ar.oauthLoggedIn')}</span> <button class="test-btn" onclick="game.ui.oauthLogout(${m.id})">${t('ar.oauthLogout')}</button>`
+                : `<button class="test-btn oauth-login" onclick="game.ui.oauthLogin(${m.id})">${t(openRouter ? 'ar.oauthLoginOR' : 'ar.oauthLogin')}</button>`;
+            // Which login server (b1025): a known one fills in what it needs by itself.
+            const server = `<div class="arena-field"><label>${t('ar.oauthServer')}</label>
+                <select onchange="game.ui.setOAuthServer(${m.id}, this.value)">
+                    <option value="openrouter" ${openRouter ? 'selected' : ''}>OpenRouter</option>
+                    <option value="other" ${openRouter ? '' : 'selected'}>${t('ar.oauthOther')}</option>
+                </select></div>`;
+            if (openRouter) return `${server}<p class="auth-hint">${t('ar.oauthHintOR')}</p><div class="model-test-row">${session}</div>`;
+            return `${server}<p class="auth-hint">${t('ar.oauthHint')}</p>
+            <div class="auth-grid">
+                <div class="arena-field full"><label>${t('ar.fAuthorizeUrl')}</label>
+                    <input type="text" value="${e(a.authorizeUrl)}" oninput="game.ui.setAuthField(${m.id},'authorizeUrl',this.value)" placeholder="https://auth.example.com/oauth/authorize"></div>
                 <div class="arena-field full"><label>${t('ar.fTokenUrl')}</label>
                     <input type="text" value="${e(a.tokenUrl)}" oninput="game.ui.setAuthField(${m.id},'tokenUrl',this.value)" placeholder="https://auth.example.com/oauth/token"></div>
                 <div class="arena-field"><label>${t('ar.fClientId')}</label>
                     <input type="text" value="${e(a.clientId)}" oninput="game.ui.setAuthField(${m.id},'clientId',this.value)"></div>
-                <div class="arena-field"><label>${t('ar.fClientSecret')}</label>
-                    <input type="text" class="secret-input" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" value="${e(a.clientSecret)}" oninput="game.ui.setAuthField(${m.id},'clientSecret',this.value)"></div>
-                <div class="arena-field full"><label>${t('ar.fScope')}</label>
+                <div class="arena-field"><label>${t('ar.fScope')}</label>
                     <input type="text" value="${e(a.scope)}" oninput="game.ui.setAuthField(${m.id},'scope',this.value)"></div>
-            </div>`;
+                <div class="arena-field full"><label>${t('ar.oauthCallback')}</label>
+                    <input type="text" readonly value="${e(OpenAIAIManager.oauthCallbackUrl())}" onclick="this.select()"></div>
+            </div>
+            <div class="model-test-row">${session}</div>`;
         }
         return '';
     }
@@ -1481,7 +1622,15 @@ class UIManager {
             // different unconfigured models all read identically — on the one screen
             // whose job is to tell you who is playing what.
             const ctrlRow = isLLM ? modelRows.find(r => r.m.id === slot.control) : null;
-            const ctrlName = ctrlRow ? this.modelDisplayName(ctrlRow.m, ctrlRow.n) : t('ar.controlKi');
+            const ctrlName = ctrlRow ? this.modelDisplayName(ctrlRow.m, ctrlRow.n) : this.ruleBasedName(campaign ? 'standard' : slot.profile);
+            // Arena only: which anchor style the rule-based seat plays. Campaign keeps the
+            // classic opponent until an opponent-strength choice is decided for it.
+            const profile = this.profileId(slot.profile);
+            const styleField = (!isLLM && !campaign) ? `
+                        <div class="arena-field"><label>${t('ar.fStyle')}</label>
+                            <select onchange="game.ui.setSlotProfile(${i}, this.value)" title="${e(t('ar.styleNote'))}">${(typeof AIManager !== 'undefined' ? AIManager.profileIds() : ['standard']).map(id =>
+                                `<option value="${id}" ${profile === id ? 'selected' : ''} title="${e(t('ar.styleHint.' + id))}">${e(t('ar.style.' + id))}</option>`).join('')}</select>
+                            <p class="arena-hint slot-style-hint">${e(t('ar.styleHint.' + profile))}</p></div>` : '';
             const body = `
                 <div class="arena-slot-body">
                     <div class="arena-field-row">
@@ -1491,7 +1640,7 @@ class UIManager {
                             <select onchange="game.ui.setSlotControl(${i}, this.value)">
                                 <option value="ki" ${slot.control === 'ki' ? 'selected' : ''}>${t('ar.controlKi')}</option>
                                 ${modelOpts}
-                            </select></div>
+                            </select></div>${styleField}
                     </div>
                     ${promptBlock}
                 </div>`;
@@ -1569,6 +1718,65 @@ class UIManager {
         const m = this.getArenaModel(id); if (!m) return;
         if (!m.auth.headers[idx]) m.auth.headers[idx] = { name: '', value: '' };
         m.auth.headers[idx][field] = value; this.saveArenaConfig();
+    }
+    // The login popup (b1024): opened on the click itself, sent to the login page once
+    // the PKCE pair is made, and answered by oauth-callback.html with the code.
+    async oauthLogin(id) {
+        const m = this.getArenaModel(id);
+        if (!m) return;
+        const a = m.auth, openRouter = OpenAIAIManager.isOpenRouter(m.endpoint);
+        const fail = msg => { m._status = { cls: 'err', text: '✗ ' + msg }; this.renderArenaLibrary(); };
+        if (!openRouter && !(a.authorizeUrl && a.tokenUrl && a.clientId)) return fail(t('ar.oauthNeedFields'));
+        // Before anything is awaited: a popup opened later is no longer the click's own,
+        // and the browser blocks it.
+        const win = window.open('', 'warOAuth', 'width=520,height=720');
+        if (!win) return fail(t('ar.oauthBlocked'));
+        let pkce;
+        try {
+            pkce = await OpenAIAIManager.oauthPkce();
+            win.location.href = OpenAIAIManager.oauthAuthorizeUrl(a, m.endpoint, pkce);
+        } catch (err) { try { win.close(); } catch (e) {} return fail(t('ar.oauthFailed', { e: err.message })); }
+        m._status = { cls: 'pending', text: t('ar.oauthWaiting') };
+        this.renderArenaLibrary();
+        const result = await new Promise(resolve => {
+            let bc = null, timer = null;
+            const onMsg = ev => { if (ev.origin === location.origin) take(ev.data); };
+            const done = r => { clearTimeout(timer); window.removeEventListener('message', onMsg); try { if (bc) bc.close(); } catch (e) {} resolve(r); };
+            const take = d => { if (d && d.type === 'war-oauth' && (!d.state || d.state === pkce.state)) done(d); };
+            window.addEventListener('message', onMsg);
+            try { bc = new BroadcastChannel('war-oauth'); bc.onmessage = ev => take(ev.data); } catch (e) {}
+            timer = setTimeout(() => done({ error: t('ar.oauthTimeout') }), 300000);
+        });
+        if (!result.code) return fail(t('ar.oauthFailed', { e: result.error || '—' }));
+        try {
+            Object.assign(a, await OpenAIAIManager.oauthExchange(a, m.endpoint, result.code, pkce));
+            m._status = null;   // the card now says "Logged in" itself
+            this.saveArenaConfig();
+            this.renderArenaLibrary();
+        } catch (err) { fail(t('ar.oauthFailed', { e: err.message })); }
+    }
+    // A known login server fills in the endpoint and dialect its preset carries; another
+    // server leaves them to the user. A login belongs to its server, so switching ends it.
+    setOAuthServer(id, key) {
+        const m = this.getArenaModel(id);
+        if (!m) return;
+        const known = UIManager.MODEL_PRESETS.cloud.find(p => p.key === key && p.auth === 'oauth');
+        if (known) {
+            Object.assign(m, { endpoint: known.endpoint, provider: known.provider });
+            if (!(m.name || '').trim()) m.name = known.name;
+        } else if (OpenAIAIManager.isOpenRouter(m.endpoint)) m.endpoint = '';
+        Object.assign(m.auth, { accessToken: '', refreshToken: '', tokenExp: 0 });
+        m._status = null;
+        this.saveArenaConfig();
+        this.renderArenaLibrary();
+    }
+    oauthLogout(id) {
+        const m = this.getArenaModel(id);
+        if (!m) return;
+        Object.assign(m.auth, { accessToken: '', refreshToken: '', tokenExp: 0 });
+        m._status = null;
+        this.saveArenaConfig();
+        this.renderArenaLibrary();
     }
     setAuthType(id, type) { const m = this.getArenaModel(id); if (m) { m.auth.type = type; if (type === 'header' && !m.auth.headers.length) m.auth.headers.push({ name: '', value: '' }); this.saveArenaConfig(); this.renderArenaLibrary(); } }
     addAuthHeader(id) { const m = this.getArenaModel(id); if (m) { m.auth.headers.push({ name: '', value: '' }); this.saveArenaConfig(); this.renderArenaLibrary(); } }
@@ -1700,8 +1908,67 @@ class UIManager {
         this.chooseArenaModel(id, value);   // saves and redraws, which is fine once closed
     }
 
-    chooseArenaModel(id, value) { const m = this.getArenaModel(id); if (m) { m.model = value; this.saveArenaConfig(); this.renderArenaLibrary(); } }
-    setModelProvider(id, value) { const m = this.getArenaModel(id); if (m) { m.provider = value; this.saveArenaConfig(); this.renderArenaLibrary(); } }
+    chooseArenaModel(id, value) { const m = this.getArenaModel(id); if (m) { m.model = value; this.saveArenaConfig(); this.renderArenaLibrary(); this.discoverArenaThinking(id); } }
+
+    // The thinking options the server reported for this entry's current model and
+    // address, or null when it has not been asked about them (b1028).
+    thinkingFor(m) {
+        if (!m || typeof OpenAIAIManager === 'undefined') return null;
+        const prov = OpenAIAIManager.resolveProvider(m);
+        if (prov === 'anthropic' || prov === 'google') return OpenAIAIManager.thinkingByProtocol(m) || { source: null };
+        const th = m.thinking;
+        return th && th.model === m.model && th.endpoint === m.endpoint && th.provider === (m.provider || 'auto') ? th : null;
+    }
+    // Ask the server what the chosen model offers, and fill the thinking dropdown from it.
+    // A value the model no longer offers is cleared rather than sent to be ignored.
+    async discoverArenaThinking(id) {
+        const m = this.getArenaModel(id);
+        if (!m || !m.model || !m.endpoint) return;
+        const asked = { model: m.model, endpoint: m.endpoint, provider: m.provider || 'auto' };
+        const th = await OpenAIAIManager.discoverThinking({ endpoint: m.endpoint.trim(), auth: this.cleanAuth(m.auth), model: m.model, provider: m.provider || 'auto' });
+        if (m.model !== asked.model || m.endpoint !== asked.endpoint || (m.provider || 'auto') !== asked.provider) return;
+        m.thinking = Object.assign({}, th, asked);
+        if (th.source && m.reasoning && !this.thinkingAllows(th, m.reasoning)) m.reasoning = '';
+        this.settleReasoning(m);
+        this.saveArenaConfig();
+        if (document.getElementById('modelLibraryList')) this.renderArenaLibrary();
+    }
+    // A value chosen before its server was known not to offer one (b1030). It used to be
+    // sent all the same; it now moves, in the exact form it was sent in, into the extra
+    // request body, where it stays visible and editable. Nothing changes on the wire.
+    settleReasoning(m) {
+        const th = this.thinkingFor(m);
+        if (!th || (th.source && !th.unsupported) || m.reasoning === '' || m.reasoning == null) return false;
+        const prov = OpenAIAIManager.resolveProvider(m);
+        const r = OpenAIAIManager.reasoningFor(prov, m.reasoning);
+        const extra = this.parseExtraBody(m.extraBody);
+        if (extra.error) return false;   // leave it; it is not sent (slotToSetupEntry) and the card says why
+        const into = Object.assign({}, extra.value || {});
+        const put = (k, v) => { if (!(k in into)) into[k] = v; };
+        if (r && r.kind === 'effort') put('reasoning_effort', r.value);
+        // Nested keys merge into what the body already has there, unless it says itself.
+        else if (r && r.kind === 'enableThinking') {
+            const kw = Object.assign({}, into.chat_template_kwargs);
+            if (!('enable_thinking' in kw)) kw.enable_thinking = r.value;
+            into.chat_template_kwargs = kw;
+        }
+        else if (r && r.kind === 'think') put('think', r.value);
+        else if (r && r.kind === 'budget' && prov === 'anthropic') put('thinking', { type: 'enabled', budget_tokens: r.value });
+        else if (r && r.kind === 'budget' && prov === 'google') {
+            const gc = Object.assign({}, into.generationConfig);
+            if (!('thinkingConfig' in gc)) gc.thinkingConfig = { thinkingBudget: r.value };
+            into.generationConfig = gc;
+        }
+        if (r) m.extraBody = JSON.stringify(into);
+        m.reasoning = '';
+        return true;
+    }
+    thinkingAllows(th, v) {
+        const s = String(v).toLowerCase();
+        if (th.send === 'anthropic' || th.send === 'google') return /^-?\d+$/.test(s);   // a budget
+        return th.levels.includes(s) || (th.canOn && (s === 'on' || s === 'true')) || (th.canOff && (s === 'off' || s === 'false'));
+    }
+    setModelProvider(id, value) { const m = this.getArenaModel(id); if (m) { m.provider = value; this.settleReasoning(m); this.saveArenaConfig(); this.renderArenaLibrary(); this.discoverArenaThinking(id); } }
 
     toggleArenaModel(id) {
         const m = this.getArenaModel(id);
@@ -1718,14 +1985,53 @@ class UIManager {
         this._modelAdvanced.set(id, !!open);
     }
 
-    addArenaModel() {
-        const m = this.makeArenaModel({});
+    // Connection presets: the plumbing only -- endpoint, dialect, auth type. The model id
+    // is always the user's choice, from the list Test connection returns. Alphabetical
+    // within each group, so no provider is placed first. Ports are the servers' own
+    // defaults (llama.cpp's is 8080, which is why WAR's serve.cjs is not).
+    static get MODEL_PRESETS() {
+        return {
+            local: [
+                { key: 'llamacpp', name: 'llama.cpp', endpoint: 'http://localhost:8080/v1', provider: 'openai' },
+                { key: 'lmstudio', name: 'LM Studio', endpoint: 'http://localhost:1234/v1', provider: 'openai' },
+                { key: 'ollama', name: 'Ollama', endpoint: 'http://localhost:11434', provider: 'ollama' },
+                { key: 'sglang', name: 'SGLang', endpoint: 'http://localhost:30000/v1', provider: 'openai' },
+                { key: 'vllm', name: 'vLLM', endpoint: 'http://localhost:8000/v1', provider: 'openai' },
+            ],
+            cloud: [
+                { key: 'anthropic', name: 'Anthropic', endpoint: 'https://api.anthropic.com/v1', provider: 'anthropic', auth: 'bearer' },
+                { key: 'google', name: 'Google Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta', provider: 'google', auth: 'bearer' },
+                { key: 'openai', name: 'OpenAI', endpoint: 'https://api.openai.com/v1', provider: 'openai', auth: 'bearer' },
+                // The login button rather than a key to copy (b1025).
+                { key: 'openrouter', name: 'OpenRouter', endpoint: 'https://openrouter.ai/api/v1', provider: 'openai', auth: 'oauth' },
+            ],
+        };
+    }
+
+    presetOptionsHtml() {
+        const P = UIManager.MODEL_PRESETS, e = s => this.escapeHtml(String(s));
+        const group = (label, list) => `<optgroup label="${e(label)}">`
+            + list.map(p => `<option value="${e(p.key)}">${e(p.name)}</option>`).join('') + '</optgroup>';
+        return `<option value="">${e(t('ar.addPreset'))}</option>` + group(t('ar.presetLocal'), P.local) + group(t('ar.presetCloud'), P.cloud);
+    }
+
+    addArenaModel(presetKey) {
+        const P = UIManager.MODEL_PRESETS, preset = presetKey ? P.local.concat(P.cloud).find(p => p.key === presetKey) : null;
+        const m = this.makeArenaModel(preset ? { name: preset.name, endpoint: preset.endpoint, provider: preset.provider } : {});
+        if (preset && preset.auth) m.auth.type = preset.auth;
         m._expanded = true; // open the new one so it can be configured right away
         this._arenaConfig.models.push(m);
         this.saveArenaConfig();
         this.renderArenaLibrary();
         this.renderArenaSlots();
         this.updateLibrarySummary();
+        if (!preset) return;
+        // A local server needs no key, so its connection can be tested at once, which
+        // also lists the models it serves. A cloud entry waits for the user's key.
+        if (P.local.includes(preset)) {
+            this.showInfoMessage(t('ar.presetTesting', { name: preset.name }));
+            this.testArenaModel(m.id);
+        } else this.showInfoMessage(t(preset.auth === 'oauth' ? 'ar.presetLogin' : 'ar.presetKey', { name: preset.name }));
     }
 
     // Ask before deleting a model (guards against an accidental ✕ misclick).
@@ -1757,6 +2063,21 @@ class UIManager {
     }
 
     setSlotCiv(i, value) { const s = this.setupSlots()[i]; if (s) { s.civ = value; this.saveSetup(); this.renderArenaSlots(); } }
+    setSlotProfile(i, value) {
+        const s = this.setupSlots()[i];
+        if (!s) return;
+        s.profile = this.profileId(value);
+        this.saveSetup(); this.renderArenaSlots();
+    }
+    // A known anchor style (AI_PROFILES in ai.js), else the classic one.
+    profileId(value) {
+        return (typeof AI_PROFILES !== 'undefined' && value && AI_PROFILES[value]) ? value : 'standard';
+    }
+    // "Rule-based AI", with its style when it plays anything but the classic one.
+    ruleBasedName(profile, base = t('ar.controlKi')) {
+        const id = this.profileId(profile);
+        return id === 'standard' ? base : base + ' · ' + t('ar.style.' + id);
+    }
     setSlotControl(i, value) {
         const s = this.setupSlots()[i];
         if (!s) return;
@@ -1966,6 +2287,27 @@ class UIManager {
         this.renderTemplateDiff();
     }
 
+    // One real request with a synthetic tool history (OpenAIAIManager.checkToolCalling),
+    // using exactly the settings a match would send. Reports; changes nothing.
+    async checkArenaModel(id) {
+        const m = this.getArenaModel(id);
+        if (!m) return;
+        const entry = this.slotToSetupEntry({ civ: 'greek', control: id });
+        const statusEl = () => document.getElementById('modelStatus-' + id);
+        if (!entry.connection) { this.showErrorMessage(t('ar.checkNeedsEndpoint')); return; }
+        if (!entry.connection.model) { this.showErrorMessage(t('ar.checkNeedsModel')); return; }
+        m._status = { cls: 'pending', text: t('ar.checking') };
+        if (statusEl()) { statusEl().className = 'test-status pending'; statusEl().textContent = t('ar.checking'); }
+        const r = await OpenAIAIManager.checkToolCalling(entry.connection);
+        m._check = { ok: r.ok, code: r.code, via: r.via || null, latencyMs: r.latencyMs, at: Date.now() };
+        const text = t('ar.check_' + r.code, { s: (r.latencyMs / 1000).toFixed(1), tool: r.tool || '', status: r.status || '', detail: r.detail || '' });
+        m._status = { cls: r.ok ? 'ok' : 'err', text };
+        const el = statusEl();
+        if (el) { el.className = 'test-status ' + (r.ok ? 'ok' : 'err'); el.textContent = text; el.title = r.detail || ''; }
+        if (!r.ok) this.showErrorMessage(text);
+        return r;
+    }
+
     async testArenaModel(id) {
         const m = this.getArenaModel(id);
         if (!m) return;
@@ -1980,7 +2322,12 @@ class UIManager {
         if (res.ok) {
             if (res.endpoint) m.endpoint = res.endpoint;
             m.availableModels = res.models || [];
-            if ((!m.model || !m.availableModels.includes(m.model)) && m.availableModels.length) m.model = m.availableModels[0];
+            // Fill the id only when there is nothing to choose between. A typed id that
+            // the list does not report (an Ollama tag, a routing alias) is deliberate and
+            // already flagged "not in the list"; overwriting it on every test threw it
+            // away. And with an empty field and many models, the first one alphabetically
+            // is a guess -- the picker shows the count and lets the user choose.
+            if (!m.model && m.availableModels.length === 1) m.model = m.availableModels[0];
             // Remember each model's context window (when the endpoint reports it) for
             // the ↺ button. Keep an empty budget at the default, capped to the model's max.
             m.availableModelContext = res.contextById || {};
@@ -2001,6 +2348,7 @@ class UIManager {
                     { endpoint: (m.endpoint || '').trim(), auth: this.cleanAuth(m.auth), model: m.model });
                 if (caps && caps.stack) this.noteModelCapabilities(id, caps);
             } catch (e) { /* a probe that fails leaves the card as it was */ }
+            if (m.model) this.discoverArenaThinking(id);
         } else {
             // errorCode maps to a localized ar.err.* message; fall back to the raw
             // (English) error string for anything unmapped.
@@ -2017,17 +2365,26 @@ class UIManager {
         if (auth.type === 'bearer') return { type: 'bearer', key: (auth.key || '').trim() };
         if (auth.type === 'basic') return { type: 'basic', username: auth.username || '', password: auth.password || '' };
         if (auth.type === 'header') return { type: 'header', headers: (auth.headers || []).filter(h => h && h.name).map(h => ({ name: h.name.trim(), value: (h.value || '').trim() })) };
-        if (auth.type === 'oauth') return { type: 'oauth', accessToken: (auth.accessToken || '').trim(), tokenUrl: (auth.tokenUrl || '').trim(), clientId: (auth.clientId || '').trim(), clientSecret: auth.clientSecret || '', scope: (auth.scope || '').trim() };
+        if (auth.type === 'oauth') return { type: 'oauth', accessToken: (auth.accessToken || '').trim(), refreshToken: auth.refreshToken || '', tokenExp: auth.tokenExp || 0,
+            authorizeUrl: (auth.authorizeUrl || '').trim(), tokenUrl: (auth.tokenUrl || '').trim(), clientId: (auth.clientId || '').trim(), scope: (auth.scope || '').trim() };
         return { type: 'none' };
     }
 
-    // Convert one participant slot into the engine's setup entry. A slot pointing
-    // at the rule-based AI — or at a model with no endpoint — becomes type 'ki'.
+    // Convert one participant slot into the engine's setup entry. A slot pointing at
+    // the rule-based AI becomes type 'ki'. A slot pointing at a model with no endpoint
+    // stays an 'llm' seat WITHOUT a connection, so the arena refuses to start and says
+    // which seat -- it used to turn into 'ki' here, which made that check unreachable
+    // and started a match of rule-based seats under model names. The campaign, whose
+    // opponents are allowed a rule-based stand-in, substitutes it visibly instead.
     slotToSetupEntry(slot) {
         const cfg = this._arenaConfig;
-        if (slot.control === 'ki') return { civ: slot.civ, type: 'ki' };
+        if (slot.control === 'ki') {
+            // The classic style is the entry it always was; any other names its style.
+            const profile = this.profileId(slot.profile);
+            return profile === 'standard' ? { civ: slot.civ, type: 'ki' } : { civ: slot.civ, type: 'ki', profile };
+        }
         const m = cfg.models.find(mm => mm.id === slot.control);
-        if (!m || !(m.endpoint || '').trim()) return { civ: slot.civ, type: 'ki' };
+        if (!m || !(m.endpoint || '').trim()) return { civ: slot.civ, type: 'llm', connection: null, unconfigured: true };
         return {
             civ: slot.civ,
             type: 'llm',
@@ -2046,7 +2403,11 @@ class UIManager {
                 minP: this.numOrNull(m.minP, 0, 1),
                 presencePenalty: this.numOrNull(m.presencePenalty, -2, 2),
                 repetitionPenalty: this.numOrNull(m.repetitionPenalty, 0, 2),
-                reasoning: m.reasoning == null ? '' : String(m.reasoning),
+                // Only what the dropdown offers is sent: a server that does not say gets nothing
+                // from here (b1030), and an entry not yet asked keeps the old mapping.
+                reasoning: (m.reasoning == null || (this.thinkingFor(m) && !this.thinkingFor(m).source)) ? '' : String(m.reasoning),
+                // How the server reads the value, when it said (b1028); null keeps the old mapping.
+                thinkingSend: (this.thinkingFor(m) && this.thinkingFor(m).send) || null,
                 extraBody: this.parseExtraBody(m.extraBody).value,
                 contextSize: (() => { const n = parseInt(m.contextSize, 10); return (n && n >= 512) ? n : null; })(),
                 maxContext: (() => { const n = parseInt(m.maxContext, 10); return (n && n >= 512) ? n : null; })(),
@@ -2058,9 +2419,152 @@ class UIManager {
                 // So a parameter the endpoint refuses mid-match can be recorded against
                 // the entry it came from rather than being relearned every match.
                 libraryId: m.id,
+                // "Check tool calls" result for this entry, if run this session; recorded
+                // in the transcript header so a reader knows the seat was verified.
+                preflight: m._check ? { ok: m._check.ok, code: m._check.code, via: m._check.via, latencyMs: m._check.latencyMs } : null,
                 auth: this.cleanAuth(m.auth)
             }
         };
+    }
+
+    // Quick match: one library model against the rule-based AI, on a fresh map, in real
+    // time at normal speed. The model is the first that can play: one whose tool-call
+    // check passed if any has, else the first with an endpoint and a model id that has
+    // not failed one. Played as a one-off spec, so the saved arena setup is untouched.
+    quickMatchModel() {
+        const ms = ((this._arenaConfig && this._arenaConfig.models) || [])
+            .filter(m => (m.endpoint || '').trim() && (m.model || '').trim());
+        return ms.find(m => m._check && m._check.ok) || ms.find(m => !m._check) || null;
+    }
+
+    quickMatch() {
+        const m = this.quickMatchModel();
+        if (!m) { this.showModelLibrary(); this.showErrorMessage(t('ar.quickNeedsModel')); return null; }
+        const ta = document.getElementById('arenaSharedPrompt');
+        if (ta) { this._arenaConfig.prompt = ta.value; this.saveArenaConfig(); }
+        const setup = [this.slotToSetupEntry({ civ: 'greek', control: m.id }),
+                       this.slotToSetupEntry({ civ: 'persian', control: 'ki' })];
+        return this.game.startArenaFromSetup({ setup, difficulty: 'easy', turnBased: false, preset: 'quick-match' });
+    }
+
+    // Rematch: the match that just ended, again -- same seats and settings, same map
+    // seed, same tempo. Leaving the results screen deletes its transcripts as usual.
+    async rematchArena() {
+        const spec = this.game.arenaSpec;
+        if (!spec) return this.leaveArenaSummary(false);
+        const rec = this.game.openAIAIManager && this.game.openAIAIManager.transcripts;
+        try { if (rec) await rec.purge(); } catch (e) { /* starting anyway */ }
+        return this.game.startArenaFromSetup(spec);
+    }
+
+    // Opens the match that just ended in the transcript analyzer, without a download
+    // and a file picker in between. The analyzer keeps the text in memory; the stored
+    // copy goes as it would on any other exit from the results screen.
+    async watchInAnalyzer() {
+        const rec = this.game.openAIAIManager && this.game.openAIAIManager.transcripts;
+        if (!rec || !rec.hasData()) return;
+        const name = `${rec.matchId || 'match'}-transcripts.jsonl`;
+        let text;
+        try { text = await (await rec.exportBlob()).text(); }
+        catch (e) { console.warn('[analyzer] export failed', e); this.showErrorMessage(t('an.badFile')); return; }
+        try { await rec.purge(); } catch (e) { /* the copy in memory is what matters now */ }
+        this.anOpen();
+        this.anStopPlay();
+        try { this.analyzer.load(text, name); }
+        catch (e) { console.warn('[analyzer] load failed', e); this.showErrorMessage(t('an.badFile')); return; }
+        this._anFramed = false;
+        this.resetChartCache();
+        this.anRender();
+    }
+
+    // ---- Lineup card -----------------------------------------------------------
+    // Who plays, served by what, checked or not, and on which contract: the facts that
+    // decide how a result may be read, shown before the first turn rather than found
+    // in the header afterwards. Built from the setup first, then again from the
+    // transcript header once each server has named itself, so it shows what the
+    // record will say. `servedBy` undefined means the server has not been asked yet.
+    lineupRows(setup, header) {
+        return (setup || []).map((s, i) => {
+            if (s.type !== 'llm') return { civ: s.civ, seat: i, rule: true, profile: s.profile || 'standard' };
+            const p = header && header.players && header.players[i];
+            const st = (p && p.settings) || null, c = s.connection || {};
+            const pick = (fromHeader, fromSetup) => (st ? fromHeader : fromSetup);
+            return {
+                civ: s.civ, seat: i,
+                name: (p && p.name) || c.name || '?',
+                // The same public form the header records: a local file path is cut to
+                // its file name, so a user folder never appears on screen.
+                model: (p && p.model) || (c.model && typeof OpenAIAIManager !== 'undefined'
+                    ? OpenAIAIManager.publicModelId(c.model) : c.model) || null,
+                servedBy: st ? (st.servedBy || null) : undefined,
+                // The protocol the seat speaks, which is not who serves it (b1026).
+                protocol: pick(st && st.provider, typeof OpenAIAIManager !== 'undefined'
+                    ? OpenAIAIManager.resolveProvider(c) : c.provider) || null,
+                preflight: pick(st && st.preflight, c.preflight) || null,
+                context: pick(st && st.contextBudget, c.contextSize) || null,
+                reasoning: pick(st && st.reasoning, c.reasoning) || null,
+                soft: !!pick(st && st.toolFallback, c.toolFallback),
+                lanes: pick(st && st.lanes, c.lanes) || 1
+            };
+        });
+    }
+
+    renderArenaLineup(host, setup, header, spec) {
+        if (!host) return null;
+        const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+        let card = host.querySelector('.arena-lineup');
+        if (!card) { card = el('div', 'arena-lineup'); host.appendChild(card); }
+        card.textContent = '';
+        const head = el('div', 'lu-head');
+        head.append(el('span', 'lu-title', t('lu.title')));
+        const meta = [];
+        if (spec && spec.preset === 'quick-match') meta.push(t('lu.quick'));
+        meta.push(spec && spec.turnBased ? t('lu.turnBased') : t('lu.realTime'));
+        if (spec && spec.turnBased && spec.lockstepSliceMs) meta.push(t('lu.lockstep', { n: spec.lockstepSliceMs / 1000 }));
+        if (spec && spec.seed) meta.push(t('lu.seed', { seed: spec.seed }));
+        head.append(el('span', 'lu-meta', meta.join(' · ')));
+        card.append(head);
+        this.lineupRows(setup, header).forEach(r => {
+            const row = el('div', 'lu-seat');
+            const badge = el('span', 'lu-badge');
+            badge.innerHTML = this.teamDotHtml ? this.teamDotHtml(r.seat, 9) : '';
+            const who = el('div', 'lu-who');
+            who.append(el('span', 'lu-name', r.rule ? this.ruleBasedName(r.profile, t('lu.rule')) : r.name),
+                       el('span', 'lu-civ', t('civ.' + r.civ + '.name')));
+            if (!r.rule && r.model && r.model !== r.name) who.append(el('span', 'lu-model', r.model));
+            const tags = el('div', 'lu-tags');
+            const tag = (text, cls, tip) => { const e = el('span', 'lu-tag' + (cls ? ' ' + cls : ''), text); if (tip) e.title = tip; tags.append(e); };
+            if (r.rule) tag(t('lu.ruleTag'), 'quiet');
+            else {
+                const PROTOCOL = { openai: 'OpenAI', anthropic: 'Anthropic', ollama: 'Ollama', google: 'Google' };
+                if (r.protocol) tag(t('lu.protocol', { p: PROTOCOL[r.protocol] || r.protocol }), 'quiet');
+                if (r.servedBy === undefined) tag(t('lu.asking'), 'quiet');
+                else if (r.servedBy) tag(t('lu.served', { s: r.servedBy }));
+                if (r.preflight && r.preflight.ok) tag(t('lu.checked'), 'ok');
+                else if (r.preflight) tag(t('lu.checkFailed', { code: r.preflight.code }), 'warn');
+                else tag(t('lu.unchecked'), 'quiet', t('lu.uncheckedTip'));
+                if (r.context) tag(t('lu.ctx', { n: r.context >= 1024 ? Math.round(r.context / 1024) + 'k' : r.context }));
+                if (r.reasoning) tag(t('lu.reasoning', { v: r.reasoning }));
+                if (r.soft) tag(t('lu.soft'), 'warn', t('lu.softTip'));
+                if (r.lanes > 1) tag(t('lu.lanes', { n: r.lanes }), 'warn');
+            }
+            row.append(badge, who, tags);
+            card.append(row);
+        });
+        return card;
+    }
+
+    // Once the match runs, the card leaves the cover and stays over the opening
+    // seconds, then fades. It takes no input it needs: a click only dismisses it early.
+    floatArenaLineup(host) {
+        const card = host && host.querySelector('.arena-lineup');
+        if (!card) return;
+        document.querySelectorAll('.arena-lineup.floating').forEach(e => e.remove());
+        card.classList.add('floating');
+        document.body.appendChild(card);
+        const gone = () => { card.classList.add('fading'); setTimeout(() => card.remove(), 700); };
+        card.addEventListener('click', gone, { once: true });
+        setTimeout(gone, 7000);
     }
 
     // Collect the setup the arena engine expects (first `count` participants, 2–4).
@@ -2079,10 +2583,15 @@ class UIManager {
         if (ta) this._arenaConfig.prompt = ta.value;
         this.saveSetup();
         const cc = this._campaignConfig;
-        return {
-            playerCiv: cc.playerCiv,
-            opponents: cc.slots.slice(0, cc.count).map(slot => this.slotToSetupEntry(slot))
-        };
+        const opponents = cc.slots.slice(0, cc.count).map(slot => this.slotToSetupEntry(slot));
+        const substituted = [];
+        opponents.forEach((o, i) => {
+            if (!o.unconfigured) return;
+            opponents[i] = { civ: o.civ, type: 'ki', substituted: true };
+            substituted.push(i + 1);
+        });
+        if (substituted.length) this.showInfoMessage(t('ar.slotSubstituted', { n: substituted.join(', ') }));
+        return { playerCiv: cc.playerCiv, opponents };
     }
 
     // Reset the template AND every per-slot prompt to the current default
@@ -2133,15 +2642,20 @@ class UIManager {
     refreshUnitInfo() {
         if (this._infoBorrowed) return;
         const s = this._infoSubject;
-        if (!s || (!s.unit && !s.building)) return;
+        if (!s || (!s.unit && !s.building && !s.node)) return;
+        if (s.node) { this.updateUnitInfo(null, null, s.node.amount > 0 ? s.node : null); return; }
         const ent = s.unit || s.building;
         if (ent.health <= 0) { this.updateUnitInfo(null, null); return; }
         this.updateUnitInfo(s.unit, s.building);
     }
 
-    updateUnitInfo(unit, building) {
-        this._infoSubject = { unit: unit || null, building: building || null };
+    updateUnitInfo(unit, building, node = null) {
+        this._infoSubject = { unit: unit || null, building: building || null, node: node || null };
         const infoDiv = document.getElementById('unitInfo');
+        // Broadcast mode shows the card only while something is picked (b1034).
+        if (infoDiv) infoDiv.classList.toggle('has-subject', !!(unit || building || node));
+        // A picked resource node is ringed on the ground while its card is up (b1036).
+        if (this.game && this.game.renderer) this.game.renderer.selectedNode = node || null;
         const spectator = this.game && this.game.spectatorMode;
         // In spectator every entity belongs to a rival civ — lead with the SEAT
         // BADGE (the same mark worn on flags and shown in the leaderboard) plus the
@@ -2152,7 +2666,7 @@ class UIManager {
             if (!spectator || !ent || typeof getCivilization !== 'function') return '';
             const civ = getCivilization(ent.civilization);
             if (!civ) return '';
-            const col = '#' + ((civ.color != null ? civ.color : 0xffffff)).toString(16).padStart(6, '0');
+            const col = this.identityHex(ent.owner, ent.civilization, ent.seat);
             const badge = (ent.seat != null && this.teamDotHtml) ? this.teamDotHtml(ent.seat, 9) : '●';
             return `<span style="color:${col};font-weight:bold;">${badge} ${tg(civ.name)}</span><br>`;
         };
@@ -2172,6 +2686,9 @@ class UIManager {
             html += `❤️ ${t('ui.health')}: ${Math.floor(building.health)}/${building.maxHealth}<br>`;
             html += `<em>${this.getBuildingTypeDescription(building.type)}</em>`;
             infoDiv.innerHTML = html;
+        } else if (node) {
+            // A resource node: what it is and how much is left (b1034).
+            infoDiv.innerHTML = `<strong>${t('res.' + node.type)}</strong><br>${t('ui.remaining', { n: Math.max(0, Math.floor(node.amount)) })}`;
         } else {
             infoDiv.innerHTML = spectator
                 ? `<p style="color:#4ecca3;font-weight:bold;">${t('spec.hint')}</p>`
@@ -2180,8 +2697,427 @@ class UIManager {
         this.renderSpectatorSoundCaption(infoDiv);
     }
 
+    // ---- Chronicle captions (review #11) -------------------------------------
+    // A visual setting, not an audio one: sound captions appear only while sound
+    // plays, which is the wrong place for "who just lost their Town Center". Notable
+    // entries (weight 2+) are shown one at a time, five seconds each, in the order they
+    // happened; a backlog is thinned to the decisive ones rather than played late.
+    captionsOn() { return this.intentOn(); }   // one button: Intent shows both
+    intentOn() { return this.viewPreferences().intent !== false; }
+    // A bubble's point was in view within the last frames (see drawIntentOverlay).
+    intentBubblesInView() { return this.intentOn() && Date.now() - (this._intentInViewAt || 0) < 400; }
+    toggleIntentLayer() {
+        const p = this.viewPreferences();
+        p.intent = !this.intentOn();
+        this.saveViewPreferences();
+        if (!p.intent) { this._chronicleQueue = []; clearTimeout(this._chronicleTimer); this._chronicleTimer = null; document.getElementById('chronicleCaption')?.remove(); }
+        this.refreshIntentButton();
+    }
+    refreshIntentButton() {
+        const btn = document.getElementById('intentBtn');
+        if (!btn) return;
+        const on = this.intentOn();
+        btn.classList.toggle('sb-on', on);   // green while on, like Speed and Auto
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    // One overlay over the canvas, redrawn every frame while anything is showing: the
+    // camera moves, so positions are projected fresh each time.
+    startIntentOverlay(hostEl = null) {
+        this.stopIntentOverlay();
+        const host = hostEl || (this.game.renderer && this.game.renderer.container);
+        if (!host) return;
+        const ov = document.createElement('div');
+        ov.id = 'intentOverlay';
+        ov.className = 'intent-overlay';
+        ov.innerHTML = '<svg class="intent-svg" aria-hidden="true"></svg><div class="intent-bubbles"></div>';
+        host.appendChild(ov);
+        const svg = ov.firstChild, box = ov.lastChild, NS = 'http://www.w3.org/2000/svg';
+        const tick = () => {
+            if (!this._intentRaf) return;
+            this._intentRaf = requestAnimationFrame(tick);
+            this.drawIntentOverlay(svg, box, NS);
+        };
+        this._intentRaf = requestAnimationFrame(tick);
+    }
+    drawIntentOverlay(svg, box, NS = 'http://www.w3.org/2000/svg') {
+        const layer = this.intentLayer, r = this.game.renderer;
+        svg.innerHTML = '';
+        if (r && r.worldToScreen) this.drawStrategic(svg, NS);
+        if (!layer || !r || !r.worldToScreen || !this.intentOn() || this._intentMarksOnly) { box.innerHTML = ''; return; }
+        // The marks themselves lie on the ground, drawn by the renderer (intentMarks);
+        // only the bubbles are screen-space.
+        // A point behind the camera still has a direction to pin its bubble to.
+        const f = layer.frame((x, z) => r.worldToScreen(x, 0, z) || (r.offscreenDirection ? r.offscreenDirection(x, 0, z) : null), Date.now(),
+            { focus: r.cameraTarget, w: r.canvas.clientWidth, h: r.canvas.clientHeight });
+        // A seat's calls whose points are all out of view come as one card (b.lines), each
+        // call on its own line; the plans follow the bubbles, on the edges of the view.
+        box.innerHTML = f.bubbles.map(b => '<div class="intent-bubble' + (b.summary ? ' summary' : '') + (b.lines ? ' merged' : '') + '" style="left:' + Math.round(b.x) + 'px;top:' + Math.round(b.y) + 'px;opacity:'
+            + b.opacity.toFixed(2) + ';--seat:' + b.band + '">' + this.chronicleSeatHtml(b.seat)
+            + (b.lines ? b.lines.map(l => '<span class="intent-line' + (l.summary ? ' summary' : '') + '">' + this.intentBodyHtml(Object.assign({ seat: b.seat }, l)) + '</span>').join('') : this.intentBodyHtml(b))
+            + '</div>').join('')
+            + (f.plans || []).map(q => '<div class="intent-bubble intent-plan" data-slot="' + q.slot + '" style="opacity:' + q.opacity.toFixed(2) + ';--seat:' + q.band + '">'
+                + this.chronicleSeatHtml(q.seat) + ' <span class="intent-call">' + this.escapeHtml(t('log.plan')) + '</span>'
+                + (q.objective ? '<span class="intent-objective">\u{1F3AF} ' + this.escapeHtml(q.objective) + '</span>' : '')
+                + (q.steps.length ? '<ol class="intent-steps">' + q.steps.map(x => '<li>' + this.escapeHtml(x) + '</li>').join('') + '</ol>' : '')
+                + '</div>').join('');
+        // Laid out again with the sizes the bubbles were actually drawn at. Every bubble is
+        // kept inside the view: one whose point is off screen rests on the edge in the
+        // direction it lies, so a seat acting out of shot is still heard from. A bubble
+        // near an edge keeps its width rather than squeezing into a column. Then stacked
+        // -- the layer can only estimate sizes, and an estimate too small let one bubble
+        // cover another's reason.
+        //
+        // A bubble stands 18px above its point (the CSS transform), so its top is
+        // y - 18 - h. The top margin clears whatever bar runs along the top -- the arena's
+        // status bar, the game's resource bar, the broadcast board -- measured, not assumed:
+        // a fixed 56px let bubbles slip under a status bar that the UI size and its own
+        // wrapping make taller.
+        const els = box.children, pad = 6, LIFT = 18;
+        const vw = box.clientWidth || r.canvas.clientWidth, vh = box.clientHeight || r.canvas.clientHeight;
+        const top0 = box.getBoundingClientRect().top;
+        let TOP = 56;
+        for (const sel of ['.spectator-statusbar', '#topHUD', '.broadcast-board']) {
+            const el = document.querySelector(sel);
+            if (!el || el.offsetParent === null && getComputedStyle(el).position !== 'fixed') continue;
+            const q = el.getBoundingClientRect();
+            if (q.height > 0 && q.top - top0 < vh * 0.25) TOP = Math.max(TOP, q.bottom - top0 + pad);
+        }
+        // For the auto camera: a bubble whose own point is in view is being read, and the
+        // director holds its shot for it (Director.readingHold).
+        if (f.bubbles.some(b => b.x >= 0 && b.x <= vw && b.ay >= 0 && b.ay <= vh)) this._intentInViewAt = Date.now();
+        // The panels over the map -- the decisions on the left, the leaderboard and the
+        // minimap on the right, the transcript and the unit card -- are not free ground: a
+        // bubble under one was unreadable. One that would meet a panel is moved out beside
+        // it, toward the middle of the view; before stacking, and again after, since
+        // stacking can raise a bubble into one.
+        const ov = box.getBoundingClientRect();
+        const panels = ['aiDecisionLog', 'spectatorLeaderboard', 'minimap', 'transcriptViewer', 'unitInfo']
+            .map(id => document.getElementById(id))
+            .filter(el => el && el.offsetParent !== null && el.offsetWidth > 0)
+            .map(el => { const q = el.getBoundingClientRect();
+                return { left: q.left - ov.left, right: q.right - ov.left, top: q.top - ov.top, bottom: q.bottom - ov.top }; });
+        // The plans: slot 0 on the left edge, slot 1 on the right, under the top bar -- or
+        // beside a panel standing there. Placed first, and then free ground no more: the
+        // turn's bubbles keep off them as they keep off the panels.
+        // In a narrow view the panels can push both into the same gap: the second then
+        // goes below the first.
+        const plansPlaced = [], fixed = panels.slice();
+        for (const el of box.querySelectorAll('.intent-plan')) {
+            const right = el.dataset.slot === '1';
+            el.style.top = TOP + 'px';
+            el.style.left = pad + 'px';
+            const q = el.getBoundingClientRect(), w = q.width, h = q.height;
+            let x = right ? vw - pad - w : pad, y = TOP;
+            for (const p of fixed) if (y < p.bottom && y + h > p.top && x < p.right && x + w > p.left) x = right ? p.left - pad - w : p.right + pad;
+            for (const p of plansPlaced) if (x < p.right && x + w > p.left && y < p.bottom && y + h > p.top) y = p.bottom + pad;
+            el.style.left = Math.round(x) + 'px';
+            el.style.top = Math.round(y) + 'px';
+            const rect = { left: x, right: x + w, top: y, bottom: y + h };
+            plansPlaced.push(rect); panels.push(rect);
+        }
+        if (f.bubbles.length) {
+            const boxes = f.bubbles.map((b, k) => {
+                const w = els[k].offsetWidth, h = els[k].offsetHeight;
+                const x = vw > w + 2 * pad ? Math.max(pad + w / 2, Math.min(vw - pad - w / 2, b.x)) : b.x;
+                // On a building or a resource the bubble's bottom goes where its top was.
+                const ay = b.ay - (b.lift ? h : 0);
+                const y = vh > h + TOP + pad + LIFT ? Math.max(TOP + LIFT + h, Math.min(vh - pad + LIFT, ay)) : ay;
+                return { x, y, w, h };
+            });
+            const avoid = (bx, y) => {
+                const top = y - LIFT - bx.h, bottom = y - LIFT;
+                for (let pass = 0; pass < 2; pass++) for (const q of panels) {
+                    if (!(top < q.bottom && bottom > q.top && bx.x - bx.w / 2 < q.right && bx.x + bx.w / 2 > q.left)) continue;
+                    bx.x = (q.left + q.right) / 2 < vw / 2 ? q.right + pad + bx.w / 2 : q.left - pad - bx.w / 2;
+                }
+                if (vw > bx.w + 2 * pad) bx.x = Math.max(pad + bx.w / 2, Math.min(vw - pad - bx.w / 2, bx.x));
+            };
+            boxes.forEach(bx => avoid(bx, bx.y));
+            const ys = IntentLayer.stack(boxes, 4, TOP + LIFT);
+            boxes.forEach((bx, k) => avoid(bx, ys[k]));
+            boxes.forEach((bx, k) => { els[k].style.left = Math.round(bx.x) + 'px'; els[k].style.top = Math.round(ys[k]) + 'px'; });
+        }
+    }
+    // The decisions log's names for actions, and the detail it puts after one ("(Wood)",
+    // "(Militia)"). Shared with the intent bubbles, which name a command the same way
+    // when the model gave no reason for it.
+    logActionNames() {
+        return {
+            train_unit: t('log.train_unit'),
+            research_tech: t('log.research_tech'),
+            upgrade_age: t('log.upgrade_age'),
+            build_structure: t('log.build_structure'),
+            move_units: t('log.move_units'),
+            attack_target: t('log.attack_target'),
+            wait: t('log.wait'),
+            self_heal: t('log.self_heal'),
+            paused: t('log.paused'),
+            resumed: t('log.resumed'),
+            defeated: t('log.defeated'),
+            explore: t('log.explore'),
+            round_missed: t('log.round_missed'),
+            lane_answer_dropped: t('log.lane_answer_dropped'),
+            assign_workers: t('log.assign_workers'),
+            delete_unit: t('log.delete_unit'),
+            destroy_building: t('log.destroy_building'),
+            // Failure tags. These render in the log exactly like an action does, so
+            // they belong in the same table — they were emitted as pre-baked English
+            // strings and stayed English in every language.
+            no_action_provided: t('log.no_action_provided'),
+            plan_only: t('log.plan_only'),
+            command_limit: t('log.command_limit'),
+            malformed_action: t('log.malformed_action'),
+            reply_truncated: t('log.reply_truncated'),
+            tool_call_failed: t('log.tool_call_failed'),
+            request_failed: t('log.request_failed'),
+            fallback_rule_based: t('log.fallback_rule_based')
+        };
+    }
+    logDetail(pp, playerId) {
+        pp = pp || {};
+        const hasT = pp.targetX !== undefined && pp.targetZ !== undefined;
+        return pp.unitType ? ` (${this.logDetailName('unit', pp.unitType, playerId)})`
+            : pp.buildingType ? ` (${this.logDetailName('building', pp.buildingType, playerId)})`
+            : pp.techId ? ` (${this.logDetailName('tech', pp.techId, playerId)})`
+            : pp.resourceType ? ` (${this.logDetailName('resource', pp.resourceType, playerId)})`
+            : hasT ? ` (→ ${Math.round(pp.targetX)}, ${Math.round(pp.targetZ)})`
+            : '';
+    }
+    // The call a bubble stands for, after the model's name: the decision log's own icon for
+    // the action, then just what was called -- the unit, the building, the research, the
+    // age, the resource, the tile or the target. Empty for a bubble with no call.
+    // What one call's bubble says after the model's name: the call, a cross if refused,
+    // and the reason. A command given without a reason is named by its call alone; the
+    // old line repeated it ("Units moved (→ 120, -40)") under the chip.
+    intentBodyHtml(b) {
+        return this.intentCallHtml(b)
+            + (b.refused ? ' <span class="intent-refused" title="' + this.escapeHtml(t('spec.intentRefused')) + '">✗</span>' : '')
+            + (b.summary && this.intentCallHtml(b) ? '' : ' <span class="intent-reason">' + this.escapeHtml(b.summary ? this.intentSummaryText(b) : b.text) + '</span>');
+    }
+    intentCallHtml(b) {
+        if (!b || !b.action) return '';
+        const label = this.logActionNames()[b.action];
+        if (!label) return '';
+        const icon = label.split(' ')[0], what = this.intentCallText(b);
+        return ' <span class="intent-call">' + icon + (what ? ' ' + this.escapeHtml(what) : '') + '</span>';
+    }
+    intentCallText(b) {
+        const p = b.params || {}, seat = b.seat, name = (kind, id) => id ? this.logDetailName(kind, id, seat) : '';
+        const where = p.tile ? String(p.tile).toUpperCase()
+            : (p.targetX !== undefined && p.targetZ !== undefined ? Math.round(p.targetX) + ', ' + Math.round(p.targetZ) : '');
+        const plain = key => { const s = t(key); return s.includes(' ') ? s.slice(s.indexOf(' ') + 1) : s; };   // without its icon
+        switch (b.action) {
+            case 'train_unit': return name('unit', p.unitType);
+            case 'build_structure': return name('building', p.buildingType);
+            case 'research_tech': return name('tech', p.techId);
+            case 'delete_unit': return (p.count > 1 ? p.count + '× ' : '') + name('unit', p.unitType || 'worker');
+            case 'destroy_building': return name('building', p.buildingType);
+            case 'explore': return where;
+            case 'assign_workers': return (p.count ? p.count + ' → ' : '→ ') + (p.resourceType ? name('resource', p.resourceType) : where);
+            case 'upgrade_age': {
+                const order = ['stone', 'neolithic', 'bronze', 'iron'];
+                const ai = ((this.game.aiManager && this.game.aiManager.aiPlayers) || []).find(a => a.id === seat);
+                const next = ai ? order[order.indexOf(ai.age) + 1] : null;
+                return next ? plain('age.' + next) : '';
+            }
+            case 'move_units':
+            case 'attack_target': {
+                // The target by id, alive or not: a target that fell since is still named.
+                const buildings = this.game.getAllBuildings ? this.game.getAllBuildings() : [];
+                const units = this.game.getAllUnits ? this.game.getAllUnits() : [];
+                const hit = list => p.targetId ? list.find(e => e && String(e.id) === String(p.targetId)) : null;
+                const building = hit(buildings), unit = building ? null : hit(units);
+                if (building || unit) return name(building ? 'building' : 'unit', (building || unit).type);
+                return where ? '→ ' + where : '';
+            }
+            default: return '';
+        }
+    }
+    // A bubble for a command given without a reason: named as the log names it.
+    intentSummaryText(b) {
+        if (!b.action) return b.text;
+        const name = this.logActionNames()[b.action];
+        if (!name) return b.text;
+        const detail = this.logDetail(b.params, b.seat);
+        return name + (detail || (b.params && b.params.tile ? ' (' + b.params.tile + ')' : ''));
+    }
+
+    // The strategic zoom layer (review #12): bases, armies with their counts, and live
+    // battles, fading in as the view widens. Drawn under the intent arrows.
+    drawStrategic(svg, NS) {
+        const L = this.strategicLayer, r = this.game.renderer;
+        if (!L || !r) return;
+        const fade = StrategicLayer.fade(r._halfH || 0);
+        if (fade <= 0) return;
+        const g = document.createElementNS(NS, 'g');
+        g.setAttribute('class', 'strat');
+        g.setAttribute('opacity', fade.toFixed(2));
+        const at = (x, z) => r.worldToScreen(x, 0, z);
+        const el = (tag, attrs, parent = g) => {
+            const e = document.createElementNS(NS, tag);
+            for (const k in attrs) e.setAttribute(k, attrs[k]);
+            parent.appendChild(e);
+            return e;
+        };
+        // The seat's badge exactly as the leaderboard shows it: its fill, its rim.
+        const badge = (seat, id, x, y, size) => {
+            const b = typeof getTeamBadge === 'function' ? getTeamBadge(seat) : null;
+            const d = (b && typeof TEAM_BADGE_SHAPES !== 'undefined' && TEAM_BADGE_SHAPES[b.shape]) || 'M3.5 12 A8.5 8.5 0 1 1 20.5 12 A8.5 8.5 0 1 1 3.5 12 Z';
+            el('path', { d, transform: `translate(${x - size / 2},${y - size / 2}) scale(${size / 24})`,
+                fill: (b && b.fill) || this.identityHex(id, null, seat), stroke: (b && b.rim) || '#222',
+                'stroke-width': '2', 'vector-effect': 'non-scaling-stroke' });   // screen pixels, whatever the size
+            return b;
+        };
+        const text = (x, y, s, size) => {
+            const tx = document.createElementNS(NS, 'text');
+            tx.setAttribute('x', x); tx.setAttribute('y', y); tx.setAttribute('font-size', size);
+            tx.setAttribute('text-anchor', 'middle'); tx.setAttribute('class', 'strat-n');
+            tx.textContent = s;
+            g.appendChild(tx);
+        };
+        // A battle's ring lies on the ground like every other ring (b1008): the same
+        // on-screen size as before (16-30 px across the view's height at any zoom), but a
+        // circle in the world projected through the camera, not a disc facing it.
+        const worldPerPx = (2 * (r._halfH || 30)) / Math.max(1, (r.canvas && r.canvas.clientHeight) || 600);
+        for (const b of L.battles) {
+            const p = at(b.x, b.z);
+            if (!p) continue;
+            const R = (16 + Math.min(14, Math.sqrt(b.n) * 2)) * worldPerPx, pts = [];
+            for (let k = 0; k < 32; k++) {
+                const q = at(b.x + Math.cos(k * Math.PI / 16) * R, b.z + Math.sin(k * Math.PI / 16) * R);
+                if (q) pts.push(q.x.toFixed(1) + ' ' + q.y.toFixed(1));
+            }
+            if (pts.length < 32) continue;
+            el('path', { d: 'M' + pts.join('L') + 'Z', class: 'strat-battle' });
+            text(p.x, p.y + 5, '\u2694', 15);
+        }
+        // A marker: a short white line rising at 45 degrees from the spot, and at its end
+        // the seat's flag -- the very flag on its flag poles, the same cloth, colour and
+        // badge, folding in the same wind, a little darker and a little see-through so it
+        // sits in the lit world. An army's flag adds the military icon in its upper-left
+        // corner and the number of its units beneath. Every marker is the same size.
+        const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const fold = u => (!reduced && r.flagFold) ? r.flagFold(u) : 0;
+        const flag = (m, army) => {
+            const p = at(m.x, m.z);
+            if (!p) return;
+            const len = StrategicLayer.POLE_PX / Math.SQRT2, q = { x: p.x + len, y: p.y - len };
+            el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: 'strat-pole-halo' });
+            el('line', { x1: p.x, y1: p.y, x2: q.x, y2: q.y, class: 'strat-pole' });
+            el('circle', { cx: p.x, cy: p.y, r: 2.5, class: 'strat-foot' });
+            // The building flag is 0.85 x 0.55. Its fold is across the cloth; seen from
+            // the camera's height, about half of it shows as a rise and fall.
+            const W = 21.6, H = 14, N = 10, top = q.y - H;
+            // One group, so the slices fade as one cloth and their seams never show.
+            const cloth = el('g', { class: 'strat-flag' });
+            const lift = u => fold(u) * W * 0.45;
+            const url = r.flagImageURL ? r.flagImageURL(m.id, m.civ, m.seat, army) : null;
+            const edge = [];
+            for (let i = 0; i <= N; i++) edge.push([q.x + i / N * W, lift(i / N)]);
+            for (let i = 0; i < N; i++) {
+                const [x0, d0] = edge[i], [x1, d1] = edge[i + 1], dy = (d0 + d1) / 2;
+                const w = x1 - x0 + (i < N - 1 ? 0.6 : 0);   // overlap the seams
+                if (url) {
+                    // One slice of the flag image, raised or lowered with its fold.
+                    const slice = el('svg', { x: x0, y: top + dy, width: w, height: H, viewBox: `${i * 256 / N} 0 ${256 / N * w / (W / N)} 128`, preserveAspectRatio: 'none' }, cloth);
+                    const img = document.createElementNS(NS, 'image');
+                    img.setAttribute('href', url); img.setAttribute('width', 256); img.setAttribute('height', 128);
+                    img.setAttribute('preserveAspectRatio', 'none');
+                    slice.appendChild(img);
+                } else el('rect', { x: x0, y: top + dy, width: w, height: H, fill: this.identityHex(m.id, m.civ, m.seat) }, cloth);
+            }
+            el('path', { class: 'strat-cloth', d: 'M' + edge.map(([x, d]) => x + ' ' + (top + d)).join('L')
+                + 'L' + edge.slice().reverse().map(([x, d]) => x + ' ' + (q.y + d)).join('L') + 'Z' }, cloth);
+            if (!url) badge(m.seat, m.id, q.x + W / 2, q.y - H / 2 + lift(0.5), 7);
+            if (army) text(q.x + W / 2, q.y + lift(0.5) + 11, String(m.n), 11);
+        };
+        for (const b of L.bases) flag(b, false);
+        // An army's flag follows its units every frame: the groups are rebuilt four times
+        // a second, but their centre is taken here from where the units stand now, so the
+        // flag glides with a marching army instead of jumping after it.
+        for (const a of L.armies) {
+            const live = (a.units || []).filter(u => u.health > 0);
+            flag(live.length ? Object.assign({}, a, { x: live.reduce((s, u) => s + u.x, 0) / live.length,
+                z: live.reduce((s, u) => s + u.z, 0) / live.length }) : a, true);
+        }
+        svg.appendChild(g);
+    }
+
+    stopIntentOverlay() {
+        if (this._intentRaf) cancelAnimationFrame(this._intentRaf);
+        this._intentRaf = null;
+        document.getElementById('intentOverlay')?.remove();
+    }
+    chronicleSeatName(id) {
+        const g = this.game, ai = ((g.aiManager && g.aiManager.aiPlayers) || []).find(a => a.id === id);
+        if (!ai) return String(id || '?');
+        const ctrl = ((g.openAIAIManager && g.openAIAIManager.aiControllers) || []).find(c => c.id === id);
+        return (ctrl && ctrl.model && ctrl.model.name) || this.anCivName(ai.civilization);
+    }
+    chronicleSeatHtml(id) {
+        const ai = ((this.game.aiManager && this.game.aiManager.aiPlayers) || []).find(a => a.id === id);
+        return (ai ? this.teamDotHtml(ai.seat, 9) + ' ' : '') + '<b>' + this.escapeHtml(this.chronicleSeatName(id)) + '</b>';
+    }
+    chronicleText(e) {
+        const who = this.chronicleSeatHtml(e.seats && e.seats[0]);
+        const bname = type => { const d = typeof getBuildingDef === 'function' ? getBuildingDef(type) : null; return this.escapeHtml(d && d.name ? tg(d.name) : String(type || '')); };
+        const by = e.by ? this.chronicleSeatHtml(e.by) : null;
+        switch (e.kind) {
+            case 'contact': return t('chr.contact', { a: who, b: this.chronicleSeatHtml(e.seats[1]) });
+            case 'clash': return t('chr.clash', { who: e.seats.map(id => this.chronicleSeatHtml(id)).join(' · ') });
+            case 'battle': return t('chr.battle', { s: e.seconds, lines: e.seats.map(id => t('chr.battleSide', {
+                who: this.chronicleSeatHtml(id), lost: e.sides[id].lost, of: e.sides[id].involved })).join(' · ') });
+            case 'building-lost': case 'town-center-lost': case 'wonder-lost':
+                return t(by ? 'chr.lostBy' : 'chr.lost', { who, what: bname(e.building), by });
+            case 'age': return t('chr.age', { who, age: this.escapeHtml(this.getAgeName(e.age)) });
+            case 'wonder-raised': return t('chr.wonderRaised', { who, what: bname(e.building), n: e.required });
+            case 'wonder-countdown': return t('chr.wonderCountdown', { who, n: e.seconds });
+            case 'elimination': return t('chr.elimination', { who });
+            case 'speed': return t('chr.speed', { n: this.simSpeedLabel(e.speed) });
+            case 'pause': return t('chr.pause');
+            case 'resume': return t('chr.resume');
+            default: return this.escapeHtml(e.kind);
+        }
+    }
+    chronicleCaption(e) {
+        if (!this.game.spectatorMode || !this.captionsOn() || e.weight < 2) return;
+        this._chronicleQueue = this._chronicleQueue || [];
+        this._chronicleQueue.push(e);
+        // Never more than a few behind: past that, keep only the decisive ones.
+        if (this._chronicleQueue.length > 3) this._chronicleQueue = this._chronicleQueue.filter(x => x.weight >= 3).slice(-3);
+        if (!this._chronicleTimer) this.nextChronicleCaption();
+    }
+    nextChronicleCaption() {
+        this._chronicleTimer = null;
+        const e = (this._chronicleQueue || []).shift();
+        let el = document.getElementById('chronicleCaption');
+        if (!e) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'chronicleCaption';
+            el.className = 'chronicle-caption';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            document.body.appendChild(el);
+        }
+        const mmss = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+        // Under the status bar, whose height depends on the window's width.
+        // Under the status bar, whose height depends on the window's width. In broadcast
+        // mode the bar is gone and the caption is a lower third (CSS).
+        const bar = document.querySelector('#spectatorHUD .spectator-statusbar');
+        const below = bar ? bar.getBoundingClientRect().bottom : 0;
+        el.style.top = below > 0 && !this.broadcastOn() ? Math.round(below + 8) + 'px' : '';
+        el.dataset.weight = String(e.weight);
+        el.innerHTML = '<span class="chr-t">' + mmss(e.t || 0) + '</span> ' + this.chronicleText(e);
+        // Restart the fade for each caption.
+        el.classList.remove('chr-in'); void el.offsetWidth; el.classList.add('chr-in');
+        this._chronicleTimer = setTimeout(() => this.nextChronicleCaption(), document.hidden ? 0 : 5000);
+    }
+
     showSpectatorSoundCaption(event) {
         if(!this.game.spectatorMode)return;
+        // What the chronicle tells, it tells whether or not sound is on; not twice.
+        if(this.captionsOn()&&['elimination','warning','wonderLost','ageUp'].includes(event.kind))return;
         const civ=typeof getCivilization==='function'?getCivilization(event.civilization):null;
         const message=t('audio.caption.'+event.kind,{
             who:civ?tg(civ.name):(event.civilization||''),
@@ -2370,7 +3306,7 @@ class UIManager {
                 const percentage = Math.min(100, Math.floor((currentResearch.progress / currentResearch.duration) * 100));
                 html += `
                     <div class="menu-item" style="background: rgba(78, 204, 163, 0.2); border: 2px solid #4ecca3;">
-                        <h4>🔬 ${tech ? tg(tech.name) : t('ui.researching')} (${this.getAgeName(tech?.requiredAge || '')})</h4>
+                        <h4>🪶 ${tech ? tg(tech.name) : t('ui.researching')} (${this.getAgeName(tech?.requiredAge || '')})</h4>
                         <p>${tech ? tg(tech.description) : ''}</p>
                         <div class="progress-bar" style="width: 100%; height: 20px; background: #1a1a2e; border: 2px solid #0f3460; border-radius: 10px; overflow: hidden; margin-top: 10px;">
                             <div class="progress-fill" style="height: 100%; width: ${percentage}%; background: linear-gradient(90deg, #4ecca3, #0f3460); border-radius: 8px;"></div>
@@ -2661,37 +3597,49 @@ class UIManager {
         infoDiv.innerHTML = `<p>${t('hud.selectHint')}</p>`;
     }
 
-    showErrorMessage(message) {
-        const infoDiv = document.getElementById('unitInfo');
-        if (!infoDiv) return;
-        // Borrowed: hold the periodic refresh off until we hand the card back, and
-        // re-render on release rather than restoring the markup we captured — by
-        // then it is seconds stale.
-        this._infoBorrowed = true;
-        infoDiv.innerHTML = `<p style="color: #e94560; font-weight: bold;">⚠️ ${message}</p>`;
-        clearTimeout(this._infoBorrowTimer);
-        this._infoBorrowTimer = setTimeout(() => {
-            this._infoBorrowed = false;
-            this.refreshUnitInfo();
-            if (!this._infoSubject || (!this._infoSubject.unit && !this._infoSubject.building)) {
-                this.updateUnitInfo(null, null);
-            }
-        }, 3000);
-    }
+    showErrorMessage(message) { this.showNotice(message, 'error'); }
+    showInfoMessage(message) { this.showNotice(message, 'info'); }
 
-    showInfoMessage(message) {
+    // One place for transient messages. On the game screen they borrow the unit card,
+    // where the player is looking. Everywhere else that card lays out at 0x0 -- so a
+    // failed start, an import result or an analyzer load error used to be written
+    // somewhere nobody could see. Off the HUD they go to a page-level live region.
+    // Text only: a message can carry an exception's own words, never markup.
+    showNotice(message, kind) {
+        const raw = String(message == null ? '' : message);
+        const isError = kind === 'error';
+        // Several translations already open with their own icon; add one only if not.
+        const text = /^(⚠️|✅|❌)/.test(raw) ? raw : (isError ? '⚠️ ' : '✅ ') + raw;
         const infoDiv = document.getElementById('unitInfo');
-        if (!infoDiv) return;
-        this._infoBorrowed = true;
-        infoDiv.innerHTML = `<p style="color: #4ecca3; font-weight: bold;">✅ ${message}</p>`;
-        clearTimeout(this._infoBorrowTimer);
-        this._infoBorrowTimer = setTimeout(() => {
-            this._infoBorrowed = false;
-            this.refreshUnitInfo();
-            if (!this._infoSubject || (!this._infoSubject.unit && !this._infoSubject.building)) {
-                this.updateUnitInfo(null, null);
-            }
-        }, 2500);
+        if (infoDiv && infoDiv.getClientRects && infoDiv.getClientRects().length) {
+            // Borrowed: hold the periodic refresh off until we hand the card back, and
+            // re-render on release rather than restoring the markup we captured — by
+            // then it is seconds stale.
+            this._infoBorrowed = true;
+            infoDiv.innerHTML = `<p style="color: ${isError ? '#e94560' : '#4ecca3'}; font-weight: bold;">${this.escapeHtml(text)}</p>`;
+            clearTimeout(this._infoBorrowTimer);
+            this._infoBorrowTimer = setTimeout(() => {
+                this._infoBorrowed = false;
+                this.refreshUnitInfo();
+                if (!this._infoSubject || (!this._infoSubject.unit && !this._infoSubject.building)) {
+                    this.updateUnitInfo(null, null);
+                }
+            }, isError ? 3000 : 2500);
+            return;
+        }
+        const el = document.getElementById('appNotice');
+        if (!el) return;
+        el.className = 'app-notice ' + (isError ? 'is-error' : 'is-info');
+        el.setAttribute('role', isError ? 'alert' : 'status');
+        el.textContent = text;
+        el.hidden = false;
+        clearTimeout(this._noticeTimer);
+        // Long enough to read a sentence twice; an error stays a little longer.
+        this._noticeTimer = setTimeout(() => { el.hidden = true; }, isError ? 8000 : 4000);
+        if (!el._wired) {
+            el._wired = true;
+            el.addEventListener('click', () => { clearTimeout(this._noticeTimer); el.hidden = true; });
+        }
     }
 
     // Single-player footer: shows who controls each rival (model name or rule-based),
@@ -2767,6 +3715,13 @@ class UIManager {
     setupSpectatorUI() {
         // Spectator layout tweaks (lower minimap, taller leaderboard) live in CSS.
         document.body.classList.add('spectator-mode');
+        // A watched match opens with the auto camera on (b1022).
+        if (!this.game._actionCam) this.game.toggleActionCam();
+        // A watched match opens in broadcast mode unless the viewer last chose analyze
+        // mode (b1011). After this setup, so the board finds the seats in place.
+        if (this.viewPreferences().broadcast) setTimeout(() => {
+            if (document.body.classList.contains('spectator-mode') && !this.broadcastOn()) this.toggleBroadcast(true, false);
+        }, 0);
 
         // Hide normal HUD elements
         const topHUD = document.getElementById('topHUD');
@@ -2815,6 +3770,29 @@ class UIManager {
         // Clear any intervals from a previous arena run so they don't stack up
         if (this._spectatorIntervals) this._spectatorIntervals.forEach(id => clearInterval(id));
         this._spectatorIntervals = [];
+
+        // The chronicle (review #11): it only reads the match, four times a second, and
+        // keeps running in a hidden tab so the transcript misses nothing.
+        this.chronicle = typeof MatchChronicle === 'function' ? new MatchChronicle(this.game) : null;
+        this._chronicleQueue = [];
+        if (this.chronicle) {
+            this.chronicle.subscribe(e => { this.chronicleCaption(e); this.broadcastSlate(e); });
+            this._spectatorIntervals.push(setInterval(() => { if (this.chronicle) this.chronicle.update(); }, 250));
+        }
+        this.refreshIntentButton();
+        // The intent layer (review #11): each model's newest orders as arrows and its own
+        // reason beside them, drawn over the 3-D view. Read from the turn logs; the match
+        // does not know it is there.
+        this.intentLayer = typeof IntentLayer === 'function' ? new IntentLayer(this.game) : null;
+        if (this.intentLayer) {
+            this._spectatorIntervals.push(setInterval(() => { if (this.intentLayer && this.intentOn()) this.intentLayer.poll(); }, 250));
+            this.startIntentOverlay();
+            if (this.game.renderer) this.game.renderer.intentMarks = () => (this.intentLayer && this.intentOn()) ? this.intentLayer.worldMarks() : null;
+        }
+        this.refreshIntentButton();
+        // The strategic zoom layer (review #12), regrouped four times a second.
+        this.strategicLayer = typeof StrategicLayer === 'function' ? new StrategicLayer(this.game) : null;
+        if (this.strategicLayer) this._spectatorIntervals.push(setInterval(() => { if (this.strategicLayer && !document.hidden) this.strategicLayer.poll(); }, 250));
 
         // Initial paint
         this.updateSpectatorPlayerList();
@@ -2924,6 +3902,11 @@ class UIManager {
     // Stop spectator refresh timers (call when leaving the arena)
     teardownSpectatorUI() {
         clearTimeout(this._soundCaptionTimer);this._soundCaptionTimer=null;this._soundCaption=null;
+        clearTimeout(this._chronicleTimer); this._chronicleTimer = null; this._chronicleQueue = [];
+        document.getElementById('chronicleCaption')?.remove();
+        this.stopIntentOverlay();
+        if (this.game.renderer) this.game.renderer.intentMarks = null;
+        if (this.broadcastOn()) this.toggleBroadcast(false, false);
         document.querySelector('.spectator-sound-caption')?.remove();
         document.body.classList.remove('spectator-mode');
         // Leave the arena with the minimap open again, so a campaign started next
@@ -3092,23 +4075,225 @@ class UIManager {
 
         // Wonder progress: show the furthest-along held Wonder among the AIs.
         const wEl = document.getElementById('arenaWonder');
+        if (this.broadcastOn()) this.renderBroadcast();
         if (wEl) {
-            const reqMs = (this.game.wonderRequired || 600) * 1000;
-            let lead = null, leadHold = 0;
-            players.forEach(ai => {
-                const holding = ai.buildings.some(b => b.isWonder && !b.underConstruction);
-                if (holding && (ai._wonderHold || 0) > leadHold) { leadHold = ai._wonderHold || 0; lead = ai; }
-            });
+            const { lead, leadHold, reqMs } = this.wonderLead();
             if (lead) {
                 const pct = Math.min(100, Math.round((leadHold / reqMs) * 100));
                 const civ = getCivilization(lead.civilization);
-                const col = this.legibleColor('#' + (civ?.color || 0xffffff).toString(16).padStart(6, '0'));
+                const col = this.legibleColor(this.identityHex(lead.id, lead.civilization, lead.seat));
                 wEl.style.display = 'flex';
                 wEl.innerHTML = `<span class="sb-sep"></span>\u{1F3DB}️ <span style="color:${col};font-weight:700">${civ ? tg(civ.name) : lead.civilization}</span> ${t('wonder.generic')} <span class="sb-wonder-track"><span class="sb-wonder-fill" style="width:${pct}%"></span></span> ${Math.floor(leadHold / 1000)}/${Math.round(reqMs / 1000)}s`;
             } else {
                 wEl.style.display = 'none';
             }
         }
+    }
+
+    // The furthest-along held Wonder: who holds it, for how long, of how long needed.
+    wonderLead() {
+        const players = (this.game.aiManager && this.game.aiManager.aiPlayers) || [];
+        // In countdown time (b1021): seconds at the 1x pace, as the countdown shows them.
+        const pace = this.game.wonderPace || 1, reqMs = (this.game.wonderRequired || 600) * 1000;
+        let lead = null, leadHold = 0;
+        players.forEach(ai => {
+            const holding = ai.buildings.some(b => b.isWonder && !b.underConstruction);
+            if (holding && (ai._wonderHold || 0) > leadHold) { leadHold = ai._wonderHold || 0; lead = ai; }
+        });
+        return { lead, leadHold: leadHold / pace, reqMs };
+    }
+
+    // ---- Broadcast mode (review #11) ---------------------------------------------
+    // For a stream or a recording: the operator's controls go (decision log, advice,
+    // tempo, the inspect card), a scoreboard and lower-third captions come, and a held
+    // Wonder becomes a countdown in its seat's colour. Esc or the button brings the
+    // controls back. Nothing about the match changes.
+    broadcastOn() { return document.body.classList.contains('broadcast-mode'); }
+    // `remember`: a switch the viewer made is kept as their choice for the next match;
+    // the arena opening or closing it (setupSpectatorUI, teardownSpectatorUI) is not.
+    toggleBroadcast(on = !this.broadcastOn(), remember = true) {
+        if (remember) { this.viewPreferences().broadcast = !!on; this.saveViewPreferences(); }
+        document.body.classList.toggle('broadcast-mode', !!on);
+        const btn = document.getElementById('broadcastBtn');
+        if (btn) { btn.classList.toggle('sb-on', !!on); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+        if (on) {
+            if (!document.getElementById('broadcastBoard')) {
+                const board = document.createElement('div');
+                board.id = 'broadcastBoard'; board.className = 'broadcast-board';
+                const wonder = document.createElement('div');
+                wonder.id = 'broadcastWonder'; wonder.className = 'broadcast-wonder'; wonder.hidden = true;
+                // The way out: the bar's broadcast button, green because broadcast is on,
+                // at the right end of the scoreboard, across from the clock.
+                const exit = document.createElement('button');
+                exit.id = 'broadcastExit'; exit.className = 'sb-end sb-on broadcast-exit'; exit.type = 'button';
+                // The way to analyze mode (b1011): the decisions log, the leaderboard and
+                // the controls. The bar's 📺 brings broadcast mode back.
+                exit.textContent = '\u{1F50D}'; exit.title = t('spec.broadcastExit');
+                exit.setAttribute('aria-label', t('spec.broadcastExit'));
+                exit.onclick = () => this.toggleBroadcast(false);
+                this._broadcastExit = exit;
+                // Beside it, icon only: the auto camera and the intent layer, the two things
+                // a broadcast may still want to switch. Green while on, as in the bar.
+                const icon = (id, glyph, title, onclick) => {
+                    const b = document.createElement('button');
+                    b.id = id; b.type = 'button'; b.className = 'sb-end broadcast-ctl';
+                    b.textContent = glyph; b.title = title; b.setAttribute('aria-label', title);
+                    b.onclick = () => { onclick(); this.renderBroadcast(); };
+                    return b;
+                };
+                const ctl = document.createElement('span');
+                ctl.className = 'broadcast-ctls';
+                ctl.append(icon('broadcastAuto', '\u{1F3AC}', t('spec.actionCamTitle'), () => this.game.toggleActionCam()),
+                    icon('broadcastIntent', '\u{1F3AF}', t('spec.intentTitle'), () => this.toggleIntentLayer()), exit);
+                this._broadcastCtl = ctl;
+                document.body.append(board, wonder);
+            }
+            // The bar's own speed control, moved beside the clock: the same button, menu
+            // and picks (all found by id), so the tempo is set from the broadcast without
+            // a second control to keep in step. It goes back where it was on exit.
+            const speed = document.getElementById('simSpeedWrap');
+            if (speed && !this._broadcastSpeed) this._broadcastSpeed = { el: speed, parent: speed.parentNode, next: speed.nextSibling };
+            this._broadcastKeys = e => { if (e.key === 'Escape') { e.preventDefault(); this.toggleBroadcast(false); } };
+            document.addEventListener('keydown', this._broadcastKeys, true);
+            this.renderBroadcast();
+        } else {
+            if (this._broadcastKeys) document.removeEventListener('keydown', this._broadcastKeys, true);
+            this._broadcastKeys = null;
+            const sp = this._broadcastSpeed;
+            if (sp && sp.parent) { sp.el.classList.remove('is-open'); sp.parent.insertBefore(sp.el, sp.next && sp.next.parentNode === sp.parent ? sp.next : null); }
+            this._broadcastSpeed = null;
+            ['broadcastBoard', 'broadcastWonder', 'broadcastExit', 'broadcastSlate'].forEach(id => document.getElementById(id)?.remove());
+            this._broadcastExit = null;
+            this._broadcastCtl = null;
+        }
+        if (this.game.renderer && this.game.renderer.onWindowResize) this.game.renderer.onWindowResize();
+    }
+    // One pill per seat, in seat order: badge, name, age, army, workers, buildings, and
+    // how often a spectator's advice reached that model -- a broadcast must not hide that
+    // a model was coached.
+    // Each seat's place as the leaderboard sorts it: the living first, then by power score.
+    seatRanks() {
+        const ais = (this.game.aiManager && this.game.aiManager.aiPlayers) || [];
+        const rows = ais.map(ai => ({ id: ai.id, alive: !this.game.isPlayerEliminated(ai), score: this.spectatorPowerScore(ai) }));
+        rows.sort((a, b) => (b.alive - a.alive) || (b.score - a.score));
+        return new Map(rows.map((r, i) => [r.id, i + 1]));
+    }
+    renderBroadcast() {
+        const board = document.getElementById('broadcastBoard');
+        if (!board) return;
+        const g = this.game, ais = [...((g.aiManager && g.aiManager.aiPlayers) || [])].sort((a, b) => a.seat - b.seat);
+        const ctrls = (g.openAIAIManager && g.openAIAIManager.aiControllers) || [];
+        const ranks = this.seatRanks();
+        const clock = document.getElementById('arenaClock');
+        // Only the seat cards are rebuilt each tick (b1013). The board used to be rebuilt
+        // whole, which detached the speed control and the buttons beside the cards every
+        // second: the hover dropped and an open speed menu closed under the pointer. The
+        // clock is a text update; the speed control and the buttons stay attached.
+        let clockEl = board.querySelector(':scope > .bb-clock'), cardsEl = board.querySelector(':scope > .bb-cards');
+        if (!clockEl || !cardsEl) {
+            board.innerHTML = '<span class="bb-clock"></span><span class="bb-cards"></span>';
+            clockEl = board.firstChild; cardsEl = board.lastChild;
+        }
+        clockEl.textContent = clock ? clock.textContent : '';
+        if (this._broadcastSpeed && clockEl.nextSibling !== this._broadcastSpeed.el) clockEl.after(this._broadcastSpeed.el);
+        if (this._broadcastCtl && this._broadcastCtl.parentNode !== board) board.appendChild(this._broadcastCtl);
+        cardsEl.innerHTML = ais.map(ai => {
+            const ctrl = ctrls.find(c => c.id === ai.id);
+            const advised = (ctrl && ctrl.stats && ctrl.stats.advisedTurns) || 0;
+            const out = g.isPlayerEliminated(ai);
+            const mil = ai.units.filter(u => u.type !== 'worker' && u.health > 0).length, wk = ai.units.filter(u => u.type === 'worker' && u.health > 0).length;
+            // Second line: the civilization and what is in the bank, with the icons the
+            // results screen uses.
+            const r = ai.resources || {}, bank = k => Math.floor(r[k] || 0);
+            // The cards keep seat order; the place shows as the leaderboard's medallion.
+            const rank = ranks.get(ai.id);
+            const sub = '<span class="bb-sub">' + (rank ? '<span class="lb-rank bb-rank rank-' + rank + '" title="' + this.escapeHtml(t('spec.bbRank', { n: rank })) + '">' + rank + '</span>' : '')
+                + '<span class="bb-civ">' + this.escapeHtml(this.anCivName(ai.civilization)) + '</span>'
+                + ' <span class="bb-n">\u{1F356} ' + bank('food') + '</span> <span class="bb-n">\u{1F332} ' + bank('wood') + '</span>'
+                + ' <span class="bb-n">\u{1FAA8} ' + bank('stone') + '</span> <span class="bb-n">\u{1F947} ' + bank('gold') + '</span>'
+                // Thinking: the leaderboard's pulsing dot, while this seat's model has a
+                // request in flight. Bottom right of the card. The board is rebuilt every
+                // tick, which would restart the pulse each time; a delay set from the clock
+                // puts every new dot at the phase the last one had reached.
+                + (ctrl && ctrl.pending ? '<span class="bb-think" title="' + this.escapeHtml(t('spec.thinking')) + '"><span class="dot" style="animation-delay:-'
+                    + (Date.now() % 1100) + 'ms"></span></span>' : '')
+                + '</span>';
+            // The seat's colour as a bar down the left, as the bubbles carry it.
+            const tb = typeof getTeamBadge === 'function' ? getTeamBadge(ai.seat) : null;
+            const band = (tb && tb.fill) || this.identityHex(ai.id, ai.civilization, ai.seat);
+            return '<span class="bb-seat' + (out ? ' out' : '') + '" style="--seat:' + band + '"><span class="bb-main">' + this.chronicleSeatHtml(ai.id)
+                + ' <span class="bb-age">' + this.escapeHtml(this.getAgeName(ai.age)) + '</span>'
+                + ' <span class="bb-n" title="' + this.escapeHtml(t('spec.bbArmy')) + '">\u2694\uFE0F ' + mil + '</span>'
+                + ' <span class="bb-n" title="' + this.escapeHtml(t('spec.bbWorkers')) + '">\u{1F477} ' + wk + '</span>'
+                + ' <span class="bb-n" title="' + this.escapeHtml(t('spec.bbBuildings')) + '">\u{1F3DB}\uFE0F ' + ai.buildings.filter(b => b.health > 0).length + '</span>'
+                // Population slots: the cap the houses and Town Centers provide.
+                + ' <span class="bb-n" title="' + this.escapeHtml(t('spec.bbHousing', { used: Math.floor(r.population || 0), max: Math.floor(r.maxPopulation || 0) })) + '">\u{1F3E0} ' + Math.floor(r.maxPopulation || 0) + '</span>'
+                + (advised ? ' <span class="bb-advised" title="' + this.escapeHtml(t('sum.coachedTip')) + '">' + this.escapeHtml(t('spec.bbAdvised', { n: advised })) + '</span>' : '')
+                + '</span>' + sub + '</span>';
+        }).join('');
+        // The speed control rides beside the clock (moved there by toggleBroadcast); the
+        // redraw above detached it, so it is put back each time, like the controls below.
+        if (this._broadcastCtl) {   // states follow the bar's
+            const on = (id, v) => { const b = document.getElementById(id); if (b) { b.classList.toggle('sb-on', !!v); b.setAttribute('aria-pressed', v ? 'true' : 'false'); } };
+            on('broadcastAuto', this.game._actionCam);
+            on('broadcastIntent', this.intentOn());
+        }
+        const w = document.getElementById('broadcastWonder');
+        if (!w) return;
+        const { lead, leadHold, reqMs } = this.wonderLead();
+        w.hidden = !lead;
+        if (!lead) return;
+        // Under the scoreboard, which wraps to more rows on a narrow screen.
+        const below = board.getBoundingClientRect().bottom;
+        if (below > 0) w.style.top = Math.round(below + 8) + 'px';
+        const left = Math.max(0, Math.ceil((reqMs - leadHold) / 1000));
+        const b = typeof getTeamBadge === 'function' ? getTeamBadge(lead.seat) : null;
+        const color = this.intentLayer ? this.intentLayer.colorOf(lead) : ((b && b.fill) || '#e9c46a');
+        w.style.setProperty('--seat', color);
+        w.innerHTML = '<div class="bw-line">\u{1F3DB}\uFE0F ' + t('spec.bbWonder', { who: this.chronicleSeatHtml(lead.id),
+            t: Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0') }) + '</div>'
+            + '<div class="bw-track"><div class="bw-fill" style="width:' + Math.min(100, Math.round(100 * leadHold / reqMs)) + '%"></div></div>';
+    }
+    // A decisive moment gets a brief band of light across the screen: never more than
+    // one every third of a second, and none at all for a viewer who asked for less motion.
+    broadcastSlate(e) {
+        if (!this.broadcastOn() || !e || e.weight < 3) return;
+        if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        const now = Date.now();
+        if (now - (this._lastSlate || 0) < 334) return;
+        this._lastSlate = now;
+        let el = document.getElementById('broadcastSlate');
+        if (!el) { el = document.createElement('div'); el.id = 'broadcastSlate'; el.className = 'broadcast-slate'; el.setAttribute('aria-hidden', 'true'); document.body.appendChild(el); }
+        el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
+    }
+
+    // WebVTT captions for a recording of the match: the chronicle's notable entries on
+    // the wall clock from the match's start, shifted by the recording's own offset
+    // (seconds of video before the match began). Plain text; no markup reaches a player.
+    chronicleVtt(entries, startAt, offsetSec = 0) {
+        const stamp = s => { s = Math.max(0, s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+            return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + sec.toFixed(3).padStart(6, '0'); };
+        const plain = html => { const d = document.createElement('div'); d.innerHTML = html; return (d.textContent || '').replace(/\s+/g, ' ').trim(); };
+        const shown = (entries || []).filter(e => e.weight >= 2 && Number.isFinite(e.at));
+        const cues = shown.map((e, i) => {
+            const start = (e.at - startAt) / 1000 + offsetSec;
+            const next = shown[i + 1] ? (shown[i + 1].at - startAt) / 1000 + offsetSec : Infinity;
+            const end = Math.min(start + 5, Math.max(start + 1, next));
+            return stamp(start) + ' --> ' + stamp(end) + '\n' + plain(this.chronicleText(e));
+        });
+        return 'WEBVTT\n\n' + cues.join('\n\n') + (cues.length ? '\n' : '');
+    }
+    downloadChronicleVtt() {
+        const chr = this.chronicle;
+        if (!chr || !chr.entries.length) return;
+        const input = document.getElementById('vttOffset');
+        const offset = input ? Number(String(input.value).replace(',', '.')) || 0 : 0;
+        const rec = this.game.openAIAIManager && this.game.openAIAIManager.transcripts;
+        const blob = new Blob([this.chronicleVtt(chr.entries, this.arenaStartTime || chr.entries[0].at, offset)], { type: 'text/vtt' });
+        const a = document.createElement('a'), url = URL.createObjectURL(blob);
+        a.href = url; a.download = ((rec && rec.matchId) || 'match') + '-captions.vtt';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
     }
 
     // Localized display name for a decision-log id (techId 'stable', unitType
@@ -3216,7 +4401,8 @@ class UIManager {
         ];
         const grid = specific.map(([k, v]) => row(k, v)).join('')
             + `<div class="controls-sub">${t('help.camera')}</div>`
-            + camera.map(([k, v]) => row(k, v)).join('');
+            + camera.map(([k, v]) => row(k, v)).join('')
+            + `<div class="controls-sub">${t('audio.title')}</div>` + row('M', t('help.act.mute'));
         const el = document.createElement('dialog');
         el.className = 'controls-overlay';
         el.id = 'controlsOverlay';
@@ -3342,36 +4528,7 @@ class UIManager {
         if (sig === this._lastLogSig) return;
         this._lastLogSig = sig;
 
-        const actionNames = {
-            train_unit: t('log.train_unit'),
-            research_tech: t('log.research_tech'),
-            upgrade_age: t('log.upgrade_age'),
-            build_structure: t('log.build_structure'),
-            move_units: t('log.move_units'),
-            attack_target: t('log.attack_target'),
-            wait: t('log.wait'),
-            self_heal: t('log.self_heal'),
-            paused: t('log.paused'),
-            resumed: t('log.resumed'),
-            defeated: t('log.defeated'),
-            explore: t('log.explore'),
-            round_missed: t('log.round_missed'),
-            lane_answer_dropped: t('log.lane_answer_dropped'),
-            assign_workers: t('log.assign_workers'),
-            delete_unit: t('log.delete_unit'),
-            destroy_building: t('log.destroy_building'),
-            // Failure tags. These render in the log exactly like an action does, so
-            // they belong in the same table — they were emitted as pre-baked English
-            // strings and stayed English in every language.
-            no_action_provided: t('log.no_action_provided'),
-            plan_only: t('log.plan_only'),
-            command_limit: t('log.command_limit'),
-            malformed_action: t('log.malformed_action'),
-            reply_truncated: t('log.reply_truncated'),
-            tool_call_failed: t('log.tool_call_failed'),
-            request_failed: t('log.request_failed'),
-            fallback_rule_based: t('log.fallback_rule_based')
-        };
+        const actionNames = this.logActionNames();
 
         // playerId → seat for the team-badge chip on each entry: entries only
         // carry the civ name, which is ambiguous once two seats play the same civ.
@@ -3385,15 +4542,9 @@ class UIManager {
         for (const entry of compact ? this.compactDecisionEntries(log) : log) {
             if (f.players.size && !f.players.has(entry.playerId)) continue;
             const pp = entry.params || {};
-            const hasT = pp.targetX !== undefined && pp.targetZ !== undefined;
             const actionLabel = entry.isAdvice ? t('log.advice')
                 : (actionNames[entry.action] || this.escapeHtml(entry.action));
-            const detail = pp.unitType ? ` (${this.logDetailName('unit', pp.unitType, entry.playerId)})`
-                : pp.buildingType ? ` (${this.logDetailName('building', pp.buildingType, entry.playerId)})`
-                : pp.techId ? ` (${this.logDetailName('tech', pp.techId, entry.playerId)})`
-                : pp.resourceType ? ` (${this.logDetailName('resource', pp.resourceType, entry.playerId)})`
-                : hasT ? ` (→ ${Math.round(pp.targetX)}, ${Math.round(pp.targetZ)})`
-                : '';
+            const detail = this.logDetail(pp, entry.playerId);
             if (f.text && !this.logHaystack(entry, actionLabel, detail).includes(f.text)) continue;
             view.push({ entry, actionLabel, detail });
             if (view.length >= 160) break;
@@ -3646,7 +4797,7 @@ class UIManager {
         // Build a ranked snapshot
         const rows = this.game.aiManager.aiPlayers.map(ai => {
             const civ = getCivilization(ai.civilization);
-            const colorHex = '#' + (civ?.color || 0xffffff).toString(16).padStart(6, '0');
+            const colorHex = this.identityHex(ai.id, ai.civilization, ai.seat);
             const workers = ai.units.filter(u => u.type === 'worker').length;
             const military = ai.units.filter(u => u.type !== 'worker').length;
             const alive = !this.game.isPlayerEliminated(ai);
@@ -3656,6 +4807,8 @@ class UIManager {
             let isLLM = false;
             let adviceCount = 0;
             let paused = false;
+            let objective = '';
+            let health = null;
             if (this.game.openAIAIManager && this.game.openAIAIManager.aiControllers) {
                 const controller = this.game.openAIAIManager.aiControllers.find(c => c.id === ai.id);
                 if (controller && controller.model) {
@@ -3664,10 +4817,12 @@ class UIManager {
                     isLLM = true;
                     adviceCount = (controller.pendingAdvice && controller.pendingAdvice.length) || 0;
                     paused = !!controller.paused;
+                    objective = String(controller.objective || '').trim();
+                    if (controller.stats) health = this.seatMetrics(controller);
                 }
             }
 
-            return { ai, civ, colorHex, workers, military, alive, modelName, thinking, isLLM, adviceCount, paused, score: this.spectatorPowerScore(ai) };
+            return { ai, civ, colorHex, workers, military, alive, modelName, thinking, isLLM, adviceCount, paused, objective, health, score: this.spectatorPowerScore(ai) };
         });
 
         // Sort: alive first, then by score desc
@@ -3704,6 +4859,8 @@ class UIManager {
                             : (r.paused ? `<span class="lb-tag-paused">${t('spec.paused')}</span>`
                             : (r.thinking ? `<span class="lb-think"><span class="dot"></span>${t('spec.thinking')}</span>` : ''))}
                     </div>
+                    ${(r.isLLM && r.health && r.alive) ? this.seatHealthHtml(r.health, r.paused) : ''}
+                    ${(r.isLLM && r.objective) ? `<div class="lb-objective" title="${this.escapeHtml(r.objective)}"><span aria-hidden="true">\u{1F3AF}</span> ${this.escapeHtml(r.objective.length > 90 ? r.objective.slice(0, 89) + '\u2026' : r.objective)}</div>` : ''}
                     <div class="lb-stats">
                         <span class="lb-stat">\u{1F465} ${ai.resources.population}/${ai.resources.maxPopulation}</span>
                         <span class="lb-stat">\u{1F477} ${r.workers}</span>
@@ -3882,12 +5039,12 @@ class UIManager {
         const nodeChips = ['food', 'wood', 'stone', 'gold'].map(k =>
             `<span class="lb-fly-chip">${esc(t('res.' + k))} ×${known[k] || 0}</span>`).join('');
 
-        const colorHex = '#' + ((civ && civ.color) || 0xffffff).toString(16).padStart(6, '0');
+        const colorHex = ai ? this.identityHex(ai.id, ai.civilization, ai.seat) : '#' + ((civ && civ.color) || 0xffffff).toString(16).padStart(6, '0');
         el.innerHTML = `
             <div class="lb-fly-head" style="--civ:${this.legibleColor(colorHex)}">
                 <b>${esc(model)}</b><span>${esc(civName)} · ${ageNames[ai.age] || ai.age}</span>
             </div>
-            <div class="lb-fly-sec"><div class="lb-fly-h">🔬 ${t('spec.flyResearch')}</div>
+            <div class="lb-fly-sec"><div class="lb-fly-h">🪶 ${t('spec.flyResearch')}</div>
                 <div class="lb-fly-body">${researchChips || `<i>${t('spec.flyNone')}</i>`}</div></div>
             <div class="lb-fly-sec"><div class="lb-fly-h">👥 ${t('spec.flyUnits', { n: ai.units.length })}</div>
                 <div class="lb-fly-body">${unitChips || `<i>${t('spec.flyNone')}</i>`}</div></div>
@@ -3958,6 +5115,137 @@ class UIManager {
     summaryReasonText(reason) {
         const key = 'sum.reason.' + reason;
         return t(key) !== key ? t(key) : t('sum.reason.gameover');
+    }
+
+    // The live seat-health strip (review #11): how the seat's endpoint is doing right now,
+    // from the same metrics the results screen shows. Only what has happened is shown --
+    // nothing before the first answer, no rate before the first command.
+    seatHealthHtml(m, paused = false) {
+        const bits = [];
+        const esc = s => this.escapeHtml(String(s));
+        const lat = m.latLate || m.avgLatency;
+        if (lat) bits.push(`<span class="sh-lat${lat > 60000 ? ' bad' : lat > 20000 ? ' warn' : ''}" title="${esc(t('sh.latencyTip'))}">\u23F1 ${(lat / 1000).toFixed(1)}s</span>`);
+        // pct(), not Math.round(x*100): an unjudged seat reads null here (nothing
+        // scored yet — every attempt contended), and null*100 is 0, which would
+        // print a confident "0%" and a warn mark for a rate that was never measured.
+        if (m.attempted) bits.push(`<span class="${m.successRate !== null && m.successRate < 0.5 ? 'warn' : ''}" title="${esc(t('sh.successTip'))}">\u2713 ${this.pct(m.successRate)}</span>`);
+        if (m.roundsMissed) bits.push(`<span class="warn" title="${esc(t('sh.missedTip'))}">${esc(t('sh.missed', { n: m.roundsMissed }))}</span>`);
+        if (m.timeouts || m.networkErrors) bits.push(`<span class="bad" title="${esc(t('sh.errorsTip'))}">${esc(t('sh.errors', { n: m.timeouts + m.networkErrors }))}</span>`);
+        if (m.contextOverflows) bits.push(`<span class="warn" title="${esc(t('sh.overflowTip'))}">${esc(t('sh.overflow', { n: m.contextOverflows }))}</span>`);
+        if (!paused && m.silentMs > 60000) bits.push(`<span class="bad" title="${esc(t('sh.silentTip'))}">${esc(t('sh.silent', { n: Math.round(m.silentMs / 1000) }))}</span>`);
+        return bits.length ? `<div class="lb-health">${bits.join('')}</div>` : '';
+    }
+
+    // One seat's metrics from its controller's counters: the results screen and the live
+    // seat-health strip (review #11) read the same function, so they cannot disagree.
+    seatMetrics(controller) {
+        const st = controller.stats;
+        const lat = st.latencies;
+        const avg = lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : 0;
+        const ctxOv = st.contextOverflows || 0;
+        // Rounds the seat was asked but did not answer inside the deadline. The
+        // counter existed and was never read, so the fair number was collected
+        // and thrown away while an unfair one (see the deadline-abort branch in
+        // sendToOpenAI) was displayed in its place.
+        const missed = st.roundsMissed || 0;
+        // Turns lost to a rate limit the retry could not clear. Same standing as
+        // a context overflow or a missed round: really lost, so not "answered" —
+        // but caused by how fast the ACCOUNT is being driven, not by the model,
+        // so it must not read as the endpoint being unreachable.
+        const rlLost = st.rateLimitLost || 0;
+        const responded = Math.max(0, st.requests - st.timeouts - st.networkErrors - ctxOv - missed - rlLost);
+        // Context overflows are lost turns caused by the HARNESS's budgeting,
+        // not the endpoint — count them visibly but keep them out of the
+        // model's reliability score (both numerator and denominator).
+        // Missed rounds leave BOTH sides, exactly like context overflows: the
+        // harness cut the request, so it is neither evidence for nor against the
+        // endpoint. Latency is reported as latency — that is what the mode is for.
+        const reliabilityBase = Math.max(0, st.requests - ctxOv - missed - rlLost);
+        // An outage, described rather than judged. A seat can lead a match on
+        // tech, have its endpoint go from 8s to 58s and stop, be dismantled over
+        // a stretch where it answers four rounds to the others' thirteen -- and
+        // the card will say "defeated" with no hint that it went quiet.
+        //
+        // The numbers only. Whether it would have survived is not the harness's
+        // to say: it may have had thirty workers and nothing to fight with, and
+        // deciding that is picking the winner of an argument the summary cannot
+        // see.
+        const lats = (lat || []).slice();
+        const med = (arr) => arr.length ? arr.slice().sort((a, b) => a - b)[arr.length >> 1] : 0;
+        const silentMs = st.lastAnswerAt ? Math.max(0, Date.now() - st.lastAnswerAt) : 0;
+        return {
+            decisions: st.requests, responded,
+            // Split late from early, so a degrading endpoint reads as a CHANGE
+            // rather than as a wide min-max range that could be a single blip.
+            latEarly: lats.length >= 6 ? med(lats.slice(0, -3)) : 0,
+            latLate: lats.length >= 6 ? med(lats.slice(-3)) : 0,
+            silentMs,
+            avgLatency: avg,
+            minLatency: lat.length ? Math.min(...lat) : 0,
+            maxLatency: lat.length ? Math.max(...lat) : 0,
+            timeouts: st.timeouts, networkErrors: st.networkErrors, parseFails: st.parseFails,
+            networkAtMs: st.networkAtMs || [],
+            // Subset of parseFails: replies cut off mid-JSON by the model's
+            // output-token cap. Broken out because it has a fix the others
+            // don't — raise maxTokens for that model.
+            truncated: st.truncatedReplies || 0,
+            noAction: st.noActionReturns || 0,
+            planOnly: st.planOnlyUpdates || 0,
+            // Turns a human's advice reached this seat's prompt, and times the
+            // harness changed its request mid-match. Beside the result, not in
+            // it: a coached or adapted run is a different run, and says so.
+            advisedTurns: st.advisedTurns || 0,
+            adaptations: st.adaptations || 0,
+            // EXPERIMENTAL, rolling inference. Orders dropped because the thing
+            // had appeared after the board that lane was given. NOT an error and
+            // not in the error total: nothing was refused and nothing was spent.
+            // It belongs beside `lanes` in the header as the other half of one
+            // trade — the decision rate a seat gained, and what that cost it.
+            laneDropped: st.laneDropped || 0,
+            laneDuplicates: st.laneDuplicates || 0,
+            laneDuplicatesBy: st.laneDuplicatesBy || {},
+            // Rounds a single-lane seat would have forfeited. Not an error and not
+            // a credit either -- the seat played the round on its own answer. It
+            // sits with the other two because all three are the SAME trade priced
+            // three ways: what staggering bought, and what it threw away to buy it.
+            laneCount: st.laneCount || 1,
+            laneRescued: st.laneRescued || 0,
+            contextOverflows: ctxOv, roundsMissed: missed,
+            rateLimited: st.rateLimited || 0, rateLimitLost: rlLost,
+            invalidActions: st.invalidActions, rejected: st.actionsRejected,
+            contended: st.actionsContended || 0,
+            // How much each turn carried. Reported BESIDE the success rate and
+            // never inside it: scoring per command already means a seat sending
+            // three and getting two right reads 67% while a seat sending one
+            // safe command reads 100%. Without this figure the second looks
+            // simply better, when what it did was less.
+            commandsPerTurn: (st.turnsExecuted || 0)
+                ? st.actionsAttempted / st.turnsExecuted : 0,
+            maxCommands: OpenAIAIManager.MAX_COMMANDS_PER_TURN,
+            finalWord: controller._finalWord || null,
+            promptTokens: st.promptTokens || 0, completionTokens: st.completionTokens || 0,
+            attempted: st.actionsAttempted, succeeded: st.actionsSucceeded,
+            // Contended attempts leave the DENOMINATOR, not just the numerator.
+            // A model whose only failures were a busy barracks made no mistake,
+            // so it should read 1.0 — docking it would score tempo as error, and
+            // the models that contend with themselves most are the busy ones.
+            // A rate with nothing to divide is null, not 0. Zero means "answered and
+            // was wrong"; these four mean "there was nothing to answer with", which
+            // is the harness's own doing (a cut request, an overflow, a turn the rate
+            // limit ate) and must not be charged to the model. computeSoundness
+            // re-normalises around them, and pct() renders them as a dash.
+            successRate: (() => {
+                const judged = st.actionsAttempted - (st.actionsContended || 0);
+                return judged > 0 ? st.actionsSucceeded / judged : null;
+            })(),
+            // Format fidelity: prose-only replies (no JSON action) are format
+            // failures too — they just get their own counter.
+            formatOk: responded > 0 ? (responded - st.parseFails - (st.noActionReturns || 0)) / responded : null,
+            reliability: reliabilityBase ? 1 - (st.timeouts + st.networkErrors) / reliabilityBase : null,
+            reasonRate: st.actionsAttempted ? st.reasonsGiven / st.actionsAttempted : null,
+            actionCounts: st.actionCounts,
+            workersTrained: st.workersTrained || 0
+        };
     }
 
     // Transparent 0-100 strategical-soundness composite (see legend on screen).
@@ -4033,6 +5321,17 @@ class UIManager {
         return tags;
     }
 
+    // The conditions this match ran under: the transcript header and the seat
+    // contracts, read through WarConditions -- the one place the comparability rule
+    // lives. null when nothing was recorded (no model seats, or file:// hosting).
+    matchConditions() {
+        const mgr = this.game && this.game.openAIAIManager;
+        const header = mgr && mgr.transcripts && mgr.transcripts.matchMeta;
+        if (!header || typeof WarConditions === 'undefined') return null;
+        const contract = mgr.contract || null;
+        return { header, contract, seat: id => WarConditions.seat(header, contract, id) };
+    }
+
     showArenaSummary(winnerAi, reason, opts = {}) {
         const game = this.game;
         // snapshot: a LIVE look at the standings mid-match (Results button). The
@@ -4054,7 +5353,7 @@ class UIManager {
 
         const reports = players.map(ai => {
             const civ = getCivilization(ai.civilization);
-            const colorHex = '#' + (civ?.color || 0xffffff).toString(16).padStart(6, '0');
+            const colorHex = this.identityHex(ai.id, ai.civilization, ai.seat);
             const controller = (game.openAIAIManager && game.openAIAIManager.aiControllers)
                 ? game.openAIAIManager.aiControllers.find(c => c.id === ai.id) : null;
             const alive = !game.isPlayerEliminated(ai);
@@ -4083,108 +5382,7 @@ class UIManager {
                 power: this.spectatorPowerScore(ai)
             };
             if (controller && controller.stats) {
-                const st = controller.stats;
-                const lat = st.latencies;
-                const avg = lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : 0;
-                const ctxOv = st.contextOverflows || 0;
-                // Rounds the seat was asked but did not answer inside the deadline. The
-                // counter existed and was never read, so the fair number was collected
-                // and thrown away while an unfair one (see the deadline-abort branch in
-                // sendToOpenAI) was displayed in its place.
-                const missed = st.roundsMissed || 0;
-                // Turns lost to a rate limit the retry could not clear. Same standing as
-                // a context overflow or a missed round: really lost, so not "answered" —
-                // but caused by how fast the ACCOUNT is being driven, not by the model,
-                // so it must not read as the endpoint being unreachable.
-                const rlLost = st.rateLimitLost || 0;
-                const responded = Math.max(0, st.requests - st.timeouts - st.networkErrors - ctxOv - missed - rlLost);
-                // Context overflows are lost turns caused by the HARNESS's budgeting,
-                // not the endpoint — count them visibly but keep them out of the
-                // model's reliability score (both numerator and denominator).
-                // Missed rounds leave BOTH sides, exactly like context overflows: the
-                // harness cut the request, so it is neither evidence for nor against the
-                // endpoint. Latency is reported as latency — that is what the mode is for.
-                const reliabilityBase = Math.max(0, st.requests - ctxOv - missed - rlLost);
-                // An outage, described rather than judged. A seat can lead a match on
-                // tech, have its endpoint go from 8s to 58s and stop, be dismantled over
-                // a stretch where it answers four rounds to the others' thirteen -- and
-                // the card will say "defeated" with no hint that it went quiet.
-                //
-                // The numbers only. Whether it would have survived is not the harness's
-                // to say: it may have had thirty workers and nothing to fight with, and
-                // deciding that is picking the winner of an argument the summary cannot
-                // see.
-                const lats = (lat || []).slice();
-                const med = (arr) => arr.length ? arr.slice().sort((a, b) => a - b)[arr.length >> 1] : 0;
-                const silentMs = st.lastAnswerAt ? Math.max(0, Date.now() - st.lastAnswerAt) : 0;
-                rep.metrics = {
-                    decisions: st.requests, responded,
-                    // Split late from early, so a degrading endpoint reads as a CHANGE
-                    // rather than as a wide min-max range that could be a single blip.
-                    latEarly: lats.length >= 6 ? med(lats.slice(0, -3)) : 0,
-                    latLate: lats.length >= 6 ? med(lats.slice(-3)) : 0,
-                    silentMs,
-                    avgLatency: avg,
-                    minLatency: lat.length ? Math.min(...lat) : 0,
-                    maxLatency: lat.length ? Math.max(...lat) : 0,
-                    timeouts: st.timeouts, networkErrors: st.networkErrors, parseFails: st.parseFails,
-                    networkAtMs: st.networkAtMs || [],
-                    // Subset of parseFails: replies cut off mid-JSON by the model's
-                    // output-token cap. Broken out because it has a fix the others
-                    // don't — raise maxTokens for that model.
-                    truncated: st.truncatedReplies || 0,
-                    noAction: st.noActionReturns || 0,
-                    planOnly: st.planOnlyUpdates || 0,
-                    // EXPERIMENTAL, rolling inference. Orders dropped because the thing
-                    // had appeared after the board that lane was given. NOT an error and
-                    // not in the error total: nothing was refused and nothing was spent.
-                    // It belongs beside `lanes` in the header as the other half of one
-                    // trade — the decision rate a seat gained, and what that cost it.
-                    laneDropped: st.laneDropped || 0,
-                    laneDuplicates: st.laneDuplicates || 0,
-                    laneDuplicatesBy: st.laneDuplicatesBy || {},
-                    // Rounds a single-lane seat would have forfeited. Not an error and not
-                    // a credit either -- the seat played the round on its own answer. It
-                    // sits with the other two because all three are the SAME trade priced
-                    // three ways: what staggering bought, and what it threw away to buy it.
-                    laneCount: st.laneCount || 1,
-                    laneRescued: st.laneRescued || 0,
-                    contextOverflows: ctxOv, roundsMissed: missed,
-                    rateLimited: st.rateLimited || 0, rateLimitLost: rlLost,
-                    invalidActions: st.invalidActions, rejected: st.actionsRejected,
-                    contended: st.actionsContended || 0,
-                    // How much each turn carried. Reported BESIDE the success rate and
-                    // never inside it: scoring per command already means a seat sending
-                    // three and getting two right reads 67% while a seat sending one
-                    // safe command reads 100%. Without this figure the second looks
-                    // simply better, when what it did was less.
-                    commandsPerTurn: (st.turnsExecuted || 0)
-                        ? st.actionsAttempted / st.turnsExecuted : 0,
-                    maxCommands: OpenAIAIManager.MAX_COMMANDS_PER_TURN,
-                    finalWord: controller._finalWord || null,
-                    promptTokens: st.promptTokens || 0, completionTokens: st.completionTokens || 0,
-                    attempted: st.actionsAttempted, succeeded: st.actionsSucceeded,
-                    // Contended attempts leave the DENOMINATOR, not just the numerator.
-                    // A model whose only failures were a busy barracks made no mistake,
-                    // so it should read 1.0 — docking it would score tempo as error, and
-                    // the models that contend with themselves most are the busy ones.
-                    // A rate with nothing to divide is null, not 0. Zero means "answered and
-                    // was wrong"; these four mean "there was nothing to answer with", which
-                    // is the harness's own doing (a cut request, an overflow, a turn the rate
-                    // limit ate) and must not be charged to the model. computeSoundness
-                    // re-normalises around them, and pct() renders them as a dash.
-                    successRate: (() => {
-                        const judged = st.actionsAttempted - (st.actionsContended || 0);
-                        return judged > 0 ? st.actionsSucceeded / judged : null;
-                    })(),
-                    // Format fidelity: prose-only replies (no JSON action) are format
-                    // failures too — they just get their own counter.
-                    formatOk: responded > 0 ? (responded - st.parseFails - (st.noActionReturns || 0)) / responded : null,
-                    reliability: reliabilityBase ? 1 - (st.timeouts + st.networkErrors) / reliabilityBase : null,
-                    reasonRate: st.actionsAttempted ? st.reasonsGiven / st.actionsAttempted : null,
-                    actionCounts: st.actionCounts,
-                    workersTrained: st.workersTrained || 0
-                };
+                rep.metrics = this.seatMetrics(controller);
                 rep.soundness = this.computeSoundness(rep);
                 rep.tags = this.computeBehaviorTags(rep);
             }
@@ -4243,7 +5441,12 @@ class UIManager {
             }
             const avgS = m.avgLatency / 1000;
             const errTotal = m.timeouts + m.networkErrors + m.parseFails + (m.noAction || 0) + m.invalidActions + m.rejected + (m.contextOverflows || 0);
-            const tagsHtml = r.tags.map(t => `<span class="sum-tag ${t.cls}">${t.t}</span>`).join('');
+            const assist = ((m.advisedTurns || 0) ? `<span class="sum-tag warn" title="${t('sum.coachedTip')}">${t('sum.coached', { n: m.advisedTurns })}</span>` : '')
+                + ((m.adaptations || 0) ? `<span class="sum-tag neutral" title="${t('sum.adaptedTip')}">${t('sum.adapted', { n: m.adaptations })}</span>` : '');
+            const tagsHtml = assist + r.tags.map(t => `<span class="sum-tag ${t.cls}">${t.t}</span>`).join('');
+            const cond = this.matchConditions();
+            const condId = cond ? WarConditions.id(cond.seat(r.ai.id)) : null;
+            const condHtml = cond ? `<div class="sum-cond" title="${this.escapeHtml(t('sum.condTip'))}">${t('sum.condId', { id: condId || t('sum.condNone') })} · ${t('sum.exploratory')}</div>` : '';
             const topActions = Object.entries(m.actionCounts).sort((a, b) => b[1] - a[1]).slice(0, 6)
                 .map(([k, v]) => `<span class="sum-chip">${k.replace(/_/g, ' ')}·${v}</span>`).join('');
             html += `
@@ -4258,6 +5461,7 @@ class UIManager {
                         <div class="sum-sound-val">${r.soundness}<span>${t('sum.strategySuffix')}</span></div>
                     </div>
                     <div class="sum-tags">${tagsHtml}</div>
+                    ${condHtml}
                     <div class="sum-metrics">
                         <div class="sum-metric"><span>⏱ ${t('sum.mResponse')}</span><b>${avgS.toFixed(1)}s</b><i>${(m.minLatency / 1000).toFixed(1)}–${(m.maxLatency / 1000).toFixed(1)}s</i></div>
                         ${(m.latLate && m.latEarly && m.latLate >= m.latEarly * 3)
@@ -4281,6 +5485,7 @@ class UIManager {
         document.getElementById('summaryGrid').innerHTML = html;
 
         document.getElementById('summaryLegend').textContent = t('sum.legend');
+        this.renderSummaryConditions();
 
         // Keep the computed report so the spectator can save it to a file (a
         // snapshot export is correctly labeled by its reason; a real match end
@@ -4316,6 +5521,8 @@ class UIManager {
         const newBtn = document.getElementById('summaryNewArenaBtn');
         const menuBtn = document.getElementById('summaryMenuBtn');
         const saveBtn = document.getElementById('summarySaveBtn');
+        const rematchBtn = document.getElementById('summaryRematchBtn');
+        if (rematchBtn) rematchBtn.style.display = (snapshot || !this.game.arenaSpec) ? 'none' : '';
         if (newBtn) newBtn.style.display = snapshot ? 'none' : '';
         if (menuBtn) menuBtn.style.display = snapshot ? 'none' : '';
         if (saveBtn) saveBtn.style.display = snapshot ? 'none' : '';
@@ -4354,7 +5561,15 @@ class UIManager {
     // match actually simulated at a speed nobody asked for on the way past.
     //
     // Hover opens it; a click pins it open, which is the only route on a touch screen.
-    simSpeedLabel(v) { return Number(v).toLocaleString(typeof getUiLang === 'function' ? getUiLang() : 'en'); }
+    // A speed as the viewer reads it: relative to the normal pace (Game.NORMAL_SIM_SPEED
+    // is 1×), so the multipliers 1 | 2 | 4 read ½ | 1 | 2.
+    // The normal pace, also on a page that does not load game.js (the Platform's viewer
+    // drives this file with a stand-in game; b1031).
+    static normalSimSpeed() { return (typeof Game !== 'undefined' && Game.NORMAL_SIM_SPEED) || 2; }
+    simSpeedLabel(v) {
+        const d = Number(v) / UIManager.normalSimSpeed();
+        return d === 0.5 ? '½' : d.toLocaleString(typeof getUiLang === 'function' ? getUiLang() : 'en');
+    }
 
     toggleSimSpeedMenu() {
         const wrap = document.getElementById('simSpeedWrap');
@@ -4424,7 +5639,7 @@ class UIManager {
         else if (locked)               btn.innerHTML = `⏱ ${this.simSpeedLabel(eff)}×`
                                            + `<span class="sb-speed-set">${this.simSpeedLabel(set)}×</span>`;
         else                           btn.textContent = `⏱ ${this.simSpeedLabel(set)}×`;
-        btn.classList.toggle('sb-on', set !== 1 || pstate !== 'running');
+        btn.classList.toggle('sb-on', set !== UIManager.normalSimSpeed() || pstate !== 'running');
         btn.classList.toggle('is-paused', pstate !== 'running');
         // Say WHY it is not running at the chosen speed, rather than silently lying.
         btn.classList.toggle('is-locked', locked && pstate === 'running');
@@ -4432,7 +5647,7 @@ class UIManager {
             : pstate === 'paused' ? t('spec.simPausedTitle')
             // Two different sentences, because "returns to 1x once it falls" is not a
             // thing to tell someone already running at 1x.
-            : locked ? t('spec.simSpeedLocked', { s: String(set) })
+            : locked ? t('spec.simSpeedLocked', { s: this.simSpeedLabel(set) })
             : heldByWonder ? t('spec.simSpeedHeld')
             : t('spec.simSpeedTitle');
         // Repainted on the arena clock's beat, so the decimal separator follows a
@@ -4453,7 +5668,7 @@ class UIManager {
             // least honest: this is the exact moment a spectator opens it to speed
             // through a hold. Still clickable — the pick is remembered for when the
             // Wonder falls — but no longer pretending to be available now.
-            const held = heldByWonder && v > 1;
+            const held = heldByWonder && v > UIManager.normalSimSpeed();
             o.classList.toggle('is-held', held);
             o.title = held ? t('spec.simSpeedHeldOpt') : '';
         });
@@ -4693,7 +5908,7 @@ class UIManager {
         const tok = e.tokens ? `${e.tokens.prompt}→${e.tokens.completion} tok` : '';
         const ms = e.latencyMs != null ? `${(e.latencyMs / 1000).toFixed(1)}s` : '';
         const act = e.parsed && e.parsed.action ? e.parsed.action : null;
-        const failed = typeof e.harnessResult === 'string' && e.harnessResult.startsWith('[ERROR]');
+        const failed = TranscriptAnalyzer.failed(e.harnessResult);
         const state = e.state
             ? `<details class="tv-sec tv-state"${pref['tv-state'] ? ' open' : ''}${keep('tv-state')} data-turn="${esc(e.turn)}"><summary>${t('spec.tvState')}</summary><pre></pre></details>`
             : '';
@@ -4829,7 +6044,7 @@ class UIManager {
                         container.firstElementChild.querySelector('pre').textContent = entry.harnessResult;
                         node.insertBefore(container.firstElementChild, node.querySelector('.tv-state'));
                     }
-                    node.classList.toggle('is-error', typeof entry.harnessResult === 'string' && entry.harnessResult.startsWith('[ERROR]'));
+                    node.classList.toggle('is-error', TranscriptAnalyzer.failed(entry.harnessResult));
                 }
                 if (node !== cursor) body.insertBefore(node, cursor);
                 cursor = node.nextElementSibling;
@@ -4868,6 +6083,11 @@ class UIManager {
         // so nothing is offered or deleted here.
         const show = !!(rec && rec.hasData() && !snapshot);
         if (btn) btn.style.display = show ? '' : 'none';
+        const watch = document.getElementById('summaryAnalyzeBtn');
+        if (watch) watch.style.display = show ? '' : 'none';
+        // Captions for a recording: whenever the chronicle told something worth a caption.
+        const vtt = document.getElementById('summaryVtt');
+        if (vtt) vtt.style.display = (!snapshot && this.chronicle && this.chronicle.entries.some(e => e.weight >= 2)) ? '' : 'none';
         if (note) {
             note.style.display = show ? '' : 'none';
             if (show) note.textContent = t('sum.transcriptNote', { turns: rec.turnsRecorded() });
@@ -4973,6 +6193,14 @@ class UIManager {
         const f = 0.45;
         const to2 = v => Math.round(v).toString(16).padStart(2, '0');
         return '#' + to2(r + (255 - r) * f) + to2(g + (255 - g) * f) + to2(b + (255 - b) * f);
+    }
+
+    // A seat's colour everywhere in the UI: its civilization's, or its seat's when two
+    // seats share a civilization (js/identity.js).
+    identityHex(ownerId, civ, seat) {
+        if (typeof WarIdentity !== 'undefined') return WarIdentity.hex(ownerId, civ, seat);
+        const def = typeof getCivilization === 'function' ? getCivilization(civ) : null;
+        return '#' + ((def && def.color) || 0xffffff).toString(16).padStart(6, '0');
     }
 
     chartColor(ai) {
@@ -5206,7 +6434,7 @@ class UIManager {
         // In showcase mode there is nowhere to go back TO -- the analyzer is the whole
         // app -- so this is the one exit and it stays shut.
         if (typeof WAR_DEMO_ONLY !== 'undefined' && WAR_DEMO_ONLY) return;
-        this.anStopPlay(); this.anUnmountStage(); this.showScreen('gameModeScreen');
+        this.anStopPlay(); this.anResimStop(false); this.anUnmountStage(); this.showScreen('gameModeScreen');
     }
 
     anLoadFile(input) {
@@ -5274,7 +6502,7 @@ class UIManager {
         sel.innerHTML = `<option value="">${esc(t('an.samplesPick'))} (${list.length})</option>`
             + list.map(m => {
                 const day = m.date ? new Date(m.date).toISOString().slice(0, 10) : '';
-                const tempo = m.turnBased ? t('an.turnBased') : t('an.realTime');
+                const tempo = m.turnBased ? t('an.turnBased') + (m.lockstepSliceMs ? ' · ' + t('lu.lockstep', { n: m.lockstepSliceMs / 1000 }) : '') : t('an.realTime');
                 const bits = [day, m.duration, tempo, m.winner].filter(Boolean);
                 return `<option value="${esc(m.file)}">${esc(bits.join(' \u00b7 '))}</option>`;
               }).join('');
@@ -5292,7 +6520,7 @@ class UIManager {
         if (file) this.anLoadSample(file);
     }
 
-    async anLoadLinkedMatch(matchId) {
+    async anLoadLinkedMatch(matchId, moment = null) {
         // Resolve public IDs through the catalogue; never treat URL input as a path.
         const list = await this.anLoadSampleIndex();
         const match = list.find(m => m.matchId === matchId);
@@ -5300,7 +6528,153 @@ class UIManager {
             this.showErrorMessage(t('an.sampleFail'));
             return;
         }
-        return this.anLoadSample(match.file);
+        await this.anLoadSample(match.file);
+        if (moment) this.anApplyMoment(moment);
+    }
+
+    // ---- Tale of the tape (review #11) -----------------------------------------------
+    // The seats side by side: what each was, how it was set up, how often it was helped,
+    // and how it finished. A row appears only when some seat has something to say in it.
+    anTaleHtml() {
+        const a = this.analyzer;
+        if (!a || !a.taleOfTheTape) return '';
+        const rows = a.taleOfTheTape();
+        if (rows.length < 2) return '';
+        const esc = s => this.escapeHtml(String(s == null ? '' : s));
+        const cell = v => (v == null || v === '' || v === false || v === 0) ? '<td class="tt-none">–</td>' : '<td>' + v + '</td>';
+        const line = (key, fn) => {
+            const vals = rows.map(fn);
+            if (vals.every(v => v == null || v === '' || v === false || v === 0)) return '';
+            return '<tr><th scope="row">' + esc(t(key)) + '</th>' + vals.map(cell).join('') + '</tr>';
+        };
+        const k = n => n >= 1024 ? Math.round(n / 1024) + 'k' : n;
+        const head = '<tr><th></th>' + rows.map(r => '<th scope="col">' + this.teamDotHtml(r.seat, 8) + ' '
+            + esc(r.rule ? this.ruleBasedName(r.profile || 'standard', t('lu.rule')) : (r.name || r.model || '?')) + '</th>').join('') + '</tr>';
+        const body = [
+            line('tt.model', r => r.model ? esc(r.model) : null),
+            line('tt.civ', r => esc(t('civ.' + r.civ + '.name'))),
+            line('tt.served', r => r.servedBy || r.provider ? esc([r.provider, r.servedBy].filter(Boolean).join(' · ')) : null),
+            line('tt.context', r => r.context ? esc(k(r.context)) : null),
+            line('tt.maxTokens', r => r.maxTokens ? esc(k(r.maxTokens)) : null),
+            line('tt.temperature', r => r.temperature != null ? esc(r.temperature) : null),
+            line('tt.reasoning', r => r.reasoning ? esc(r.reasoning) : null),
+            line('tt.lanes', r => r.lanes > 1 ? esc(r.lanes) : null),
+            line('tt.toolFallback', r => r.toolFallback ? esc(t('tt.yes')) : null),
+            line('tt.ownPrompt', r => r.ownPrompt ? esc(t('tt.yes')) : null),
+            line('tt.turns', r => r.turns || null),
+            line('tt.missed', r => r.missed || null),
+            line('tt.advised', r => r.advised ? '<span class="tt-warn">' + r.advised + '</span>' : null),
+            line('tt.paused', r => r.paused ? '<span class="tt-warn">' + r.paused + '</span>' : null),
+            line('tt.adaptations', r => Object.keys(r.adaptations).length
+                ? '<span class="tt-warn">' + Object.entries(r.adaptations).map(([kind, n]) => esc(kind) + ' ×' + n).join(', ') + '</span>' : null),
+            line('tt.result', r => r.rank == null ? null : esc(t('tt.rank', { n: r.rank })) + (r.winner ? ' 🏆' : r.alive === false ? ' ✕' : '')),
+        ].join('');
+        return '<details class="an-tale"><summary>' + esc(t('tt.title')) + '</summary><div class="an-tale-scroll"><table class="an-tale-table">'
+            + head + body + '</table></div></details>';
+    }
+
+    // ---- Moment links (review #11) ---------------------------------------------------
+    // ?match=<id>&t=1:04:30&seat=2&turn=17 opens a published sample at that moment: the
+    // seat's view (seats count from 1, as the badges do), that seat's n-th turn, or the
+    // last record AT OR BEFORE the time -- never a later one, which would show a board
+    // from after the moment the link names. Plain query strings, so a link works on a
+    // plain-http LAN host as well as on the hosted page.
+    static parseMomentTime(v) {
+        const s = String(v == null ? '' : v).trim().replace(/s$/i, '');
+        if (!s) return null;
+        if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+        const parts = s.split(':');
+        if (parts.length < 2 || parts.length > 3 || parts.some(p => !/^\d+$/.test(p))) return null;
+        return parts.reduce((a, p) => a * 60 + Number(p), 0);
+    }
+    static formatMomentTime(sec) {
+        sec = Math.max(0, Math.floor(sec));
+        const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+        return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(s).padStart(2, '0');
+    }
+    anApplyMoment({ t: time = null, seat = null, turn = null } = {}) {
+        const a = this.analyzer;
+        if (!a || !a.order || !a.order.length) return false;
+        const n = Number(seat);
+        const s = Number.isInteger(n) && n >= 1 ? [...a.seats.values()].find(x => x.seat === n - 1) : null;
+        a.seatFilter = s ? s.id : null;
+        const k = Number(turn), sec = UIManager.parseMomentTime(time);
+        const own = s ? s.turns.filter(r => !r.type) : [];   // its turns, not the markers filed with them
+        if (s && Number.isInteger(k) && k >= 1 && own[k - 1]) a.seek(a.order.indexOf(own[k - 1]));
+        else if (sec != null && s) {
+            // In a seat's view, that seat's own last record at or before the time -- not a
+            // rival's later one, which would show another seat's board under this seat's name.
+            let rec = null;
+            for (const r of s.turns) { if (r._sec <= sec) rec = r; else break; }
+            a.seek(a.order.indexOf(rec || s.turns[0]));
+        }
+        else if (sec != null) a.seekSeconds(sec);
+        this.anRender();
+        return true;
+    }
+    // A link to the moment on screen -- offered only for a published sample, because only
+    // a sample's link opens anywhere but on this machine.
+    anMomentLink() {
+        const a = this.analyzer, h = a && a.header;
+        if (!h || !h.matchId || !(this._sampleIndex || []).some(m => m.matchId === h.matchId)) return null;
+        const rec = a.current ? a.current() : a.order[a.cursor];
+        const url = new URL(location.href);
+        const keep = url.searchParams.get('full');
+        url.search = '';
+        url.hash = '';
+        url.searchParams.set('match', h.matchId);
+        if (rec && Number.isFinite(rec._sec)) url.searchParams.set('t', UIManager.formatMomentTime(rec._sec));
+        const s = a.seatFilter ? a.seats.get(a.seatFilter) : null;
+        if (s) {
+            url.searchParams.set('seat', String(s.seat + 1));
+            const k = rec ? s.turns.filter(r => !r.type).indexOf(rec) : -1;   // a marker has no turn number
+            if (k >= 0) url.searchParams.set('turn', String(k + 1));
+        }
+        if (keep) url.searchParams.set('full', keep);
+        return url.toString();
+    }
+    async copyText(text) {
+        try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* not a secure context, or refused */ }
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        let ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        ta.remove();
+        return ok;
+    }
+    async anCopyLink() {
+        const link = this.anMomentLink();
+        if (!link) return;
+        const ok = await this.copyText(link);
+        this.showNotice(ok ? t('an.linkCopied') : t('an.copyManual', { text: link }));
+    }
+    // YouTube chapters from the analyzer's chapters: the first at 0:00, each at least ten
+    // seconds after the one before, every time shifted by the video's own offset (the
+    // seconds of video before the match began). Said, not guessed: the offset is asked.
+    anChaptersText(offsetSec = 0) {
+        const a = this.analyzer;
+        const out = [];
+        let last = -Infinity;
+        for (const c of (a && a.chapters) || []) {
+            const at = Math.max(0, Math.floor(c.t + offsetSec));
+            if (at - last < 10) continue;
+            const line = (c.icon ? c.icon + ' ' : '') + String(c.text || '').replace(/\s+/g, ' ').trim();
+            if (!line.trim()) continue;
+            out.push([at, line]); last = at;
+        }
+        // YouTube wants the first chapter at 0:00: one that begins within the first ten
+        // seconds is moved there; otherwise a "Start" chapter opens the list.
+        if (out.length && out[0][0] > 0 && out[0][0] < 10) out[0][0] = 0;
+        else if (!out.length || out[0][0] > 0) out.unshift([0, t('an.chStart')]);
+        return out.map(([at, line]) => UIManager.formatMomentTime(at) + ' ' + line).join('\n');
+    }
+    async anCopyChapters() {
+        const input = document.getElementById('anChapterOffset');
+        const offset = input ? Number(String(input.value).replace(',', '.')) || 0 : 0;
+        const text = this.anChaptersText(offset);
+        const ok = await this.copyText(text);
+        this.showNotice(ok ? t('an.chaptersCopied', { n: text.split('\n').length }) : t('an.copyManual', { text }));
     }
 
     anLoadSample(file0) {
@@ -5393,6 +6767,452 @@ class UIManager {
     anStopPlay() {
         if (this._anPlayTimer) { clearInterval(this._anPlayTimer); this._anPlayTimer = null; }
     }
+
+    // ---- Re-simulated replay (review #9) --------------------------------------
+    // The match again, from its recorded inputs, through the real rules in a worker
+    // (js/resim-worker.js), with every recorded world hash checked on the way. It is a
+    // separate mode beside the snapshots, not a smoother version of them: every frame
+    // comes from the rules, nothing is interpolated, and the hash chain certifies it.
+    // Offered only when the rules and the harness running here are the ones that made
+    // the recording; otherwise the snapshots are all there is, and the chip says so.
+    async anResimCheck() {
+        const a = this.analyzer;
+        if (!a || !a.inputs || !a.inputs.length) return 'noInputs';
+        if (!a.contract || typeof WarConditions === 'undefined') return 'rulesChanged';
+        if (!this._anHashes) this._anHashes = WarConditions.sourceHashes();
+        const h = await this._anHashes;
+        return h.coreHash && h.coreHash === a.contract.coreHash && h.harnessHash === a.contract.harnessHash ? null : 'rulesChanged';
+    }
+    async anResimOffer() {
+        const why = await this.anResimCheck();
+        const btn = document.getElementById('anResimBtn');
+        if (!btn || !why) return;
+        btn.disabled = true;
+        btn.title = t(why === 'noInputs' ? 'an.resimNoInputs' : 'an.resimRulesChanged');
+    }
+    async anResimStart(fromStep = 0) {
+        const a = this.analyzer;
+        if (!a) return;
+        const why = await this.anResimCheck();
+        if (why) { this.showErrorMessage(t(why === 'noInputs' ? 'an.resimNoInputs' : 'an.resimRulesChanged')); return; }
+        const prev = this._anResim;
+        this.anStopPlay();
+        this.anResimStop(false);
+        // The scripts exactly as this page loaded them, ?v= included; the worker runs and
+        // hashes those very texts.
+        const urls = {};
+        document.querySelectorAll('script[src]').forEach(el => {
+            const src = el.getAttribute('src') || '';
+            urls[src.split('?')[0]] = new URL(src, location.href).href;
+        });
+        const v = (urls['js/game.js'] || '').split('?')[1];
+        urls['js/resim.js'] = new URL('js/resim.js' + (v ? '?' + v : ''), location.href).href;
+        let worker;
+        try { worker = new Worker('js/resim-worker.js' + (v ? '?' + v : '')); }
+        catch (e) { this.showErrorMessage(t('an.resimFailed', { e: e.message || String(e) })); return; }
+        // A restart to seek backward keeps the world on screen until the new run reaches
+        // the step: the ids are seeded, so the same entities are simply moved on. Only a
+        // fresh start clears the stage.
+        const keep = !!(prev && prev.inputs === a.inputs && fromStep > 0);
+        const rs = this._anResim = { worker, inputs: a.inputs, step: 0, target: fromStep, total: 0, busy: true,
+            playing: prev ? prev.playing : true, speed: prev ? prev.speed : 4, status: 'loading', checked: 0,
+            ents: keep ? prev.ents : new Map(), problem: null, seekTo: fromStep > 0 ? fromStep : null,
+            marks: this.anResimMarks(a) };
+        rs.markAt = new Map(rs.marks.map(m => [m.idx, m.step]));
+        worker.onmessage = e => this.anResimMessage(rs, e.data);
+        worker.onerror = e => this.anResimMessage(rs, { type: 'error', problem: (e && e.message) || 'worker failed' });
+        worker.postMessage({ type: 'init', urls, recs: [a.header, a.contract].concat(a.inputs) });
+        if (this.game.renderer) {
+            this.game.renderer.resimPlaying = true;   // units move here: let them animate
+            // The analyzer's auto camera is the live director over this replay (b1010).
+            this.game.renderer.poseSource = () => this.anDirectorPose();
+            // Its age-up waves come from the replayed seats, and not while it jumps (b1032).
+            this.game.renderer._ageSeen = null;
+            this.game.renderer.ageSource = () => { const x = this._anResim; return x && x.seekTo == null && x.world ? x.world.aiManager.aiPlayers : null; };
+        }
+        if (!keep) this.anResimStage();
+        this.anResimOverlays(rs);
+        this.anResimHud(true);
+    }
+    anResimStop(render = true) {
+        const rs = this._anResim;
+        if (!rs) return;
+        this._anResim = null;
+        if (this.game.renderer) { this.game.renderer.resimPlaying = false; this.game.renderer.poseSource = null; this.game.renderer.ageSource = null; }
+        this.anResimOverlaysOff(rs);
+        try { rs.worker.terminate(); } catch (e) {}
+        if (render) this.anRender();
+    }
+    // Where each recorded answer landed: the step of its batch input, and its turn record
+    // in the list (same seat, same turn number). Sorted by step, so the decision on screen
+    // can follow the re-simulated world, and a decision picked in the list can be sought.
+    anResimMarks(a) {
+        const at = new Map(a.order.map((r, i) => [r.playerId + '#' + r.turn, i]));
+        return (a.inputs || []).filter(x => x.kind === 'batch')
+            .map(x => ({ step: x.step, idx: at.get(x.playerId + '#' + x.turnCount) }))
+            .filter(m => m.idx != null).sort((p, q) => (p.step - q.step) || (p.idx - q.idx));
+    }
+    // The step at which the decision at list index `i` was played (or the next one that was).
+    anResimStepOf(i) {
+        const rs = this._anResim;
+        if (!rs || !rs.marks.length) return null;
+        const m = rs.marks.find(x => x.idx === i) || rs.marks.find(x => x.idx > i);
+        return m ? m.step : rs.total;
+    }
+    // Follow the world: the decision on screen is the latest one played by this step, the
+    // camera goes where it points when the auto camera is on, and the daylight is the
+    // live match's -- its clock interpolated between the decisions around this step.
+    // Without that the stage kept whatever light the last match had left.
+    anResimFollow(rs) {
+        const a = this.analyzer;
+        if (!a) return;
+        // The daylight runs on the replayed world's own match clock, as the live game's
+        // does (b1032). It was interpolated between the decisions' recorded times, which
+        // are when each seat was ASKED; ordered by when the answers landed, a slow answer
+        // could follow a later question, and the light ran backwards: night, day, night.
+        if (Number.isFinite(rs.matchMs)) this.game._environmentSeconds = rs.matchMs / 1000;
+        if (!rs.marks.length) return;
+        let lo = 0, hi = rs.marks.length - 1, k = -1;
+        while (lo <= hi) { const mid = (lo + hi) >> 1; if (rs.marks[mid].step <= rs.step) { k = mid; lo = mid + 1; } else hi = mid - 1; }
+        const m0 = rs.marks[k], m1 = rs.marks[k + 1];
+        if (!Number.isFinite(rs.matchMs)) {
+            const sec = m => (a.order[m.idx] && a.order[m.idx]._sec) || 0;
+            this.game._environmentSeconds = !m0 ? (m1 ? sec(m1) * rs.step / Math.max(1, m1.step) : rs.step * 0.05)
+                : (!m1 || m1.step === m0.step) ? sec(m0) + (rs.step - m0.step) * 0.05
+                : sec(m0) + (sec(m1) - sec(m0)) * (rs.step - m0.step) / (m1.step - m0.step);
+        }
+        this.anResimIntents(rs, k);
+        // A decision the reader picked stays picked while the world stands at its step:
+        // another seat's decision played at the same step must not take the panel from it.
+        const picked = rs.markAt ? rs.markAt.get(a.cursor) : undefined;
+        if (m0 && picked === m0.step) return;
+        if (m0 && a.cursor !== m0.idx) {
+            a.seek(m0.idx);
+            // The replay's camera is the director's (anDirectorPose); the jump to a
+            // turn's hotspot is for reading single turns.
+            this.anRender();
+        }
+    }
+
+    // ---- The analyzer's director (b1010) ---------------------------------------
+    // The live auto camera, over the re-simulated replay: fights, marches, scouts,
+    // close-ups, cut and composed as in a live match. It used to jump from one turn's
+    // hotspot to the next with no direction. The director reads a world: here, a view
+    // of the game whose seats are the replay's entities (anResimDraw keeps it current),
+    // whose speed is the replay's, and whose followed unit is the one picked on stage.
+    anDirectorPose() {
+        const rs = this._anResim, a = this.analyzer;
+        if (!rs || !a || !a.autoCam || !rs.world || typeof Director !== 'function') return null;
+        if (!rs.director) rs.director = new Director(rs.world);
+        // A unit or building picked on stage is followed, as a click follows one live.
+        const p = this._anPicked, prev = rs.world._camFollow;
+        const want = p && p.ent ? (p.kind === 'unit' ? { kind: 'units', units: [p.ent] } : { kind: 'ent', ent: p.ent }) : null;
+        const same = prev && want && (prev.ent || (prev.units && prev.units[0])) === p.ent;
+        if (!same) rs.world._camFollow = want;   // the same object each frame: the director keys its shot on it
+        return rs.director.update(Date.now());
+    }
+    anDirectorWorld(rs) {
+        if (!rs.world) {
+            const g = this.game, w = Object.create(g);
+            Object.assign(w, { gameStarted: true, spectatorMode: true, _contactFeed: [], _camFollow: null,
+                aiManager: { aiPlayers: [] }, openAIAIManager: null, _battles: [], simNow: () => 0,
+                isPlayerEliminated: ai => !!(ai && ai._eliminated),
+                effectiveSimSpeed: () => (this._anResim && this._anResim.speed) || 1 });
+            rs.world = w;
+        }
+        return rs.world;
+    }
+    anResimMessage(rs, m) {
+        if (rs !== this._anResim) return;   // a stopped run's late answer
+        // A progress note arrives while the worker is still working toward the step asked
+        // for; the run stays busy.
+        if (m.type === 'progress') { rs.progress = m.step; this.anResimHud(); return; }
+        rs.busy = false;
+        if (m.type === 'error') {
+            rs.status = 'failed'; rs.playing = false;
+            rs.problem = m.problem === 'rules changed since recording' ? t('an.resimRulesChanged') : m.problem;
+        } else if (m.type === 'ready') {
+            rs.total = m.lastInputStep; rs.inputsTotal = m.inputs; rs.status = 'running';
+            this.anResimLoop(rs);
+        } else if (m.type === 'frame') {
+            rs.step = m.step; rs.checked = m.checked;
+            rs.matchMs = m.scene ? m.scene.matchMs : undefined;
+            const landing = rs.seekTo != null;
+            if (rs.seekTo != null && rs.step >= rs.seekTo) rs.seekTo = null;
+            rs.progress = null;
+            this.anResimDraw(rs, m.scene, landing ? null : m.fx);
+            this.anResimFollow(rs);
+            // A hash that differs is a divergence; anything else that stops it (the match
+            // ending before an input, a seat no model played) is a replay that failed.
+            if (!m.ok) { rs.status = m.divergedSeq != null ? 'diverged' : 'failed'; rs.problem = m.problem;
+                         rs.divergedAt = m.divergedAt; rs.divergedSeq = m.divergedSeq; rs.playing = false; }
+            else if (m.complete && m.step >= rs.total) { rs.status = 'certified'; rs.playing = false; }
+        }
+        this.anResimHud();
+    }
+    // Paced by the page's frames. The worker is asked for the next step only once it has
+    // answered the last, so a speed the machine cannot keep plays as fast as it can
+    // rather than queueing work.
+    anResimLoop(rs) {
+        let last = performance.now();
+        const tick = now => {
+            if (rs !== this._anResim) return;
+            const dt = Math.min(250, now - last); last = now;
+            // The target may run ahead of the world by about a second of play and no more.
+            // It used to grow for as long as the worker was busy, so after a long seek the
+            // next request was for everything played "meanwhile" -- a second freeze, the
+            // units standing still until that was worked through too.
+            if (rs.playing && rs.status === 'running' && document.visibilityState !== 'hidden') {
+                const lead = Math.max(20, 20 * rs.speed);
+                rs.target = Math.min(rs.total, Math.max(rs.target, Math.min(rs.target + dt / 50 * rs.speed, rs.step + lead)));
+            }
+            if (!rs.busy && rs.status === 'running' && (Math.floor(rs.target) > rs.step || !rs.ents.size)) {
+                rs.busy = true;
+                rs.worker.postMessage({ type: 'to', step: Math.floor(rs.target) });
+            }
+            requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+    }
+    anResimToggle() {
+        const rs = this._anResim;
+        if (!rs) return;
+        if (rs.status === 'certified') { this.anResimStart(0); return; }
+        rs.playing = !rs.playing;
+        this.anResimHud();
+    }
+    anResimSpeed(v) { if (this._anResim) this._anResim.speed = Number(v) || 1; }
+    // Forward is more stepping. Back is a rebuild: the world is not kept at every step,
+    // so it is replayed from the start to the step asked for.
+    anResimSeek(v) {
+        const rs = this._anResim, step = Math.max(0, Math.round(Number(v) || 0));
+        if (!rs) return;
+        if (step < rs.step) { this.anResimStart(step); return; }
+        rs.target = step;
+        if (step - rs.step > 600) rs.seekTo = step;   // long enough to show progress for
+        this.anResimHud();
+    }
+    // The stage for a re-simulation: the recorded map, empty, and no fog. It is the
+    // observer's view, as a spectator of the live match had it.
+    anResimStage() {
+        const r = this.game.renderer;
+        if (!r) return;
+        this.anUseIdentity();
+        this._anPicked = null;
+        r.clearScene();
+        const terrain = this.anTerrain();
+        this.game.terrain = terrain;
+        r.setTerrain(terrain);
+        this.anApplyFog({ seats: [], nodes: [], enemies: [] }, terrain);
+        const fow = this.game.fogOfWar;
+        if (fow && fow.fogGrid) { fow.fogGrid.fill(2); fow.updateFogTexture(); fow.fogDirty = true; }
+        (terrain.resources || []).forEach(res => {
+            if (!res.mesh) return;
+            if (res.mesh.trunk) { res.mesh.trunk.visible = false; res.mesh.leaves.visible = false; }
+            else res.mesh.visible = false;
+        });
+    }
+    // One frame of the re-simulated world onto the stage. Entities persist by id and
+    // move, rather than being rebuilt per frame; a building is rebuilt once when it
+    // completes, because its scaffold is decided when it is created.
+    anResimDraw(rs, scene, fx) {
+        const r = this.game.renderer;
+        if (!r || !scene) return;
+        const seen = new Set();
+        // The director's view of this world: seats with their entities (anDirectorWorld).
+        const world = this.anDirectorWorld(rs), seats = [];
+        // Its fights and its clock, for the strategic layer's battle rings (b1032).
+        const simNow = scene.simNow || 0;
+        world.simNow = () => simNow;
+        world._battles = (scene.battles || []).map(b => Object.assign({}, b, { sides: Object.fromEntries(Object.entries(b.sides || {})
+            .map(([id, s]) => [id, { involved: Object.fromEntries(Object.entries(s.involved || {}).map(([k, v]) => [k, { ids: new Set(v.ids || []) }])) }])) }));
+        const hurt = [];   // [entity, damage]: the replay has no hit events, so a drop in health is one
+        scene.seats.forEach(s => {
+            const seat = { id: s.id, seat: s.seat, civilization: s.civilization, age: s.epoch, _eliminated: !!s.eliminated, units: [], buildings: [] };
+            seats.push(seat);
+            s.units.forEach(u => {
+                const key = 'u' + u.id;
+                seen.add(key);
+                let ent = rs.ents.get(key);
+                // An age-up upgrades field units to their next tier (upgradeFieldUnits):
+                // the same unit, a new type. Rebuilt, so it looks what it now is.
+                if (ent && ent.type !== u.type) { if (r.removeUnit) r.removeUnit(ent); else r.killUnit(ent); rs.ents.delete(key); ent = null; }
+                if (!ent) {
+                    ent = typeof createUnit === 'function' ? createUnit(u.type, u.x, u.z, s.id, s.civilization, s.epoch) : null;
+                    if (!ent) return;
+                    ent.seat = s.seat;
+                    ent._appearanceId = u.id;
+                    rs.ents.set(key, ent);
+                    r.addUnit(ent);
+                }
+                const before = ent.health;
+                Object.assign(ent, { x: u.x, z: u.z, health: u.health, isMoving: u.isMoving, isAttacking: u.isAttacking, attackTimer: u.attackTimer || 0,
+                    isHarvesting: u.isHarvesting, isBuilding: u.isBuilding, carryingResource: u.carryingResource,
+                    carryingResourceType: u.carryingResourceType, attackTarget: u.attackTarget,
+                    targetX: u.targetX == null ? undefined : u.targetX, targetZ: u.targetZ == null ? undefined : u.targetZ, task: u.task || null });
+                if (before > u.health) hurt.push([ent, before - u.health]);
+                seat.units.push(ent);
+            });
+            s.buildings.forEach(b => {
+                const key = 'b' + b.id + (b.underConstruction ? ':site' : '');
+                seen.add(key);
+                let ent = rs.ents.get(key);
+                if (!ent) {
+                    ent = typeof createBuilding === 'function' ? createBuilding(b.type, b.x, b.z, s.id, s.civilization,
+                        { instant: true, age: b.age || s.epoch, underConstruction: b.underConstruction }) : null;
+                    if (!ent) return;
+                    ent.seat = s.seat;
+                    rs.ents.set(key, ent);
+                    r.addBuilding(ent);
+                } else if (b.age && ent.age !== b.age) {
+                    // An age-up restyles every building of the seat (morphBuildingsToAge);
+                    // the stage follows, as the live renderer does.
+                    ent.age = b.age;
+                    if (r.rebuildBuildingMesh) r.rebuildBuildingMesh(ent);
+                }
+                if (ent.health > b.health) hurt.push([ent, ent.health - b.health]);
+                ent.health = b.health;
+                ent.underConstruction = b.underConstruction;
+                if (b.underConstruction) ent.buildProgress = b.buildProgress;
+                seat.buildings.push(ent);
+            });
+        });
+        world.aiManager.aiPlayers = seats;
+        // A hit, as the live game reports it to its director: who struck (the enemy whose
+        // target stands there, else the nearest enemy fighting nearby) and where.
+        if (rs.director && hurt.length) {
+            const fighters = seats.flatMap(st => st.units.filter(u => u.isAttacking && u.attackTarget));
+            const now = Date.now();
+            for (const [ent, dmg] of hurt) {
+                let by = null, best = 22;
+                for (const f of fighters) {
+                    if (f.owner === ent.owner) continue;
+                    const onIt = Math.hypot(f.attackTarget.x - ent.x, f.attackTarget.z - ent.z) < 1.5;
+                    const d = onIt ? 0 : Math.hypot(f.x - ent.x, f.z - ent.z);
+                    if (d < best) { best = d; by = f; }
+                }
+                if (by) rs.director.observeCombat(by, ent, dmg, now, ent.x, ent.z);
+            }
+        }
+        rs.ents.forEach((ent, key) => {
+            if (seen.has(key)) return;
+            rs.ents.delete(key);
+            if (key[0] === 'u') r.killUnit(ent);
+            else if (key.endsWith(':site') && seen.has(key.slice(0, -5))) r.removeBuilding(ent);   // finished, not destroyed
+            else r.killBuilding(ent);
+        });
+        this.anResimFx(rs, fx);
+        const nodes = new Set(scene.nodes.map(n => n.type + '@' + Math.round(n.x) + ',' + Math.round(n.z)));
+        ((this.game.terrain && this.game.terrain.resources) || []).forEach(res => {
+            if (!res.mesh) return;
+            const on = nodes.has(res.type + '@' + Math.round(res.x) + ',' + Math.round(res.z));
+            if (res.mesh.trunk) { res.mesh.trunk.visible = on; res.mesh.leaves.visible = on; }
+            else res.mesh.visible = on;
+        });
+    }
+    // What the rules showed since the last frame (the worker's fx): arrows and stones,
+    // hit flashes, dust, battle rings, on the stage's own entities (b1032). A jump shows
+    // none of what it skipped.
+    anResimFx(rs, fx) {
+        const r = this.game.renderer;
+        if (!r || !fx || !fx.length) return;
+        const ent = e => e ? rs.ents.get((e.b ? 'b' : 'u') + e.id) : null;
+        for (const f of fx) {
+            if (f.k === 'proj') { if (r.spawnProjectile) r.spawnProjectile(f.from, f.to, f.kind, ent(f.shooter) || undefined); }
+            else if (f.k === 'hit') { const e = ent(f.e); if (e && r.flashHit) r.flashHit(e); else if (f.e && r.spawnBattleRing) r.spawnBattleRing(f.e.x, f.e.z); }
+            else if (f.k === 'dust') { if (r.spawnDust) r.spawnDust(f.x, f.y, f.z, f.count, f.color); }
+            else if (f.k === 'ring') { if (r.spawnBattleRing) r.spawnBattleRing(f.x, f.z); }
+        }
+    }
+    // The live overlays over the replay (b1032): the strategic layer -- army and base
+    // flags, battle rings -- and each command's target marker as it is played. The
+    // decision bubbles stay off (asp67): the list beside the stage reads them, and at
+    // replay speed they would only flash past.
+    anResimOverlays(rs) {
+        const world = this.anDirectorWorld(rs), r = this.game.renderer;
+        rs.saved = { strategic: this.strategicLayer, intent: this.intentLayer, marks: r ? r.intentMarks : null };
+        rs.strategic = typeof StrategicLayer === 'function' ? new StrategicLayer(world) : null;
+        rs.intent = typeof IntentLayer === 'function' ? new IntentLayer(world) : null;
+        if (rs.intent) rs.intent._started = true;
+        this.strategicLayer = rs.strategic;
+        this.intentLayer = rs.intent;
+        this._intentMarksOnly = true;
+        if (r) r.intentMarks = () => (rs.intent && this.intentOn()) ? rs.intent.worldMarks() : null;
+        this.startIntentOverlay(document.getElementById('anViewport'));
+        rs.overlayTimer = setInterval(() => { if (rs.strategic) rs.strategic.poll(); if (rs.intent) rs.intent.poll(); }, 250);
+    }
+    anResimOverlaysOff(rs) {
+        if (!rs || !rs.saved) return;
+        clearInterval(rs.overlayTimer);
+        this.stopIntentOverlay();
+        this.strategicLayer = rs.saved.strategic;
+        this.intentLayer = rs.saved.intent;
+        if (this.game.renderer) this.game.renderer.intentMarks = rs.saved.marks;
+        this._intentMarksOnly = false;
+        rs.saved = null;
+    }
+    // The commands of the decisions played since the last frame, onto the intent layer.
+    // A stretch played at once (a fast replay, a landing after a jump) shows each seat's
+    // newest turn only.
+    anResimIntents(rs, k) {
+        const fed = rs.fedK == null ? -1 : rs.fedK;
+        rs.fedK = k;
+        if (!rs.intent || k <= fed || rs.seekTo != null) return;
+        const a = this.analyzer, seats = (rs.world && rs.world.aiManager.aiPlayers) || [], last = new Map();
+        rs.marks.slice(Math.max(fed + 1, k - 30), k + 1).forEach(m => {
+            const rec = a.order[m.idx];
+            if (rec && rec.playerId) last.set(rec.playerId, rec);
+        });
+        const now = Date.now();
+        last.forEach((rec, id) => {
+            const ai = seats.find(s => s.id === id);
+            const calls = ((rec.assistant && rec.assistant.tool_calls) || [])
+                .map(c => ({ name: c.function && c.function.name, args: c.function && c.function.arguments })).filter(c => c.name);
+            if (ai && calls.length) rs.intent.add(ai, { toolCalls: calls, outcome: rec.harnessResult || '' }, now);
+        });
+    }
+    // The controls are built once per run and then only updated, so a slider being
+    // dragged is not rebuilt under the pointer.
+    anResimHud(build = false) {
+        const rs = this._anResim, hud = document.getElementById('anStageHud');
+        if (!rs || !hud) return;
+        const esc = s => this.escapeHtml(String(s == null ? '' : s));
+        if (build || !document.getElementById('anResimTxt')) {
+            hud.innerHTML = '<span class="an-chip is-on">' + esc(t('an.resimMode')) + '</span>'
+                + '<button id="anResimPlay" class="an-chip" onclick="game.ui.anResimToggle()"></button>'
+                + '<select id="anResimSpeed" class="an-chip" onchange="game.ui.anResimSpeed(this.value)" aria-label="' + esc(t('an.resimSpeed')) + '">'
+                + [1, 4, 16, 64].map(n => '<option value="' + n + '"' + (n === rs.speed ? ' selected' : '') + '>' + n + '×</option>').join('') + '</select>'
+                // The auto camera works here too: it follows the decision being played.
+                // No slider of its own: the timeline above the lists drives the replay.
+                + '<button id="anResimAuto" data-an-auto-camera class="an-chip" onclick="game.ui.anToggleAutoCam()">' + esc(t('an.autoCam')) + '</button>'
+                + '<span id="anResimTxt" class="an-cap-txt"></span>'
+                + '<button class="an-chip" onclick="game.ui.anResimStop()">' + esc(t('an.resimExit')) + '</button>';
+        }
+        const clock = steps => { const sec = Math.floor(steps / 20); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); };
+        const play = document.getElementById('anResimPlay');
+        if (play) {
+            play.textContent = rs.status === 'certified' ? '↺' : (rs.playing ? '❚❚' : '▶');
+            play.setAttribute('aria-label', t(rs.status === 'certified' ? 'an.resimAgain' : rs.playing ? 'an.resimPause' : 'an.resimPlay'));
+            play.disabled = rs.status === 'loading' || rs.status === 'failed' || rs.status === 'diverged';
+        }
+        const auto = document.getElementById('anResimAuto');
+        if (auto && this.analyzer) {
+            auto.classList.toggle('is-on', !!this.analyzer.autoCam);
+            auto.setAttribute('aria-pressed', String(!!this.analyzer.autoCam));
+        }
+        const txt = document.getElementById('anResimTxt');
+        if (txt) {
+            const n = rs.inputsTotal || (rs.inputs ? rs.inputs.length : 0);
+            txt.textContent = rs.seekTo != null && rs.status !== 'failed' && rs.status !== 'diverged'
+                    ? t('an.resimSeeking', { t: clock(rs.progress != null ? rs.progress : rs.step), total: clock(rs.seekTo) })
+                : rs.status === 'loading' ? t('an.resimLoading')
+                : rs.status === 'failed' ? t('an.resimFailed', { e: rs.problem || '?' })
+                : rs.status === 'diverged' ? t('an.resimDiverged', { t: clock(rs.divergedAt), s: rs.divergedAt, n: rs.divergedSeq })
+                : rs.status === 'certified' ? t('an.resimCertified', { n })
+                : t('an.resimStatus', { t: clock(rs.step), total: clock(rs.total), n: rs.checked, m: n });
+            txt.classList.toggle('is-bad', rs.status === 'diverged' || rs.status === 'failed');
+        }
+    }
     anSetMode(mode) {
         if (!this.analyzer) return;
         this.analyzer.mode = mode;
@@ -5414,13 +7234,35 @@ class UIManager {
     // A deliberate jump takes over from playback rather than fighting it.
     // Focus follows the click, so arrows continue where the reader just was rather than
     // going back to panning the map.
+    // While a re-simulation runs, choosing a decision -- in the list, on the timeline, by
+    // stepping -- seeks the replay to the step it was played at; the panel then follows
+    // the world there. Returns whether it did.
+    anResimSeekEntry(i) {
+        const a = this.analyzer, step = this._anResim ? this.anResimStepOf(i) : null;
+        if (step == null || !a) return false;
+        a.seek(i);
+        this.anResimSeek(step);
+        this.anRender();
+        return true;
+    }
     anSeek(i) {
         this.anStopPlay();
+        if (this.anResimSeekEntry(i)) return;
         if (this.analyzer) { this.analyzer.seek(i); this.anRender(); }
         const list = document.getElementById('anList');
         if (list && list.focus) list.focus({ preventScroll: true });
     }
-    anStep(d) { if (this.analyzer) { this.analyzer.step(d); this.anRender(); } }
+    anStep(d) {
+        if (!this.analyzer) return;
+        if (this._anResim) {
+            const a = this.analyzer, before = a.cursor;
+            a.step(d);
+            const i = a.cursor;
+            a.seek(before);
+            if (this.anResimSeekEntry(i)) return;
+        }
+        this.analyzer.step(d); this.anRender();
+    }
 
     // Free-text search over the turn list. Steps and playback both walk visible(),
     // so narrowing here narrows those too — which is the point: type "wonder", then
@@ -5516,7 +7358,14 @@ class UIManager {
         this.anRender();
     }
 
-    anJumpSec(sec) { this.anStopPlay(); if (this.analyzer) { this.analyzer.seekSeconds(sec); this.anRender(); } }
+    // A moment picked on the chart or a chapter: in a re-simulation, the replay goes there
+    // too (b1032) -- it used to move only the list, and the next frame took it back.
+    anJumpSec(sec) {
+        this.anStopPlay();
+        if (!this.analyzer) return;
+        this.analyzer.seekSeconds(sec);
+        if (!this.anResimSeekEntry(this.analyzer.cursor)) this.anRender();
+    }
 
     // A click on the plot becomes a moment. The SVG is a fixed 900x300 viewBox stretched
     // to whatever width the pane has, so the pixel is converted back through the same
@@ -5535,7 +7384,7 @@ class UIManager {
         const samples = a.timeline.samples || [];
         const tMax = samples.length ? (samples[samples.length - 1].t || 1) : a.durationSec();
         a.seekSeconds(Math.round(frac * tMax));
-        this.anRender();
+        if (!this.anResimSeekEntry(a.cursor)) this.anRender();
     }
 
 
@@ -5602,9 +7451,21 @@ class UIManager {
         if (h.mapSeed) bits.push('seed ' + esc(h.mapSeed));
         if (h.difficulty) bits.push(esc(h.difficulty));
         if (h.turnBased != null) bits.push(h.turnBased ? t('an.turnBased') : t('an.realTime'));
-        if (h.simSpeed) bits.push(esc(h.simSpeed) + '×');
+        if (h.turnBased && h.lockstepSliceMs) bits.push(esc(t('lu.lockstep', { n: h.lockstepSliceMs / 1000 })));
+        if (h.simSpeed) bits.push(this.simSpeedLabel(h.simSpeed) + '×');
         if (h.promptVersion) bits.push(esc(h.promptVersion));
-        if (a.results && a.results.build) bits.push('build ' + esc(a.results.build));
+        const build = h.build || (a.results && a.results.build);
+        if (build) bits.push('build ' + esc(build));
+        // A human played in a Campaign match, so it is never a record of models alone.
+        if (h.mode === 'campaign') bits.push('<b>' + esc(t('an.campaignMode')) + '</b>');
+        // The seats' conditions ids, as the results screen showed them. A file from before
+        // contracts were recorded says so rather than showing nothing.
+        if (typeof WarConditions !== 'undefined' && h.schema) {
+            const ids = a.contract ? [...new Set((a.contract.seats || []).map(s => WarConditions.id(WarConditions.seat(h, a.contract, s.playerId)) || '—'))] : [];
+            bits.push(esc(t('sum.condId', { id: ids.length ? ids.join(' / ') : t('sum.condNone') })));
+        }
+        if (st.interventions) bits.push(esc(t('an.interventions', { n: st.interventions })));
+        if (st.adaptations) bits.push(esc(t('an.adaptations', { n: st.adaptations })));
         bits.push(mmss(st.duration));
         if (st.parseErrors) bits.push(t('an.parseErrors', { n: st.parseErrors }));
         // An interrupted match has turns but no tail. Better to say so than to leave a
@@ -5733,15 +7594,19 @@ class UIManager {
             const cmds = a.commandsOf ? a.commandsOf(r) : [];
             const act = cmds.length ? cmds[0].action : (r.parsed && r.parsed.action);
             const more = cmds.length > 1 ? cmds.length - 1 : 0;
-            const bad = typeof r.harnessResult === 'string' && r.harnessResult.indexOf('[ERROR]') === 0;
+            const bad = a.hasError(r);
+            // A turn with no game command is named for what it was -- a plan save, a
+            // reply with no tool call, an empty reply -- and only a genuinely broken
+            // one is still called malformed.
+            const label = typeof act === 'string' ? act.replace(/_/g, ' ') : this.anTurnKindLabel(a.turnKind(r));
             const fight = !!(r.state && r.state.battles && r.state.battles.length);
             return '<div class="an-row' + on + (bad ? ' is-bad' : '') + '" onclick="game.ui.anSeek(' + i + ')">'
                 + '<span class="an-t">' + esc(mmss(r._sec)) + '</span>'
                 + this.teamDotHtml(sm.seat, 8)
-                + '<span class="an-act">' + esc(typeof act === 'string' ? act.replace(/_/g, ' ') : '(malformed)') + '</span>'
+                + '<span class="an-act">' + esc(label) + '</span>'
                 + (more ? '<span class="an-more" title="' + esc(t('an.plusMore', { n: more })) + '">+' + more + '</span>' : '')
                 + (fight ? '<span class="an-flag">⚔️</span>' : '')
-                + (r._planNew ? '<span class="an-flag">📋</span>' : '')
+                + (r._planNew ? '<span class="an-flag">🪶</span>' : '')
                 + (bad ? '<span class="an-flag">✕</span>' : '') + '</div>';
         }).join('');
         document.getElementById('anList').innerHTML = rows
@@ -5757,23 +7622,36 @@ class UIManager {
         // different claims and the label says which is on screen.
         // The stage: the engine's own canvas, showing this moment.
         this.anMountStage();
-        this.anBuildStage(cur);
+        // A re-simulation belongs to the file it was started on; a new file ends it.
+        if (this._anResim && this._anResim.inputs !== a.inputs) this.anResimStop(false);
+        if (this._anResim) this.anResimHud();
+        else this.anBuildStage(cur);
         const hud = document.getElementById('anStageHud');
-        if (hud) {
+        if (hud && !this._anResim) {
             const sn = a.seats.get(cur && cur.playerId) || {};
             hud.innerHTML = '<button class="an-chip' + (a.union ? ' is-on' : '')
                 + '" onclick="game.ui.anToggleUnion()">' + esc(t('an.union')) + '</button>'
                 + '<button data-an-auto-camera aria-pressed="' + !!a.autoCam + '" class="an-chip' + (a.autoCam ? ' is-on' : '')
                 + '" onclick="game.ui.anToggleAutoCam()">' + esc(t('an.autoCam')) + '</button>'
                 + '<span class="an-cap-txt">' + esc(a.union ? t('an.viewAll')
-                    : t('an.viewSeat', { s: sn.name || sn.model || sn.civ || '?' })) + '</span>';
+                    : t('an.viewSeat', { s: sn.name || sn.model || sn.civ || '?' })) + '</span>'
+                + (a.inputs && a.inputs.length ? '<button id="anResimBtn" class="an-chip" onclick="game.ui.anResimStart()" title="'
+                    + esc(t('an.resimTip')) + '">' + esc(t('an.resim')) + '</button>' : '');
+            if (a.inputs && a.inputs.length) this.anResimOffer();
         }
 
         const ch = a.chapters.map(c => '<button class="an-chapter" onclick="game.ui.anJumpSec(' + c.t + ')">'
             + '<span class="an-t">' + esc(mmss(c.t)) + '</span>' + esc(c.icon) + ' ' + esc(c.text)
             + '</button>').join('');
-        document.getElementById('anChapters').innerHTML = ch
-            ? '<div class="an-ch-title">' + esc(t('an.chapters')) + '</div>' + ch : '';
+        const link = this.anMomentLink();
+        const tools = '<div class="an-ch-tools">'
+            + (link ? '<button type="button" class="an-chip" onclick="game.ui.anCopyLink()" title="' + esc(t('an.copyLinkTip')) + '">' + esc(t('an.copyLink')) + '</button>' : '')
+            + (ch ? '<label class="an-ch-offset" title="' + esc(t('an.chOffsetTip')) + '">' + esc(t('an.chOffset')) + ' <input type="number" id="anChapterOffset" step="1" value="'
+                + esc(this._anChapterOffset || 0) + '" onchange="game.ui._anChapterOffset=this.value"></label>'
+                + '<button type="button" class="an-chip" onclick="game.ui.anCopyChapters()" title="' + esc(t('an.copyChaptersTip')) + '">' + esc(t('an.copyChapters')) + '</button>' : '')
+            + '</div>';
+        document.getElementById('anChapters').innerHTML = this.anTaleHtml()
+            + (ch ? '<div class="an-ch-title">' + esc(t('an.chapters')) + '</div>' + tools + ch : (link ? tools : ''));
     }
 
     // ---- the stage: the real engine, showing a finished match -----------------
@@ -5825,6 +7703,7 @@ class UIManager {
     }
 
     anUnmountStage() {
+        if (typeof WarIdentity !== 'undefined') WarIdentity.use(null);   // back to the live match's seats
         const cv = document.getElementById('gameCanvas');
         const home = this._anCanvasHome;
         if (cv && home && home.parent) {
@@ -6023,11 +7902,17 @@ class UIManager {
         const t = new TerrainManager(null, size);
         t.difficulty = h.difficulty || 'easy';
         t.seed = h.mapSeed || null;
-        const n = Math.max(1, (h.players || []).length), half = size / 2;
+        // The spawns exactly as the arena start computes them (Game._startArenaFromSetup):
+        // 40 in from the edge, then 85 % of that, with the simulation's own trig. Stone
+        // and gold are laid out around them, so a radius of 85 % of the half-size put
+        // every rotated stone and gold node somewhere the match never had one -- found
+        // when the re-simulated world's nodes did not all land on this map.
+        const n = Math.max(1, (h.players || []).length), half = size / 2 - 40;
+        const trig = typeof WarMath !== 'undefined' ? WarMath : Math;
         t.spawns = [];
         for (let i = 0; i < n; i++) {
             const ang = (i / n) * Math.PI * 2 - Math.PI / 2, rad = half * 0.85;
-            t.spawns.push({ x: Math.cos(ang) * rad, z: Math.sin(ang) * rad });
+            t.spawns.push({ x: trig.cos(ang) * rad, z: trig.sin(ang) * rad });
         }
         t.generateTerrain();   // spawns must be set first: stone and gold rotate onto them
         this._anTerrain = t; this._anTerrainKey = key;
@@ -6076,9 +7961,19 @@ class UIManager {
     // Rebuilt per seek rather than diffed: a snapshot is a whole world, and matching
     // entities across an 8-to-900-second gap would be inventing continuity the file
     // does not claim.
+    // The recording's seats name the colours while the analyzer shows it (review #12).
+    anUseIdentity() {
+        const h = this.analyzer && this.analyzer.header;
+        if (typeof WarIdentity !== 'undefined') WarIdentity.use(((h && h.players) || []).map(p => ({ id: p.id, seat: p.seat, civ: p.civ })));
+    }
+
     anBuildStage(rec) {
         const a = this.analyzer, r = this.game.renderer;
         if (!a || !r || !rec) return;
+        this.anUseIdentity();
+        // The live match's daylight at this moment. The page's own day clock is not
+        // running here, so the stage used to keep whatever light the last match left.
+        this.game._environmentSeconds = rec._sec || 0;
         const sc = a.scene(rec, a.union);
         if (!sc) return;
 
@@ -6352,6 +8247,15 @@ class UIManager {
     }
 
 
+    // The name a command-less turn is shown under; see TranscriptAnalyzer.turnKind.
+    anTurnKindLabel(kind) {
+        const key = { plan: 'an.kindPlan', noAction: 'an.kindNoAction', empty: 'an.kindEmpty',
+                      cancelled: 'an.kindCancelled', requestFailed: 'an.kindRequestFailed',
+                      intervention: 'an.kindIntervention', adaptation: 'an.kindAdaptation',
+                      matchEvent: 'an.kindMatchEvent' }[kind];
+        return key ? t(key) : '(malformed)';
+    }
+
     anDetailHtml(r) {
         if (!r) return '';
         const a = this.analyzer;
@@ -6364,6 +8268,17 @@ class UIManager {
 
         if (r.type === 'round_missed') {
             return head + '<div class="an-d-missed">⏱ ' + esc(r.note || t('an.rowMissed')) + '</div>';
+        }
+        // A human or the harness changed something the model did not choose. Shown as
+        // recorded: the kind, and the advice text word for word.
+        if (r.type === 'intervention' || r.type === 'adaptation' || r.type === 'match_event') {
+            const label = this.anTurnKindLabel(a.turnKind(r));
+            const extra = r.params ? r.params.join(', ') : (r.factor != null ? String(r.factor)
+                : (r.speed != null ? this.simSpeedLabel(r.speed) + '× (' + this.simSpeedLabel(r.effective) + '×)' : (r.streak != null ? '×' + r.streak : '')));
+            return head
+                + '<div class="an-d-sec"><span class="an-d-tag">' + esc(label) + '</span>'
+                + '<span class="an-d-cmd">' + esc(r.kind || '') + (extra ? ' · ' + esc(extra) : '') + '</span></div>'
+                + (r.text ? '<pre class="an-d-final">' + esc(r.text) + '</pre>' : '');
         }
         // The last thing a model said. Shown whole and unstyled beyond a label, because
         // this is the one record in the file that is not data about play — it is the
@@ -6400,10 +8315,6 @@ class UIManager {
         }
 
         const p = r.parsed || {};
-        const act = typeof p.action === 'string' ? p.action : '(malformed)';
-        const params = Object.assign({}, p.params || {});
-        const reason = params.reason; delete params.reason;
-        const bad = typeof r.harnessResult === 'string' && r.harnessResult.indexOf('[ERROR]') === 0;
 
         const stt = r.state || {};
         const res = stt.resources || {};
@@ -6460,7 +8371,8 @@ class UIManager {
         const cmdList = a.commandsOf ? a.commandsOf(r) : [];
         const cmdResults = a.resultsOf ? a.resultsOf(r) : [];
         const cmdBlocks = (cmdList.length ? cmdList : [p]).map((c, i) => {
-            const nm = (c && typeof c.action === 'string') ? c.action : '(malformed)';
+            const nm = (c && typeof c.action === 'string') ? c.action
+                : (cmdList.length ? '(malformed)' : this.anTurnKindLabel(a.turnKind(r)));
             const ps = Object.assign({}, (c && c.params) || {});
             const why = ps.reason; delete ps.reason;
             const res = cmdResults.length > 1 ? cmdResults[i] : (i === 0 ? cmdResults[0] : null);
@@ -6585,6 +8497,22 @@ class UIManager {
         } catch (e) { return null; }
     }
 
+    renderSummaryConditions() {
+        const box = document.getElementById('summaryConditions');
+        if (!box) return;
+        const cond = this.matchConditions();
+        if (!cond) { box.hidden = true; return; }
+        const h = cond.header, c = cond.contract || {}, esc = s => this.escapeHtml(String(s == null ? '' : s));
+        const short = v => v ? esc(String(v).slice(0, 12)) : esc(t('sum.condNone'));
+        const rows = [
+            ['core', short(c.coreHash)], ['harness', short(c.harnessHash)], ['rules', esc(c.rulesId || t('sum.condNone'))],
+            ['protocol', esc(WarConditions.protocolOf(h))], ['build', esc(h.build || '?')], ['mode', esc(h.mode || '?')]];
+        box.innerHTML = '<summary>' + esc(t('sum.condTitle')) + '</summary>'
+            + '<p>' + esc(t('sum.condTip')) + '</p>'
+            + '<p class="sum-cond-rows">' + rows.map(([k, v]) => '<span><b>' + k + '</b> ' + v + '</span>').join(' · ') + '</p>';
+        box.hidden = false;
+    }
+
     buildResultsMarkdown(summary) {
         const { reports, reason, durStr, playerCount } = summary;
         const d = new Date();
@@ -6599,7 +8527,13 @@ class UIManager {
         L.push(`- **Duration:** ${durStr}`);
         L.push(`- **Players:** ${playerCount}`);
         L.push(`- **Difficulty:** ${summary.difficulty || 'easy'}`);
-        L.push(`- **Map seed:** ${summary.mapSeed ? `\`${summary.mapSeed}\` (reproducible)` : 'random'}`);
+        L.push(`- **Map seed:** ${summary.mapSeed ? `\`${summary.mapSeed}\` (map layout reproducible)` : 'random'}`);
+        const cond = this.matchConditions();
+        if (cond) {
+            const c = cond.contract || {};
+            L.push(`- **Conditions:** core \`${(c.coreHash || 'not recorded').slice(0, 12)}\` · harness \`${(c.harnessHash || 'not recorded').slice(0, 12)}\` · rules ${c.rulesId || 'not recorded'} · protocol ${WarConditions.protocolOf(cond.header)} · build ${cond.header.build || '?'} · mode ${cond.header.mode || '?'}`);
+            L.push(`- **Status:** exploratory match. Seats with the same conditions id had the same declared conditions (simulation code, prompt template, tools, harness, rules, protocol); that is not an identical match.`);
+        }
 
         const winner = reports.find(r => r.isWinner);
         L.push(`- **Winner:** ${winner ? `${winner.model} (${winner.civName}, ${winner.isLLM ? 'LLM' : 'rule-based'}) — ${winner.power} pts` : 'none (draw)'}`);
@@ -6617,12 +8551,16 @@ class UIManager {
                 const mc = r.modelConfig;
                 L.push(`- Model config: provider ${mc.provider} · model \`${mc.modelId || 'auto'}\` · context budget ${mc.contextBudget} · history ${mc.minimizeTokens ? 'compact (minimize tokens)' : 'multi-turn'} · language ${mc.language}`);
             }
+            if (r.metrics && (r.metrics.advisedTurns || r.metrics.adaptations)) {
+                L.push(`- Assistance: ${r.metrics.advisedTurns || 0} turn(s) carried spectator advice · ${r.metrics.adaptations || 0} harness adaptation(s) of the request`);
+            }
+            if (cond && r.isLLM) L.push(`- Conditions id: \`${WarConditions.id(cond.seat(r.ai.id)) || 'not recorded'}\``);
             L.push(`- End power score: ${r.power}`);
             L.push(`- Final state: ${r.ageName} age · ${r.workers} workers · ${r.military} military · ${r.buildings} buildings`);
             L.push(`- Resources: ${r.food} food · ${r.wood} wood · ${r.stone} stone · ${r.gold} gold`);
             const m = r.metrics;
             if (r.isLLM && m) {
-                L.push(`- Strategy score: ${r.soundness}/100`);
+                L.push(`- Match heuristic (not a capability score): ${r.soundness}/100`);
                 L.push(`- Decisions: ${m.decisions} (answered ${m.responded}${(m.roundsMissed || 0) ? ` · ${m.roundsMissed} missed the round deadline` : ''})`);
                 // Only when it says something: a match where every reply carried one
                 // command prints exactly what it always did.

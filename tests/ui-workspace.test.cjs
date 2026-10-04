@@ -111,10 +111,10 @@ test('camera commands respect map and zoom bounds, reset pose, and cancel pendin
     assert.ok(Number.isFinite(r._halfH));
 });
 
-function renderFrame(replayMode, drive, units) {
+function renderFrame(replayMode) {
     const h = harness(), r = h.renderer, noop = () => {};
     // Two close friendly units and one inside a building exercise both live pushes.
-    units = units || [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 },
+    const units = [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 },
         { x: 50, z: 50, owner: 2 }];
     Object.assign(r, { replayMode, units, buildings: [{ x: 50, z: 50, type: 'house' }],
         _lastTime: 83.333, updateCamera: noop, _computeCam: () => ({ view: [], proj: [], haze: [] }),
@@ -122,49 +122,65 @@ function renderFrame(replayMode, drive, units) {
         gl: new Proxy({}, { get: () => noop }), prog: { uniforms: {} },
         tex: { white: {} }, _daySky: [0.42,0.60,0.79], _daySun: [0.96,0.84,0.66], sunDir: [], _dl: { opaque: [], blended: [], bars: [] } });
     const before = structuredClone(units);
-    // 'step' drives the simulation clock (Game.simulateStep's call), 'animate' drives one
-    // painted frame, 'both' the pair a live 60fps tab actually runs.
-    if (drive !== 'animate') r.simulateStep(1000 / 60);
-    if (drive !== 'step') { r.animate(); h.setTime(116.667); h.frames.shift()(); }
+    // A drawn frame decides nothing: separation and clearance are simulation rules now
+    // (js/simulation/position-rules.js, from Game.tick), so animate() must move nothing.
+    r.animate(); h.setTime(116.667); h.frames.shift()();
     return { before, after: units };
 }
 
-test('replay frames preserve recorded positions, including overlaps', () => {
-    // The guard has to hold on BOTH clocks now: a transcript must never be re-refereed,
-    // whether something is painting it or the sim is stepping under it.
-    for (const drive of ['animate', 'step', 'both']) {
-        const { before, after } = renderFrame(true, drive);
-        assert.deepEqual(after, before, drive + ' moved a replayed unit');
-    }
+// The world moves in 50 ms steps; a frame is drawn between the last two (review #6
+// step 9). The smoothed positions exist only while the frame is built.
+function smoothFrame(alpha, replayMode, assemble) {
+    const h = harness(), r = h.renderer, noop = () => {};
+    const walker = { x: 0, z: 0, owner: 1 }, jumper = { x: 0, z: 0, owner: 1 }, still = { x: 5, z: 5, owner: 2 };
+    const units = [walker, jumper, still];
+    Object.assign(r, { replayMode, units, buildings: [], _lastTime: 83.333, updateCamera: noop,
+        _computeCam: () => ({ view: [], proj: [], haze: [] }), _assembleFrame: assemble, _syncFog: noop,
+        gl: new Proxy({}, { get: () => noop }), prog: { uniforms: {} }, tex: { white: {} },
+        _daySky: [0.42,0.60,0.79], _daySun: [0.96,0.84,0.66], sunDir: [], _dl: { opaque: [], blended: [], bars: [] },
+        game: { gameStarted: true, simAlpha: () => alpha } });
+    r.beginSimStep();                         // a step starts here...
+    walker.x = 2; jumper.x = 40;              // ...and ends here: a walk and a teleport
+    let error = null;
+    try { r.animate(); h.setTime(116.667); h.frames.shift()(); } catch (e) { error = e; }
+    return { units, error };
+}
+
+test('frames are drawn between steps, and the true positions are back afterwards', () => {
+    // What _assembleFrame saw, against what the world holds before and after.
+    let drawn;
+    const run = smoothFrame(0.25, false, function () { drawn = this.units.map(u => [u.x, u.z]); });
+    assert.deepEqual(drawn, [[0.5, 0], [40, 0], [5, 5]], 'a quarter of the way along a walk; a jump drawn where it landed');
+    assert.deepEqual(run.units.map(u => [u.x, u.z]), [[2, 0], [40, 0], [5, 5]], 'the world is untouched');
+    let replayed;
+    smoothFrame(0.25, true, function () { replayed = this.units.map(u => [u.x, u.z]); });
+    assert.deepEqual(replayed, [[2, 0], [40, 0], [5, 5]], 'the analyzer is never smoothed');
+    const failed = smoothFrame(0.25, false, () => { throw new Error('frame failed'); });
+    assert.ok(failed.error, 'the frame error surfaces');
+    assert.deepEqual(failed.units.map(u => [u.x, u.z]), [[2, 0], [40, 0], [5, 5]], 'and positions are restored even so');
 });
 
-test('separation and building clearance run on the simulation clock, not the render loop', () => {
-    const { before, after } = renderFrame(false, 'step');
-    assert.ok(after[0].x < before[0].x, 'friendly units must push apart');
-    assert.ok(after[1].x > before[1].x, 'and push each other the other way');
-    const escaped = Math.hypot(after[2].x - 50, after[2].z - 50);
-    assert.ok(escaped > 4.49, 'a unit inside dead centre must reach the clearance ring, got ' + escaped.toFixed(3));
-    // The escape direction is per unit, not a constant: the old `+x` parked every unit that
-    // ever landed on a building's origin on the SAME point of the ring, where separation
-    // could no longer reach them.
-    assert.ok(after[2].z > 54.49, 'the third unit should fan out along its own direction');
-});
-
-test('painting a frame no longer moves anything', () => {
-    // The invariant the migration bought: animate() draws. If a positional pass creeps back
-    // in, a backgrounded tab stops refereeing again and this fails.
-    const { before, after } = renderFrame(false, 'animate');
+test('replay render frames preserve recorded positions, including overlaps', () => {
+    const { before, after } = renderFrame(true);
     assert.deepEqual(after, before);
 });
 
-test('units standing on the identical point still come apart', () => {
-    // dist > 0.01 used to skip the pair forever. A move command snaps units onto one
-    // coordinate, so this is the common case, not a corner: measured in a live match, eight
-    // stacked units went 0.000 -> 0.000 over seven seconds before the fix.
-    const stack = [{ x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }];
-    const { after } = renderFrame(false, 'step', stack);
-    const gaps = [[0, 1], [1, 2], [0, 2]].map(([i, j]) => Math.hypot(after[j].x - after[i].x, after[j].z - after[i].z));
-    assert.ok(gaps.every(g => g > 0.05), 'coincident units stayed welded: ' + gaps.map(g => g.toFixed(3)).join(', '));
+// Separation and clearance are simulation rules now (js/simulation/position-rules.js,
+// run from Game.tick). A drawn frame decides nothing, so it moves nothing either.
+test('live render frames move no entity: separation is a simulation rule', () => {
+    const { before, after } = renderFrame(false);
+    assert.deepEqual(after, before);
+});
+
+test('the positional rules push friends apart and clear buildings', () => {
+    const context = vm.createContext({ Math });
+    vm.runInContext(source('js/simulation/position-rules.js'), context);
+    const units = [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 }, { x: 50, z: 50, owner: 2 }];
+    const before = structuredClone(units);
+    vm.runInContext('WarPositionRules', context).apply(units, [{ x: 50, z: 50, type: 'house' }], 1 / 60);
+    assert.ok(units[0].x < before[0].x);
+    assert.ok(units[1].x > before[1].x);
+    assert.equal(units[2].x, 54.5);
 });
 
 test('all workspace controls have translations in every supported UI language', () => {
@@ -203,6 +219,7 @@ function selectionHarness() {
     h.context.window.addEventListener = () => {};
     h.context.location = { hostname: 'localhost', protocol: 'http:', search: '' };
     h.context.t = key => key;
+    vm.runInContext(source('js/simulation/math.js'), h.context);
     vm.runInContext(source('js/game.js') + '\nthis.Game = Game;', h.context);
     const game = Object.create(h.context.Game.prototype);
     Object.assign(game, { renderer: r, ui: h.ui, aiManager: { aiPlayers: [] },

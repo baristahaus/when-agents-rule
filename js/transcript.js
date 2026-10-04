@@ -43,6 +43,7 @@ class TranscriptRecorder {
     // exportBlob: conditions first, outcome last, turns in between.
     static MATCH_KEY() { return '__match__'; }
     static SUMMARY_KEY() { return '__summary__'; }
+    static EVENTS_KEY() { return '__events__'; }
 
     async _root(create = false) {
         if (!this.available) return null;
@@ -143,6 +144,48 @@ class TranscriptRecorder {
         }
     }
 
+    // A second conditions line (the seat contracts), kept beside the header so a reader
+    // meets it before any turn. Flushed at once.
+    addHeaderLine(entry) {
+        if (!this.matchId || !entry) return;
+        const key = TranscriptRecorder.MATCH_KEY();
+        const buf = this.pending.get(key) || [];
+        buf.push(JSON.stringify(entry) + '\n');
+        this.pending.set(key, buf);
+        this.flush(key);
+    }
+
+    // A step-stamped input (review #9). Match-level, so it never seals a seat's open
+    // turn, and buffered like turns rather than flushed at once: an arena writes several
+    // a round. flushAll() at the match's end takes the rest.
+    noteInput(entry) {
+        if (!this.matchId || !entry) return;
+        try {
+            const key = TranscriptRecorder.EVENTS_KEY();
+            const buf = this.pending.get(key) || [];
+            buf.push(JSON.stringify(entry) + '\n');
+            this.pending.set(key, buf);
+            if (buf.length >= this.FLUSH_EVERY * 5) this.flush(key);
+        } catch (e) {
+            console.warn('[transcript] input note failed', e);
+        }
+    }
+
+    // A line about the match rather than a seat: global pause and speed. It carries no
+    // playerId, so a reader keeps it out of the seat list. Flushed at once.
+    noteMatch(entry) {
+        if (!this.matchId || !entry) return;
+        try {
+            const key = TranscriptRecorder.EVENTS_KEY();
+            const buf = this.pending.get(key) || [];
+            buf.push(JSON.stringify(entry) + '\n');
+            this.pending.set(key, buf);
+            this.flush(key);
+        } catch (e) {
+            console.warn('[transcript] match note failed', e);
+        }
+    }
+
     // The tail: how it ended, and the curve of how it got there. Appended rather than
     // kept in a second file so one artifact answers everything — the conditions, every
     // exchange, the outcome, and the graph. A recipient replaying it needs no second
@@ -230,12 +273,15 @@ class TranscriptRecorder {
     // because the action has to execute first — so it is stamped onto the open turn,
     // which is then sealed. The ring holds the same object, so the in-memory copy
     // gains the result too.
-    noteResult(playerId, harnessResult, lane) {
+    // `outcomes` is one {n, action, code, verdict} per command, in order -- the same
+    // verdicts the results metrics count (OpenAIAIManager.verdictFor).
+    noteResult(playerId, harnessResult, lane, outcomes) {
         if (!this.matchId || !playerId) return;
         const key = this._key(playerId, lane);
         const t = this.open.get(key);
         if (!t) return;                    // already sealed by THIS lane's next turn
         t.harnessResult = harnessResult;
+        if (Array.isArray(outcomes) && outcomes.length) t.outcomes = outcomes;
         this._seal(key);
     }
 
@@ -259,7 +305,21 @@ class TranscriptRecorder {
         await this.flushAll();
         const parts = [];
         let header = null, tail = null;
-        try {
+        // No origin-private storage -- a plain-http LAN host, which WAR serves on
+        // purpose. flush() cannot write there, so every line is still in `pending`,
+        // complete and in order. The disk read below used to throw and fall through
+        // to the 300-turn display ring, losing the markers and the results tail.
+        if (!this.available) {
+            const lines = key => (this.pending.get(key) || []).join('');
+            header = lines(TranscriptRecorder.MATCH_KEY()) || null;
+            tail = lines(TranscriptRecorder.SUMMARY_KEY()) || null;
+            for (const key of this.pending.keys()) {
+                if (key === TranscriptRecorder.MATCH_KEY() || key === TranscriptRecorder.SUMMARY_KEY()) continue;
+                const text = lines(key);
+                if (text) parts.push(text);
+            }
+        }
+        if (this.available) try {
             const dir = await (await this._root(true)).getDirectoryHandle(this.matchId, { create: true });
             for await (const [name, h] of dir.entries()) {
                 if (!name.endsWith('.jsonl') || h.kind !== 'file') continue;

@@ -52,6 +52,7 @@ button,input,select,textarea { font-family:inherit; }
     letter-spacing:-.025em; color:var(--text); text-align:left; margin:12px 0;
 }
 .arena-setup-subtitle { text-align:left; color:var(--muted); max-width:800px; line-height:1.65; font-size:1rem; }
+.quick-match-btn { display:block; min-width:0; margin:14px 0 4px; padding:10px 20px; font-size:.95rem; }
 .arena-setup-content > .lang-picker { border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:28px; flex-wrap:wrap; }
 .arena-section { border-color:var(--line); padding:24px; margin-bottom:24px; }
 .arena-section-head { gap:16px; margin-bottom:22px; }
@@ -86,6 +87,8 @@ button,input,select,textarea { font-family:inherit; }
 .mdl-caret { color:var(--muted); }
 .mdl-row:hover,.mdl-row.on { background:#3b4535; }
 .slot-diff { background:#151a15; border-color:var(--line); border-radius:3px; }
+.lib-preset { background:var(--bg-1); color:var(--text); border:1px solid var(--line); border-radius:3px; padding:10px 12px; font:inherit; cursor:pointer; }
+.lib-preset:hover,.lib-preset:focus { border-color:var(--gold); color:var(--gold-2); }
 .hdr-add-btn,.lib-add-btn,.lib-io-btn,.ctx-max-btn,.lib-sort-btn,.hr-del {
     background:transparent; color:var(--text); border:1px solid var(--line); border-radius:3px; font-weight:500;
 }
@@ -153,7 +156,9 @@ button,input,select,textarea { font-family:inherit; }
 /* Camera controls are part of the minimap frame; advanced controls open inward. */
 .minimap { border-radius:4px; background:rgba(24,30,24,.96); overflow:visible; }
 #minimapCanvas { background:#202a22; }
-.mm-rows { bottom:45px; }
+/* Exactly the canvas's height, not "45px above the panel's edge": broadcast mode hides the
+   tools dock, the panel shrinks, and the 1-7 labels were squeezed off their rows. */
+.mm-rows { bottom:auto; height:var(--mm-canvas); }
 .map-tools-dock { margin-left:calc(-1 * var(--mm-gut)); margin-right:-4px; margin-bottom:-4px;
     padding:4px 6px; border-top:1px solid var(--line); }
 .camera-controls { position:relative; inset:auto; transform:none; display:flex; justify-content:space-between;
@@ -186,7 +191,8 @@ button,input,select,textarea { font-family:inherit; }
 .an-camera-dock { position:absolute; right:10px; bottom:10px; width:200px; padding:4px 6px;
     background:rgba(24,30,24,.96); border:1px solid var(--line); border-radius:4px; z-index:8; }
 .an-stage .camera-controls { top:auto; left:auto; transform:none; }
-body.spectator-mode .spectator-leaderboard { max-height:calc(100vh - 312px); }
+/* Divided by the UI size: the minimap it stops above is scaled too (styles.css, UI size). */
+body.spectator-mode .spectator-leaderboard { max-height:calc(100vh / var(--ui-scale, 1) - 312px); }
 body.spectator-mode .mm-fog { bottom:calc(var(--mm-bottom) + 42px); }
 .visual-showcase-label { position:absolute; left:20px; top:70px; max-width:340px;
     color:var(--gold-2); background:rgba(25,30,25,.92); padding:12px 16px; border-left:2px solid var(--gold);
@@ -223,6 +229,32 @@ body.spectator-mode .mm-fog { bottom:calc(var(--mm-bottom) + 42px); }
     font:1.2rem Georgia,serif; letter-spacing:.04em;
 }
 .arena-loading img { width:80px; height:80px; margin-bottom:12px; }
+/* Lineup card: on the loading cover, then briefly over the opening of the match. */
+.arena-lineup { margin-top:26px; min-width:min(560px, calc(100vw - 32px)); max-width:calc(100vw - 32px);
+    background:rgba(20,26,23,.94); border:1px solid rgba(222,197,148,.35); border-radius:4px;
+    padding:14px 16px; font:.9rem/1.4 system-ui,sans-serif; letter-spacing:0; color:#e8dcc2; cursor:default; box-sizing:border-box; }
+.arena-lineup .lu-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;
+    border-bottom:1px solid rgba(222,197,148,.2); padding-bottom:8px; margin-bottom:6px; }
+.arena-lineup .lu-title { font:1.05rem Georgia,serif; color:#dec594; letter-spacing:.04em; }
+.arena-lineup .lu-meta { color:#a9a38f; font-size:.8rem; overflow-wrap:anywhere; }
+.arena-lineup .lu-seat { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; align-items:center; padding:7px 0; }
+.arena-lineup .lu-seat + .lu-seat { border-top:1px solid rgba(222,197,148,.1); }
+.arena-lineup .lu-badge { grid-row:span 2; display:flex; }
+.arena-lineup .lu-who { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; min-width:0; }
+.arena-lineup .lu-name { font-weight:600; overflow-wrap:anywhere; }
+.arena-lineup .lu-civ, .arena-lineup .lu-model { color:#a9a38f; font-size:.8rem; overflow-wrap:anywhere; }
+.arena-lineup .lu-tags { display:flex; gap:5px; flex-wrap:wrap; }
+.arena-lineup .lu-tag { font-size:.72rem; padding:1px 7px; border-radius:9px; border:1px solid rgba(222,197,148,.3); color:#d8cfb8; }
+.arena-lineup .lu-tag.ok { border-color:#6f9a64; color:#a8d39b; }
+.arena-lineup .lu-tag.warn { border-color:#b58a3c; color:#e6c27a; }
+.arena-lineup .lu-tag.quiet { color:#8d8878; border-style:dashed; }
+/* Over the opening of the match it sits at the bottom, clear of the top bar and the first
+   bubbles; in broadcast mode above the caption row, which runs along the bottom there. */
+.arena-lineup.floating { position:fixed; top:auto; bottom:28px; left:50%; transform:translateX(-50%); margin:0; z-index:9000;
+    cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,.45); transition:opacity .6s ease; }
+.arena-lineup.floating.fading { opacity:0; }
+body.broadcast-mode .arena-lineup.floating { bottom:calc(128px * var(--ui-scale, 1)); }
+@media (prefers-reduced-motion: reduce) { .arena-lineup.floating { transition:none; } }
 
 .visual-showcase-label > .showcase-tools { margin-top:12px; }
 .player-formation-picker {
@@ -241,3 +273,12 @@ body.spectator-mode .mm-fog { bottom:calc(var(--mm-bottom) + 42px); }
 /* Heard horn announcements: three seconds readable, then one second fading. */
 .spectator-sound-caption { color:#f1d399; font-weight:600; margin:8px 0 0; animation:spectatorSoundCaption 4s linear forwards; }
 @keyframes spectatorSoundCaption { 0%,75% { opacity:1; } 100% { opacity:0; } }
+
+/* Transient messages off the game HUD (UIManager.showNotice). Above the loading
+   cover, because a failed start is reported while that cover is still up. */
+.app-notice { position:fixed; left:50%; bottom:32px; transform:translateX(-50%); z-index:100001;
+    max-width:min(560px, calc(100vw - 32px)); padding:12px 18px; border:1px solid var(--line);
+    border-left:3px solid var(--teal); border-radius:3px; background:var(--bg-1); color:var(--text);
+    box-shadow:var(--shadow); font-size:.92rem; line-height:1.45; cursor:pointer; overflow-wrap:anywhere; }
+.app-notice.is-error { border-left-color:var(--red-2); }
+.app-notice[hidden] { display:none; }

@@ -70,11 +70,12 @@ built behind it, `main` stays on Three.js until the swap milestone.
   note: with the locked camera a unit dead-behind a prop is invisible —
   scenes flank, never stack, along the view diagonal.
 - **M4 — integration (done)**: EngineRenderer implements GameRenderer's whole
-  public surface — entity bookkeeping, the two positional passes the old path
-  ran per frame (separation, building clearance — copied bit-identical; since
-  a later pass they run from EngineRenderer.simulateStep on the game's
-  simulation clock and animate() only draws, see docs/QUALITY_REVIEW.md §7),
-  ortho ground-plane
+  public surface — entity bookkeeping, the embedded sim duties the old path carried
+  (the AI movement lerp, plus the two positional passes: separation and building
+  clearance — copied bit-identical). Both positional passes have since left the render
+  loop entirely and run from the simulation step, in js/simulation/position-rules.js
+  called by Game.tick, so animate() only draws — see docs/QUALITY_REVIEW.md §7 and
+  docs/RULES-CHANGES.md build 933 — and the ortho ground-plane
   picking, screen-space marquee, selection rings, building previews +
   validity, camera intents (position/lookAt map onto dimetric target + ortho
   zoom), health/food bars, projectiles, battle pings, flash-hit tints,
@@ -95,8 +96,9 @@ built behind it, `main` stays on Three.js until the swap milestone.
   landed: TC name banners (canvas → cached texture per civ), priest halos,
   carried-goods diamonds over workers, pulsing wonder claim rings, and
   early/late material eras for town center, house and tower (timber + thatch
-  → plaster + fired tile, gold finial at iron). A fixed noon is a deliberate
-  part of the one-angle art direction — no day tint cycle.
+  → plaster + fired tile, gold finial at iron). A fixed noon was a deliberate
+  part of the one-angle art direction at the time — superseded later by the
+  cosmetic 12-minute day/night cycle (js/engine/atmosphere.js).
 - **M6 — swap (done)**: EngineRenderer is the only renderer — the Three.js
   CDN tag, the `?engine=1` opt-in and js/renderer.js (~2200 lines) are gone.
   terrain.js is pure data now (resource layout + walkability + minimap;

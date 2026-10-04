@@ -36,7 +36,7 @@ class Game {
         // 1 while a Wonder stands, because speeding the sim shrinks the number of
         // DECISIONS a seat gets inside that countdown even though the countdown itself
         // scales correctly.
-        this.simSpeed = 1;
+        this.simSpeed = Game.NORMAL_SIM_SPEED;   // b1020: the old 2x, now labelled 1x
         // 'running' | 'pausing' | 'paused'. Pause is NOT speed zero: a request already
         // sent cannot be unsent, so pressing pause asks to stop and the world keeps
         // turning until every answer in flight has landed and been applied. Freezing on
@@ -46,6 +46,9 @@ class Game {
         // Seconds a finished Wonder must be HELD to win. Long enough that rivals get a
         // real window to march over and destroy it (a Wonder is an existential threat).
         this.wonderRequired = 600;
+        // Game seconds per countdown second (b1021): the countdown counts seconds at the
+        // 1x pace, so 600 of them are ten real minutes at 1x and twenty at 1/2x.
+        this.wonderPace = Game.NORMAL_SIM_SPEED;
         // Exploration bitmap resolution: 42×42 cells (~19 units each), summarised
         // for the models as a 7×7 tile grid of 6×6 cells per tile (see
         // markExploration / explorationSummary).
@@ -53,6 +56,70 @@ class Game {
         this.EXPLORE_TILES = 7;
         this.gameSpeed = 1;
         this.lastFrameTime = 0;
+        this.clock = Game.newClock();
+    }
+
+    // ---- The match clock ----------------------------------------------------------
+    // Every gameplay timer reads simMs: simulated time, advanced by simulateStep itself,
+    // so it runs faster at 2x, stands still on a pause, and cannot depend on the frame
+    // rate or on anything that is not the simulation. stepNo counts those steps.
+    //
+    // matchMs is real match time with pauses left out -- the clock a model lives on,
+    // since it answers in real seconds. Durations reported TO a model are converted
+    // back to it (realSecsSince). `rates` records how fast simMs ran against matchMs,
+    // one entry per change (a speed change, a Wonder's 1x clamp, a pause), which is
+    // all that conversion needs.
+    static newClock() { return { stepNo: 0, simMs: 0, matchMs: 0, rates: [{ sim: 0, match: 0, rate: 1 }] }; }
+    simNow() { return this.clock.simMs; }
+    // Simulated ms per real ms right now: 0 paused, 1 while a Wonder stands, else speed.
+    simRate() {
+        if (this.pauseState === 'paused') return 0;
+        // Lockstep between rounds: the world waits for the models, and so does the match
+        // clock -- thinking time is no time at all in the world they are thinking about.
+        if (this.lockstepFrozen()) return 0;
+        return this.effectiveSimSpeed();
+    }
+    // A tempo change, noted where the stepped world stands (lockstep: no part-steps).
+    noteSimRate(rate) {
+        const c = this.clock;
+        if (rate !== c.rates[c.rates.length - 1].rate) c.rates.push({ sim: c.simMs, match: c.matchMs, rate });
+    }
+    // Once per tick, with the real time that tick covers.
+    advanceMatchClock(wallMs) {
+        const rate = this.simRate(), c = this.clock;
+        if (!(rate > 0) || !(wallMs > 0)) return;
+        // Simulated time budgeted so far includes what the accumulator holds but has not
+        // stepped yet; that is the point on the sim timeline this moment corresponds to.
+        if (rate !== c.rates[c.rates.length - 1].rate) c.rates.push({ sim: c.simMs + (this._simAccumulator || 0), match: c.matchMs, rate });
+        c.matchMs += wallMs;
+    }
+    // The real (match) time at which the simulation stood at `simStamp`.
+    matchMsAt(simStamp) {
+        const r = this.clock.rates;
+        let i = r.length - 1;
+        while (i > 0 && r[i].sim > simStamp) i--;
+        return r[i].match + (simStamp - r[i].sim) / r[i].rate;
+    }
+    // Real seconds since a sim-time stamp, for text a model reads.
+    realSecsSince(simStamp) { return (this.clock.matchMs - this.matchMsAt(simStamp)) / 1000; }
+
+    // ---- Random draws -------------------------------------------------------------
+    // Every random choice a rule makes, keyed (js/simulation/rng.js): the value depends
+    // on the match seed, WHO drew (the seat), WHAT for (the purpose) and which draw of
+    // that pair it is -- never on how many draws anything else made first. `who` is a
+    // unit, a building or an owner.
+    rand(who, purpose) {
+        if (!this._rng) this._rng = WarRng.keyed(this.mapSeed);
+        return WarRng.draw(this._rng, this.rngOwnerKey(who) + ':' + purpose);
+    }
+    // Seats, not player ids: ids are still random until they are seeded (review #6
+    // step 5), and a key must mean the same seat in every run of the match.
+    rngOwnerKey(who) {
+        if (!who) return 'world';
+        const owner = (who === this.player || who.units) ? who : this.getOwner(who);
+        if (!owner) return 'world';
+        if (owner === this.player) return 'p';
+        return owner.seat != null ? 's' + owner.seat : 'id:' + owner.id;
     }
 
     init() {
@@ -189,7 +256,7 @@ class Game {
     // origin is not localhost -- both things this box never exercises. Whatever the
     // specific cause turns out to be, a half-started arena that says nothing is its own
     // bug, and it is the reason the report reads "then nothing happens".
-    async startArenaFromSetup() {
+    async startArenaFromSetup(spec = null) {
         if (this._arenaStarting) return;
         this._arenaStarting = true;
         const cover=document.createElement('div');
@@ -197,10 +264,11 @@ class Game {
         const crest=document.createElement('img');crest.src='favicon.svg';crest.alt='';
         const label=document.createElement('p');label.textContent=t('ar.loadingWorld');
         cover.append(crest,label);document.body.appendChild(cover);
+        this._arenaCover=cover;
         try {
             // Let the opaque cover paint before synchronous terrain generation.
             await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-            return await this._startArenaFromSetup();
+            return await this._startArenaFromSetup(spec);
         } catch (e) {
             console.error('[arena] start failed', e);
             this.gameStarted = false;
@@ -217,6 +285,7 @@ class Game {
             return null;
         } finally {
             cover.remove();
+            this._arenaCover = null;
             this._arenaStarting = false;
         }
     }
@@ -233,13 +302,17 @@ class Game {
         }
     }
 
-    async _startArenaFromSetup() {
-        const setup = this.ui.collectArenaSetup();
+    // `spec` (Quick match, Rematch) is a match given whole: seats, seed, difficulty and
+    // tempo. It is played as given and never written over the saved arena setup, so the
+    // next ordinary match is still the one the user configured. Without one, the setup
+    // screen decides, as before.
+    async _startArenaFromSetup(spec = null) {
+        const setup = spec ? JSON.parse(JSON.stringify(spec.setup)) : this.ui.collectArenaSetup();
 
         // Validate: every LLM slot must point at a model with an endpoint.
         for (let i = 0; i < setup.length; i++) {
             if (setup[i].type === 'llm' && !(setup[i].connection && setup[i].connection.endpoint)) {
-                alert(t('ar.slotNeedsModel', { n: i + 1 }));
+                this.ui.showErrorMessage(t('ar.slotNeedsModel', { n: i + 1 }));
                 return;
             }
         }
@@ -251,7 +324,8 @@ class Game {
         // same countdown, which is the thing that decides races. A result whose tempo
         // was inherited from a match the viewer may not even remember starting is a
         // result they cannot read. Same for a pause: a new match must not begin frozen.
-        this.setSimSpeed(1);
+        this.setSimSpeed(Game.NORMAL_SIM_SPEED);
+        this.wonderPace = Game.NORMAL_SIM_SPEED;
         this.pauseState = 'running';
         // And the speed-up confirmation is documented as "once per match" — it was
         // stored on the UI and never cleared, so it was really once per session and
@@ -284,6 +358,8 @@ class Game {
         this.player.trainSpeedBonus = 1.0;
         this.player.miningBonus = 1.0;
         this.player.healthBonus = 1.0;
+        this.player.healPowerBonus = 0;       // tech bonuses held on the owner: a new match starts without them
+        this.player.rangedBuildingBonus = 0;
         this.player.attackBonus = 1.0;
         this.player.workerSpeedBonus = 1.0;
         this.player.workerBuildSpeedBonus = 1.0;
@@ -299,34 +375,59 @@ class Game {
             const angle = (i / numPlayers) * Math.PI * 2 - Math.PI / 2;
             const radius = halfSize * 0.85;
             spawnPositions.push({
-                x: Math.cos(angle) * radius,
-                z: Math.sin(angle) * radius
+                x: WarMath.cos(angle) * radius,
+                z: WarMath.sin(angle) * radius
             });
         }
 
         // Regenerate the map FIRST (with the chosen difficulty) so resource counts
         // reflect it and the per-TC clearResourcesNear below acts on fresh nodes.
-        this.difficulty = Game.storedDifficulty();
+        this.difficulty = (spec && spec.difficulty) || Game.storedDifficulty();
         this.terrain.difficulty = this.difficulty;
         // Blank means "pick one for me", NOT "run unseeded". Terrain falls through to
         // Math.random when seed is null, so a blank field used to produce a layout that
         // could never be played again — and the transcript recorded null, which answered
         // "did you type a seed" rather than "what map was this". Mint one instead: every
         // match is reproducible and every transcript carries the seed that made it.
-        this.terrain.seed = (this.ui.setupSeed && this.ui.setupSeed()) || Game.mintSeed();
+        this.terrain.seed = (spec && spec.seed) || (this.ui.setupSeed && this.ui.setupSeed()) || Game.mintSeed();
         this.mapSeed = this.terrain.seed;
+        // What this match IS, kept so Rematch can play it again -- same seats, same map,
+        // same tempo. The harness reads the round mode from here rather than from the
+        // setup screen, which a Quick match does not use.
+        this.arenaSpec = {
+            setup: JSON.parse(JSON.stringify(setup)),
+            seed: this.terrain.seed,
+            difficulty: this.difficulty,
+            turnBased: spec ? !!spec.turnBased : !!(this.ui.turnBasedEnabled && this.ui.turnBasedEnabled()),
+            // World milliseconds per round, or null: lockstep is an option of turn-based.
+            lockstepSliceMs: Game.lockstepSliceMs(spec ? spec.lockstepSliceMs : (this.ui.lockstepSliceMs && this.ui.lockstepSliceMs())),
+            roundTimeoutMs: (spec && spec.roundTimeoutMs) || (this.ui.roundTimeoutMs ? this.ui.roundTimeoutMs() : null),
+            preset: (spec && spec.preset) || null
+        };
+        // The lineup card, on the cover while the map is built. One frame is yielded so
+        // it paints before terrain generation blocks the thread.
+        if (this._arenaCover && this.ui.renderArenaLineup) {
+            this.ui.renderArenaLineup(this._arenaCover, setup, null, this.arenaSpec);
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        }
         // Stone and gold are laid out ROTATIONALLY around the Town Centers, so the
         // generator needs the spawns before it runs (they are already computed above).
         this.terrain.spawns = spawnPositions;
         this._battles = []; // fresh match, no carried-over engagements
         this.resetTimeline();  // ...and a fresh graph
+        // Lockstep needs a round to freeze the world between, and rounds need a model
+        // seat: an all-rule-based match simply runs.
+        if (this.arenaSpec.turnBased && this.arenaSpec.lockstepSliceMs && setup.some(s => s.type === 'llm')) {
+            this._lockstep = { sliceMs: this.arenaSpec.lockstepSliceMs, budget: 0 };   // frozen until round one has run
+        } else this.arenaSpec.lockstepSliceMs = null;
         this.terrain.generateTerrain();
         this.renderer.setTerrain(this.terrain);
 
         // Create AI players based on setup
         this.aiManager.aiPlayers = [];
         for (let i = 0; i < numPlayers; i++) {
-            const ai = this.aiManager.addAIPlayer(setup[i].civ, 'medium');
+            // A rule-based seat plays the anchor style its slot names (AI_PROFILES).
+            const ai = this.aiManager.addAIPlayer(setup[i].civ, 'medium', setup[i].type === 'ki' ? setup[i].profile : undefined);
             ai.seat = i; // arena slot order → team badge (must be set BEFORE any create*)
             const spawn = spawnPositions[i];
 
@@ -342,7 +443,7 @@ class Game {
 
             // Create initial workers
             for (let w = 0; w < 3; w++) {
-                const worker = createUnit('worker', spawn.x + this.randJitter(10), spawn.z + this.randJitter(10), ai.id, ai.civilization, 'stone');
+                const worker = createUnit('worker', spawn.x + (this.rand(ai, 'start-workers') - 0.5) * 10, spawn.z + (this.rand(ai, 'start-workers') - 0.5) * 10, ai.id, ai.civilization, 'stone');
                 if (worker) {
                     ai.units.push(worker);
                     this.renderer.addUnit(worker);
@@ -361,6 +462,12 @@ class Game {
         if (this.openAIAIManager) this.openAIAIManager.stop();
         this.openAIAIManager = new OpenAIAIManager(this);
         await this.openAIAIManager.initFromSetup(setup);
+        // Again from the transcript header, now that each server has said what it is:
+        // the card shows what the record says.
+        if (this._arenaCover && this.ui.renderArenaLineup) {
+            const rec = this.openAIAIManager.transcripts;
+            this.ui.renderArenaLineup(this._arenaCover, setup, rec && rec.matchMeta, this.arenaSpec);
+        }
 
         // Mark LLM-controlled AI players
         for (let i = 0; i < setup.length; i++) {
@@ -405,6 +512,7 @@ class Game {
 
         await this.waitForArenaScene();
         this.gameStarted = true;
+        if (this._arenaCover && this.ui.floatArenaLineup) this.ui.floatArenaLineup(this._arenaCover);
         this.sound?.matchStart();
         // Start game loop
         this.lastFrameTime = Date.now();
@@ -452,6 +560,8 @@ class Game {
         this.player.trainSpeedBonus = 1.0;
         this.player.miningBonus = 1.0;
         this.player.healthBonus = 1.0;
+        this.player.healPowerBonus = 0;       // tech bonuses held on the owner: a new match starts without them
+        this.player.rangedBuildingBonus = 0;
         this.player.attackBonus = 1.0;
         this.player.workerSpeedBonus = 1.0;
         this.player.workerBuildSpeedBonus = 1.0;
@@ -473,8 +583,8 @@ class Game {
             const angle = (i / totalPlayers) * Math.PI * 2 - Math.PI / 2; // Start from top
             const radius = halfSize * 0.85; // 85% of half-size
             spawnPositions.push({
-                x: Math.cos(angle) * radius,
-                z: Math.sin(angle) * radius
+                x: WarMath.cos(angle) * radius,
+                z: WarMath.sin(angle) * radius
             });
         }
 
@@ -510,8 +620,8 @@ class Game {
             // Create initial workers near player town center
             for (let i = 0; i < 3; i++) {
                 const worker = createUnit('worker', 
-                    playerSpawn.x + this.randJitter(10), 
-                    playerSpawn.z + this.randJitter(10), 
+                    playerSpawn.x + (this.rand(this.player, 'start-workers') - 0.5) * 10, 
+                    playerSpawn.z + (this.rand(this.player, 'start-workers') - 0.5) * 10, 
                     'player', this.player.civilization, 'stone');
                 this.player.units.push(worker);
                 this.renderer.addUnit(worker);
@@ -546,8 +656,8 @@ class Game {
             // Create AI workers near their town center
             for (let j = 0; j < 3; j++) {
                 const aiWorker = createUnit('worker', 
-                    aiSpawn.x + this.randJitter(10), 
-                    aiSpawn.z + this.randJitter(10), 
+                    aiSpawn.x + (this.rand(ai, 'start-workers') - 0.5) * 10, 
+                    aiSpawn.z + (this.rand(ai, 'start-workers') - 0.5) * 10, 
                     ai.id, aiCiv, 'stone');
                 ai.units.push(aiWorker);
                 this.renderer.addUnit(aiWorker);
@@ -696,80 +806,65 @@ class Game {
         let elapsed = currentTime - this.lastFrameTime;
         this.lastFrameTime = currentTime;
         if (!(elapsed > 0)) elapsed = 0;
-        // Keep the FULL elapsed time (don't discard like the old 100ms clamp did),
-        // but cap a single catch-up so an extreme gap (machine slept) can't freeze
-        // the tab replaying it. Fed to the sim in safe ≤100ms slices below.
+        // Keep the FULL elapsed time, but cap a single catch-up so an extreme gap (the
+        // machine slept) cannot freeze the tab replaying it.
         const MAX_CATCHUP = 2000; // ms of real time we'll replay in one tick at most
         const simTime = Math.min(elapsed, MAX_CATCHUP);
 
-        // Coarse, once-per-tick work (AI decision cadence and population don't need slicing).
-        //
-        // Population is derived FIRST, because both managers below read it and one of
-        // them ships it to a model. It used to be re-derived at the end of the tick,
-        // which meant every state a model received carried the PREVIOUS tick's headcount
-        // — harmless while the count held still, a straight contradiction whenever it
-        // had just changed, and on the opening turn a population of 0 sitting beside the
-        // three workers it was counting. A field that is computed from another field has
-        // to be computed before the read, not after it.
-        this.aiManager.aiPlayers.forEach(ai => {
-            ai.resources.updatePopulation(ai.units.length);
-        });
-        this.aiManager.update(simTime);
-        if (this.openAIAIManager) {
-            this.openAIAIManager.update(simTime);
-        }
-        this.sampleTimeline(currentTime);
-        this.pruneBattles();   // time-driven: a quiet map must still let fights expire
-        // Keep the selection card current. Health, and anything else it shows, moves
-        // while you watch; the card only ever rendered on the click that selected.
-        // Throttled to ~400ms: fast enough to watch a building lose health, far
-        // cheaper than the per-frame rebuild a tick-rate refresh would be.
-        if (currentTime - (this._infoTick || 0) >= 400) {
-            this._infoTick = currentTime;
-            if (this.ui && this.ui.refreshUnitInfo) this.ui.refreshUnitInfo();
-        }
-
-        // Fine simulation in ≤100ms sub-steps so the FULL elapsed time is advanced.
-        const STEP_MAX = 100;
-        const budgeted = this.simBudget(simTime);
+        // Lockstep: the match clock follows the steps a slice actually takes (below), not
+        // the frames -- a slice ends mid-frame, and counting that frame whole drifted it
+        // by a few milliseconds a round.
+        const lockRate = this._lockstep ? this.simRate() : 0;
+        if (!this._lockstep) this.advanceMatchClock(simTime);
+        else if (lockRate > 0) this.noteSimRate(lockRate);
         // Ambient motion and daylight follow elapsed time, not the fast-forward
         // multiplier for units/research. They still stop with an actual pause.
         this._environmentSeconds = (this._environmentSeconds || 0)
             + (this.pauseState === 'paused' ? 0 : simTime / 1000);
-        let remaining = budgeted;
-        while (remaining > 0) {
-            const step = Math.min(STEP_MAX, remaining);
-            this.simulateStep(step);
-            remaining -= step;
-        }
-        this.keepUnitsAshore();
 
-        // HUD/minimap work is pointless while the tab is hidden (background ticks)
-        // — skip it. Win conditions ALWAYS run so a match can end unattended.
+        // The model harness runs on wall time on purpose: models answer in real seconds.
+        if (this.openAIAIManager) {
+            this.openAIAIManager.update(simTime);
+        }
+
+        // The simulation: whole fixed steps, the remainder carried to the next tick (it
+        // is also how far the renderer smooths between the last two steps). Everything
+        // that decides the game runs inside stepOnce, so the frame rate cannot reach it.
+        this._simAccumulator = (this._simAccumulator || 0) + this.simBudget(simTime);
+        let steps = 0;
+        while (this._simAccumulator >= Game.SIM_STEP_MS && this.gameStarted) {
+            // Lockstep: only the steps the round granted, never one more.
+            if (this._lockstep) {
+                if (this._lockstep.budget < Game.SIM_STEP_MS) break;
+                this._lockstep.budget -= Game.SIM_STEP_MS;
+            }
+            this.stepOnce();
+            this._simAccumulator -= Game.SIM_STEP_MS;
+            steps++;
+        }
+        if (this._lockstep && lockRate > 0) this.clock.matchMs += steps * Game.SIM_STEP_MS / lockRate;
+        // A spent slice leaves no part-step behind: the next slice starts on a clean step.
+        if (this._lockstep && this._lockstep.budget < Game.SIM_STEP_MS) this._simAccumulator = 0;
+
+        // Presentation from here down.
+        this.sampleTimeline(currentTime);
+        // Keep the selection card current. Throttled to ~400ms.
+        if (currentTime - (this._infoTick || 0) >= 400) {
+            this._infoTick = currentTime;
+            if (this.ui && this.ui.refreshUnitInfo) this.ui.refreshUnitInfo();
+        }
+        // HUD/minimap work is pointless while the tab is hidden (background ticks).
         const hidden = (typeof document !== 'undefined') && document.hidden;
         if (!hidden) {
             this.updateProgressBar();
             this.ui.updateResources(this.player.resources);
             this.ui.updateAge(this.player.age);
-            // Rival intel footer (campaign): epochs are public, counts appear on
-            // first contact — refresh every ~2s so both stay current. (No-op in
-            // the arena: updateOpponentsPanel hides itself in spectator mode.)
+            // Rival intel footer (campaign): refreshed every ~2s.
             this._oppPanelTimer = (this._oppPanelTimer || 0) + simTime;
             if (this._oppPanelTimer >= 2000) {
                 this._oppPanelTimer = 0;
                 if (this.ui.updateOpponentsPanel) this.ui.updateOpponentsPanel();
             }
-        }
-        // The BUDGET, not raw elapsed time. A Wonder hold is the one clock that could
-        // run while the world stood still: it accumulates from whatever it is handed,
-        // and handing it real milliseconds meant a paused match could still be won by
-        // a Wonder nobody was defending and nobody could attack. (Outside a pause the
-        // two are identical whenever it matters — a standing Wonder already forces the
-        // sim to 1x — so this changes nothing else.)
-        this.checkWinConditions(budgeted);
-
-        // Update minimap periodically (every ~500ms; skipped while hidden)
-        if (!hidden) {
             if (!this.minimapUpdateTimer) this.minimapUpdateTimer = 0;
             this.minimapUpdateTimer += simTime;
             if (this.minimapUpdateTimer >= 500) {
@@ -777,6 +872,97 @@ class Game {
                 this.updateMinimap();
             }
         }
+    }
+
+    // ---- The simulation step (review #6 step 9) ------------------------------------------
+    // One fixed quantum of simulated time. Every rule runs in here and nowhere else, so a
+    // match is the same sequence of steps whatever drives it: tick() in a browser at any
+    // frame rate, a hidden tab's worker, or advanceSim() with the world frozen between
+    // model turns. 50 ms: the Platform's headless server already steps by it, so the
+    // browser and the server run identical step sequences; and every periodic timer in
+    // the rules (attack 1000, tower 1500, defense 600, acquire 150, discovery 250, think
+    // 2000) is a whole number of steps, so none of them loses a remainder.
+    static get SIM_STEP_MS() { return 50; }
+
+    // A hash of the rule state -- every seat's resources, research, units and buildings,
+    // the nodes and the step -- recorded with every arena input so a re-simulation can be
+    // certified step by step (review #9). The same projection the golden-trace harness
+    // pins; 16 hex characters.
+    stateHash() {
+        const ref = v => (v && (v.id || v.handle)) || null;
+        const fields = ['id', 'type', 'x', 'z', 'health', 'maxHealth', 'task', 'isMoving', 'isAttacking',
+            'targetX', 'targetZ', 'attackTimer', 'carryingResource', 'harvestAmount', 'buildProgress',
+            'underConstruction', 'isProducing', 'productionType', 'productionProgress', 'foodAmount'];
+        const project = e => Object.assign(Object.fromEntries(fields.filter(k => e[k] !== undefined).map(k => [k, e[k]])),
+            { attackTarget: ref(e.attackTarget), harvestTarget: ref(e.harvestTarget), buildTarget: ref(e.buildTarget) });
+        const text = JSON.stringify({
+            step: this.clock ? this.clock.stepNo : 0,
+            seats: this.aiManager.aiPlayers.map(p => ({
+                id: p.id, age: p.age, eliminated: !!p._eliminated,
+                resources: ['food', 'wood', 'stone', 'gold', 'population', 'maxPopulation'].map(k => p.resources[k]),
+                research: Object.keys(p.researchedTechs || {}).sort(),
+                units: p.units.map(project), buildings: p.buildings.map(project),
+            })),
+            nodes: ((this.terrain && this.terrain.resources) || []).map(r => [r.type, r.x, r.z, r.amount]),
+        });
+        return (typeof warSha256 === 'function' ? warSha256(text) : '').slice(0, 16);
+    }
+
+    // ---- Lockstep (an option of turn-based play) ------------------------------------
+    // The world stands still while a round's seats think. When the round's moves have
+    // run, it is granted exactly one slice of simulated time -- a whole number of steps
+    // -- plays it at the chosen tempo, and stops again for the next round. So every
+    // round spans the same world time however long the models take: the precise form
+    // of slowing the game down. The tempo buttons only decide how fast a slice plays
+    // on screen. null when off.
+    static lockstepSliceMs(v) {
+        const n = Math.round(Number(v) / Game.SIM_STEP_MS) * Game.SIM_STEP_MS;
+        return n >= Game.SIM_STEP_MS && n <= 60000 ? n : null;
+    }
+    lockstepFrozen() { return !!this._lockstep && this._lockstep.budget < Game.SIM_STEP_MS; }
+    grantLockstep() { if (this._lockstep) this._lockstep.budget += this._lockstep.sliceMs; }
+
+    stepOnce() {
+        const dt = Game.SIM_STEP_MS;
+        // Presentation only: the renderer notes where units stood, to smooth between steps.
+        if (this.renderer && this.renderer.beginSimStep) this.renderer.beginSimStep();
+        // Population first: the brain below and the state a model is sent both read it.
+        this.aiManager.aiPlayers.forEach(ai => {
+            ai.resources.updatePopulation(ai.units.length);
+        });
+        // The rule-based brain thinks on simulated time, like the world it commands.
+        this.aiManager.update(dt);
+        this.simulateStep(dt);
+        // Separation and building clearance, on simulated time (review #6 step 2).
+        WarPositionRules.apply(this.getAllUnits(), this.getAllBuildings(), dt / 1000);
+        // What each model has found, sampled every step.
+        if (this.openAIAIManager && this.openAIAIManager.observeStep) this.openAIAIManager.observeStep();
+        this.keepUnitsAshore();
+        this.pruneBattles();   // time-driven: a quiet map must still let fights expire
+        // With the step's own length: a Wonder hold cannot run while the world stands still.
+        this.checkWinConditions(dt);
+    }
+
+    // The frozen-step driver: advance exactly `simMs` of simulated time -- a whole number
+    // of steps -- with no wall clock involved, and stop if the match ends. What a
+    // lockstep round or a benchmark calls between model turns; the world does not move
+    // while they think. The match clock counts the same time as real match time, at the
+    // current rate, so what models are told in seconds stays consistent.
+    advanceSim(simMs) {
+        const steps = simMs / Game.SIM_STEP_MS;
+        if (!Number.isInteger(steps) || steps < 0) throw new RangeError('advanceSim takes a whole number of ' + Game.SIM_STEP_MS + ' ms steps');
+        const rate = this.simRate() || 1;
+        let done = 0;
+        for (; done < steps && this.gameStarted; done++) {
+            this.advanceMatchClock(Game.SIM_STEP_MS / rate);
+            this.stepOnce();
+        }
+        return done;
+    }
+
+    // How far the next step is along, 0..1 -- for presentation smoothing only.
+    simAlpha() {
+        return Math.max(0, Math.min(1, (this._simAccumulator || 0) / Game.SIM_STEP_MS));
     }
 
     // Background-tab driver: browsers pause requestAnimationFrame in hidden tabs
@@ -809,6 +995,9 @@ class Game {
     // One fixed simulation slice (dt ≤ 100ms). Called once for a normal 60fps frame,
     // or several times to replay a long/throttled frame without losing time.
     simulateStep(dt) {
+        // The clock first, so everything this step stamps carries this step's time.
+        this.clock.simMs += dt;
+        this.clock.stepNo++;
         // One sight-list rebuild per owner per sub-step, however many units scan
         // (visionSources below). The stamp is what makes the cache honest: positions move
         // every step, so a source list may not outlive the step that computed it.
@@ -832,13 +1021,6 @@ class Game {
         // time so the leaderboard age never lags behind the actual game.
         this.updateResearchProgress(dt);
         this.updateAgeUpgradeProgress(dt);
-        // Where units may stand. This belongs to the renderer's entity bookkeeping, but it
-        // mutates positions, so it runs on the SIMULATION clock rather than from the render
-        // loop: last in the step, mirroring where it sat relative to a completed tick before
-        // (movement and combat first, refereeing after). Guarded because the vm harnesses
-        // load game.js with no renderer at all — and because a match must keep simulating if
-        // the GPU took the context back, which is the same reason the loop no longer owns it.
-        if (this.renderer && this.renderer.simulateStep) this.renderer.simulateStep(dt);
     }
 
     // A jitter recorder lived here: it sampled every moving unit every 200ms and
@@ -908,8 +1090,8 @@ class Game {
                 resourceNode.farmRef.assignedWorker = unit;
                 // Move worker to the farm
                 unit.isMoving = true;
-                unit.targetX = resourceNode.farmRef.x + this.randJitter(3);
-                unit.targetZ = resourceNode.farmRef.z + this.randJitter(3);
+                unit.targetX = resourceNode.farmRef.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+                unit.targetZ = resourceNode.farmRef.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
                 unit.harvestTarget = null;
                 unit.carryingResource = false;
             } else if (unit.type === 'worker' && resourceNode) {
@@ -1070,8 +1252,8 @@ class Game {
             // had, and it undid the formation for exactly the units standing closest to
             // the fighting.
             const off = u.formationOffset;
-            u.targetX = x + (off ? off.x : this.randJitter(4));
-            u.targetZ = z + (off ? off.z : this.randJitter(4));
+            u.targetX = x + (off ? off.x : (this.rand(u, 'escort') - 0.5) * 4);
+            u.targetZ = z + (off ? off.z : (this.rand(u, 'escort') - 0.5) * 4);
             n++;
         });
         return n;
@@ -1088,7 +1270,8 @@ class Game {
         if (targetIsBuilding) {
             if (a === 'infantry') return 1.5;
             if (a === 'cavalry') return 1.0;
-            if (a === 'ranged') return 0.5;
+            // Fire Arrows (academy, iron age): +30% of this against buildings.
+            if (a === 'ranged') return 0.5 * (1 + this.rangedBuildingBonusOf(attacker));
             return 0.5; // workers/support
         }
         const t = target.unitType;
@@ -1122,7 +1305,8 @@ class Game {
             this._standingOrders?.retaliate(victim, attacker);
             return;
         }
-        if (!victim || !victim.unitType || victim.unitType === 'support' || victim.type === 'worker') return;
+        if (victim && victim.type === 'worker') { this.workerSelfDefense(victim, attacker); return; }
+        if (!victim || !victim.unitType || victim.unitType === 'support') return;
         if (!victim.isAttacking || !victim.attackTarget) return;
         if (!attacker || attacker.health <= 0) return;
         if (victim.attackTarget === attacker) return; // already fighting back
@@ -1138,6 +1322,28 @@ class Game {
                 this.spreadRetaliation(victim, first);
             }
         }
+    }
+
+    // A worker hit by a unit fights back against THAT unit -- the retaliation the army
+    // has, without the army's habit of joining a fight nearby. It saves what it was
+    // doing (gathering, farming, building, a scouting trip) and goes back to it when the
+    // attacker falls or is out of reach (SELF_DEFENSE_LEASH from where it was hit).
+    // Buildings and towers are not answered: a worker cannot fight a tower, and walking
+    // up to one only gets it killed. A worker already defending itself keeps its
+    // attacker; one under a standing order is left to it.
+    static get SELF_DEFENSE_LEASH() { return 30; }
+    workerSelfDefense(w, attacker) {
+        if (!w || w.health <= 0 || w._standingOrder || !(w.attack > 0)) return;
+        if (!attacker || attacker.health <= 0 || !attacker.unitType || attacker.owner === w.owner) return;
+        if (w.isAttacking && w.attackTarget && w.attackTarget.health > 0) return;
+        w._draftReturn = { task: w.task, harvestTarget: w.harvestTarget || null, farmRef: w.farmRef || null,
+            buildTarget: w.buildTarget || null, targetX: w.targetX, targetZ: w.targetZ, isMoving: !!w.isMoving };
+        if (w.farmRef && w.farmRef.assignedWorker === w) w.farmRef.assignedWorker = null;
+        w.farmRef = null; w.isHarvesting = false;
+        w.task = null;
+        this.clearRetaliation(w);
+        w._selfDefense = { x: w.x, z: w.z };
+        w.isAttacking = true; w.attackTarget = attacker; w.attackMove = null; w.attackTimer = 0;
     }
 
     // Focus fire: squadmates on the same original target join in. Units may
@@ -1185,7 +1391,7 @@ class Game {
         // Share the mesh stand-off with pursuit checks: attacking a wall from
         // outside the building is productive combat, not a stalled chase.
         const building = target.isWonder || !!(target.type && BUILDING_DEFS[target.type]);
-        const reach = (unit.range > 1 ? unit.range : 1.5) + (building ? (target.isWonder ? 4.6 : 3.5) : 0);
+        const reach = (unit.range > 1 ? unit.range : 1.5) + (building ? (target.isWonder ? 4.6 * Game.WONDER_SCALE : 3.5) : 0);
         // Building footprints must not let archers fire from beyond tower reach.
         return unit.unitType === 'ranged'
             ? Math.min(reach, (typeof BUILDING_DEFS !== 'undefined' && BUILDING_DEFS.tower?.range) || 18) : reach;
@@ -1201,6 +1407,16 @@ class Game {
             if(unit._standingOrder?.mode==='scout'&&!unit._standingOrder.threats?.length)return;
             // Skip workers - they don't attack unless explicitly ordered
             if (unit.type === 'worker' && !unit.isAttacking) return;
+            // Self-defense ends with its attacker: dead, gone, or out of reach of where
+            // the worker was hit. It never looks for the next enemy.
+            if (unit._selfDefense) {
+                const t = unit.attackTarget, sd = unit._selfDefense;
+                if (!t || t.health <= 0 || WarMath.hypot(t.x - sd.x, t.z - sd.z) > Game.SELF_DEFENSE_LEASH) {
+                    unit._selfDefense = null;
+                    this.resumeWorkerAfterCombat(unit);
+                    return;
+                }
+            }
 
             // Drop a dead/destroyed target — the retaliation ladder decides what
             // comes next: the next living damage dealer in line, then the
@@ -1230,7 +1446,7 @@ class Game {
                 // unit keeps marching on its attack-move. First scan is immediate.
                 unit._acquireTimer = (unit._acquireTimer == null) ? 150 : unit._acquireTimer + deltaTime;
                 if (unit._acquireTimer >= 150) {
-                    unit._acquireTimer = 0;
+                    unit._acquireTimer -= 150;   // carry the remainder: cadence-proof
                     // What this radius now MEANS, since the scan requires sight: measured
                     // across the roster, every unit's aggro exceeds its own sight (militia
                     // 24 vs 15, elite archer 35 vs 15, cavalry 24 vs 22.5), so in open
@@ -1350,7 +1566,7 @@ class Game {
                 // push attackers just outside it forever, starving attackTimer.
                 // The small inward stand-off above resists those nudges; epsilon
                 // only covers coordinate rounding, not extra weapon reach.
-                if (Math.hypot(currentTarget.x-unit.x,currentTarget.z-unit.z) <= attackRange + 1e-6) {
+                if (WarMath.hypot(currentTarget.x-unit.x,currentTarget.z-unit.z) <= attackRange + 1e-6) {
                     // In range - attack!
                     unit.formationOffset = null;   // fighting now; the march shape is over
                     unit.isMoving = false;
@@ -1358,7 +1574,7 @@ class Game {
                     
                     // Attack every 1 second
                     if (unit.attackTimer >= 1000) {
-                        unit.attackTimer = 0;
+                        unit.attackTimer -= 1000;   // carry the remainder: cadence-proof
 
                         // Deal damage (with rock-paper-scissors counter bonus)
                         const dealt = unit.attack * this.combatMultiplier(unit, currentTarget);
@@ -1366,16 +1582,19 @@ class Game {
                         this.recordBattleDamage(unit, currentTarget, dealt);
                         // Remember who hit this target & when, for the auto-defense reflex.
                         currentTarget._lastAttacker = unit;
-                        currentTarget._lastDamageTime = Date.now();
+                        currentTarget._lastDamageTime = this.simNow();
                         // A besieging squad answers back: focus-fire the dealer.
                         this.noteRetaliation(currentTarget, unit);
 
                         // Combat visuals: arrows for ranged shots, a hit flash on the
                         // victim, and a (throttled) battle ping for spectators.
                         if (unit.range > 1) {
+                            // A burning arrow at a building once Fire Arrows is researched.
+                            const atBuilding = (currentTarget.type && BUILDING_DEFS[currentTarget.type]) || currentTarget.isWonder;
+                            const fire = atBuilding && unit.unitType === 'ranged' && this.rangedBuildingBonusOf(unit) > 0;
                             this.renderer.spawnProjectile(
                                 { x: unit.x, y: 1.5, z: unit.z },
-                                { x: currentTarget.x, y: 1.1, z: currentTarget.z }, 'arrow', unit);
+                                { x: currentTarget.x, y: 1.1, z: currentTarget.z }, fire ? 'fireArrow' : 'arrow', unit);
                         }
                         this.renderer.flashHit(currentTarget);
                         this.notifyCombat(currentTarget.x, currentTarget.z, unit, currentTarget, dealt);
@@ -1433,7 +1652,7 @@ class Game {
             let patient = null, best = HEAL_SEARCH;
             owner.units.forEach(o => {
                 if (o === u || o.health <= 0 || o.health >= o.maxHealth) return;
-                const d = Math.hypot(o.x - u.x, o.z - u.z);
+                const d = WarMath.hypot(o.x - u.x, o.z - u.z);
                 if (d < best) { best = d; patient = o; }
             });
             if (!patient) return;
@@ -1461,8 +1680,8 @@ class Game {
                 // marching/holding; do not alternate patient pursuit with the slot.
                 // Idle with someone hurt nearby: walk over (generic mover drives it).
                 u.isMoving = true;
-                u.targetX = patient.x + this.randJitter(2);
-                u.targetZ = patient.z + this.randJitter(2);
+                u.targetX = patient.x + (this.rand(u, 'heal-walk') - 0.5) * 2;
+                u.targetZ = patient.z + (this.rand(u, 'heal-walk') - 0.5) * 2;
             }
         });
     }
@@ -1483,13 +1702,13 @@ class Game {
         const unknown = requireSight ? (o) => !this.canOwnerSee(unit.owner, o.x, o.z) : () => false;
         this.renderer.units.forEach(o => {
             if (o.owner === unit.owner || o.health <= 0 || unknown(o)) return;
-            const d = Math.hypot(o.x - unit.x, o.z - unit.z);
+            const d = WarMath.hypot(o.x - unit.x, o.z - unit.z);
             if (d < minDist) { minDist = d; nearest = o; }
         });
         if (includeBuildings) {
             this.renderer.buildings.forEach(b => {
                 if (b.owner === unit.owner || b.health <= 0 || unknown(b)) return;
-                const d = Math.hypot(b.x - unit.x, b.z - b.z);
+                const d = WarMath.hypot(b.x - unit.x, b.z - unit.z);
                 if (d < minDist) { minDist = d; nearest = b; }
             });
         }
@@ -1505,7 +1724,7 @@ class Game {
             if (!tower.attackTimer) tower.attackTimer = 0;
             tower.attackTimer += deltaTime;
             if (tower.attackTimer < 1500) return; // fire every 1.5s
-            tower.attackTimer = 0;
+            tower.attackTimer -= 1500;   // carry the remainder: cadence-proof
 
             const range = tower.range || 6;
             // Volley width and bite both scale with the tower's epoch (TOWER_POWER).
@@ -1531,7 +1750,7 @@ class Game {
                 // Credit the shooter: the casualty report names the tower, and
                 // the auto-defense reflex knows what to retaliate against.
                 unit._lastAttacker = tower;
-                unit._lastDamageTime = Date.now();
+                unit._lastDamageTime = this.simNow();
                 // Besieging squads turn on the tower shooting them.
                 this.noteRetaliation(unit, tower);
 
@@ -1572,8 +1791,8 @@ class Game {
     updateAutoDefense(deltaTime) {
         this._autoDefTimer = (this._autoDefTimer || 0) + deltaTime;
         if (this._autoDefTimer < 600) return; // throttle (~0.6s) so we don't re-task every frame
-        this._autoDefTimer = 0;
-        const now = Date.now();
+        this._autoDefTimer -= 600;   // carry the remainder: cadence-proof
+        const now = this.simNow();
 
         this.aiManager.aiPlayers.forEach(owner => {
             if (!owner || !owner.units) return;
@@ -1644,27 +1863,16 @@ class Game {
                             1: Game.BATTLE_RADIUS * 1.5, 0: Game.BATTLE_RADIUS };
             const reach = REACH[this.threatPriority(primary.ent)];
             let defenders = military.filter(u => !u._standingOrder && !u.isAttacking &&
-                Math.hypot(u.x - primary.ent.x, u.z - primary.ent.z) <= reach);
-            // A WONDER under attack is existential — it IS the win condition — so it
-            // is ALL HANDS ON DECK: every worker downs tools and fights ALONGSIDE the
-            // army, from anywhere on the map. For anything else workers stay a last
-            // resort: only those nearby, and only when there is no army at all.
+                WarMath.hypot(u.x - primary.ent.x, u.z - primary.ent.z) <= reach);
+            // Workers are never drafted here (1 Oct 2026). They used to be: all of them
+            // for a Wonder raid, from anywhere on the map, and those within 28 when the
+            // seat had no army -- which pulled scouts off their trips and builders off
+            // their sites to answer fights they were not part of. A worker now fights
+            // only for itself, against whoever hits it (Game.workerSelfDefense), and goes
+            // back to its job after.
+            const hands = [];
             const wonderRaid = !!primary.ent.isWonder;
-            let hands = [];
-            if (wonderRaid || military.length === 0) {
-                // Only workers NOT already fighting — this reflex re-runs every ~600ms
-                // while the raid lasts, and re-drafting an engaged worker reset its
-                // attackTimer below the 1000ms swing threshold FOREVER: drafted mobs
-                // surrounded the raider and never landed a single blow until the
-                // building fell and the threat list finally emptied. (It also
-                // overwrote _draftReturn with the already-drafted state, losing the
-                // economy job the worker should return to.)
-                hands = owner.units.filter(u => u.type === 'worker' && u.health > 0 && !u._standingOrder &&
-                    !u.isAttacking &&
-                    (wonderRaid || Math.hypot(u.x - primary.ent.x, u.z - primary.ent.z) <= 28));
-                defenders = defenders.concat(hands);
-            }
-            const usingWorkers = hands.length > 0;
+            const usingWorkers = false;
 
             // Priests march to a DEFENSE exactly as they march to an attack. This was
             // the one order path that never called escortSupportUnits, so the clergy
@@ -1681,11 +1889,11 @@ class Game {
             // drafted-worker note above warns about), and a priest tending another live
             // battle is not recalled off an ongoing assault to answer a scratch at home.
             const defenceOnSite = defenders.length > 0 || military.some(u =>
-                u.isAttacking && Math.hypot(u.x - atk.x, u.z - atk.z) <= Game.BATTLE_RADIUS);
+                u.isAttacking && WarMath.hypot(u.x - atk.x, u.z - atk.z) <= Game.BATTLE_RADIUS);
             if (defenceOnSite) {
                 this.escortSupportUnits(owner.units.filter(u =>
                     u.unitType === 'support' && u.health > 0 && !u._standingOrder &&
-                    !(u.isMoving && Math.hypot(u.targetX - atk.x, u.targetZ - atk.z) < 12) &&
+                    !(u.isMoving && WarMath.hypot(u.targetX - atk.x, u.targetZ - atk.z) < 12) &&
                     !this.tendingOtherBattle(u, atk)), atk.x, atk.z);
             }
 
@@ -1740,7 +1948,7 @@ class Game {
                 d.attackTarget = atk;
                 // Small spread on the rally point so a worker mob doesn't try to
                 // occupy one exact spot when the fight ends (the old jam).
-                d.attackMove = { x: atk.x + this.randJitter(5), z: atk.z + this.randJitter(5) };
+                d.attackMove = { x: atk.x + (this.rand(d, 'defend-rally') - 0.5) * 5, z: atk.z + (this.rand(d, 'defend-rally') - 0.5) * 5 };
                 d.attackTimer = 0;
                 d.isMoving = true;
                 d.targetX = atk.x;
@@ -1753,11 +1961,11 @@ class Game {
     // (atk)? Reuses the battle ledger so auto-defense can tell "idle at home" from
     // "healing at the front" without inventing a second piece of bookkeeping.
     tendingOtherBattle(unit, atk) {
-        const now = Date.now();
+        const now = this.simNow();
         return (this._battles || []).some(b =>
             (now - b.lastAt) < Game.BATTLE_QUIET_MS &&
-            Math.hypot(b.x - atk.x, b.z - atk.z) > Game.BATTLE_RADIUS &&
-            Math.hypot(unit.x - b.x, unit.z - b.z) <= Game.BATTLE_RADIUS);
+            WarMath.hypot(b.x - atk.x, b.z - atk.z) > Game.BATTLE_RADIUS &&
+            WarMath.hypot(unit.x - b.x, unit.z - b.z) <= Game.BATTLE_RADIUS);
     }
 
     // A worker's fight is over: send it back to the economy job it was drafted
@@ -1794,8 +2002,8 @@ class Game {
         unit.carryingResource = false;
         unit.harvestAmount = 0;
         unit.isMoving = true;
-        unit.targetX = q.node.x + this.randJitter(2);
-        unit.targetZ = q.node.z + this.randJitter(2);
+        unit.targetX = q.node.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
+        unit.targetZ = q.node.z + (this.rand(unit, 'node-spot') - 0.5) * 2;
         return true;
     }
 
@@ -1808,13 +2016,39 @@ class Game {
         unit.attackTarget = null;
         if (this.applyQueuedAssign(unit)) return;   // ordered onward while it was fighting
         if (!r) return;
+        // A load still in hand goes home first (b1033). Sent back to its node instead, the
+        // worker arrived full -- and a full worker does not gather (the arrival needs empty
+        // hands), so it stood at the node for good with the stone it was carrying (asp67).
+        // It walks to the nearest finished Town Center, as a full worker does, and the
+        // delivery sends it back to its node or field from there.
+        if (unit.carryingResource && (r.harvestTarget || r.farmRef)) {
+            const owner = this.getOwner(unit);
+            let tc = null, best = Infinity;
+            for (const b of (owner && owner.buildings) || []) {
+                if (b.type !== 'town_center' || b.underConstruction || !(b.health > 0)) continue;
+                const d = WarMath.hypot(b.x - unit.x, b.z - unit.z);
+                if (d < best) { best = d; tc = b; }
+            }
+            if (tc) {
+                if (r.farmRef && r.farmRef.health > 0 && !r.farmRef.assignedWorker) {
+                    unit.farmRef = r.farmRef;
+                    r.farmRef.assignedWorker = unit;
+                } else if (r.harvestTarget) unit.harvestTarget = r.harvestTarget;
+                unit.task = 'carrying';
+                unit.isHarvesting = false;
+                unit.isMoving = true;
+                unit.targetX = tc.x;
+                unit.targetZ = tc.z;
+                return;
+            }
+        }
         if (r.farmRef && r.farmRef.health > 0 && !r.farmRef.assignedWorker) {
             unit.task = 'farm_work';
             unit.farmRef = r.farmRef;
             r.farmRef.assignedWorker = unit;
             unit.isMoving = true;
-            unit.targetX = r.farmRef.x + this.randJitter(3);
-            unit.targetZ = r.farmRef.z + this.randJitter(3);
+            unit.targetX = r.farmRef.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+            unit.targetZ = r.farmRef.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
             return;
         }
         if (r.harvestTarget && r.harvestTarget.amount > 0) {
@@ -1823,14 +2057,32 @@ class Game {
             unit.isHarvesting = false;
             unit.harvestTimer = 0;
             unit.isMoving = true;
-            unit.targetX = r.harvestTarget.x + this.randJitter(2);
-            unit.targetZ = r.harvestTarget.z + this.randJitter(2);
+            unit.targetX = r.harvestTarget.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
+            unit.targetZ = r.harvestTarget.z + (this.rand(unit, 'node-spot') - 0.5) * 2;
             return;
         }
         if (r.harvestTarget) {
             // The node ran dry during the fight: nearest discovered same-type node.
             unit.harvestTarget = r.harvestTarget;
             this.retargetDepletedWorker(unit, this.getOwner(unit));
+            return;
+        }
+        // A builder goes back to its site while it still needs building; a scout picks
+        // its trip up where it left it. Both were lost before: the worker stood idle at
+        // the fight.
+        if (r.task === 'building' && r.buildTarget && r.buildTarget.health > 0 && r.buildTarget.underConstruction) {
+            unit.task = 'building';
+            unit.buildTarget = r.buildTarget;
+            unit.isMoving = true;
+            unit.targetX = r.targetX != null ? r.targetX : r.buildTarget.x;
+            unit.targetZ = r.targetZ != null ? r.targetZ : r.buildTarget.z;
+            return;
+        }
+        if (r.task === 'scouting' && Number.isFinite(r.targetX) && Number.isFinite(r.targetZ)) {
+            unit.task = 'scouting';
+            unit.isMoving = true;
+            unit.targetX = r.targetX;
+            unit.targetZ = r.targetZ;
         }
     }
 
@@ -1947,21 +2199,24 @@ class Game {
     // typed it. Any string works — terrain hashes it — so this only has to be unique
     // enough that two matches minutes apart do not collide.
     static mintSeed() {
-        return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); // rng-exempt: mints the seed itself
     }
 
     simBudget(ms) {
-        if (this.pauseState === 'paused') return 0;
-        return ms * (this.anyWonderStanding() ? 1 : (this.simSpeed || 1));
+        return ms * this.simRate();
     }
 
     // Pause takes effect only once nothing is in flight; the AI manager makes that call
     // (it is the only thing that knows) and flips us to 'paused'.
     requestPause() {
-        if (this.pauseState === 'running') this.pauseState = 'pausing';
+        if (this.pauseState === 'running') {
+            this.pauseState = 'pausing';
+            if (this.openAIAIManager) this.openAIAIManager.noteMatchEvent({ kind: 'pauseRequested' });
+        }
         if (this.ui && this.ui.updateSimSpeedButton) this.ui.updateSimSpeedButton();
     }
     resumeSim() {
+        if (this.pauseState !== 'running' && this.openAIAIManager) this.openAIAIManager.noteMatchEvent({ kind: 'resumed' });
         this.pauseState = 'running';
         // Elapsed time is measured from lastFrameTime, which has been advancing all
         // through the pause. Without this the first tick back would hand the sim the
@@ -1981,40 +2236,24 @@ class Game {
 
     // 1 | 1.5 | 2 | 4. Returns what actually took effect, which is 1 while a Wonder stands.
     setSimSpeed(mult) {
+        const before = this.simSpeed;
         this.simSpeed = [1, 1.5, 2, 4].includes(mult) ? mult : 1;
+        if (this.simSpeed !== before && this.openAIAIManager && this.openAIAIManager.noteInput) this.openAIAIManager.noteInput('speed', null, { speed: this.simSpeed });
+        // Requested and effective: a standing Wonder holds the match at 1x.
+        if (this.simSpeed !== before && this.openAIAIManager) this.openAIAIManager.noteMatchEvent(
+            { kind: 'speed', requested: mult, speed: this.simSpeed, effective: this.effectiveSimSpeed() });
         if (this.ui && this.ui.updateSimSpeedButton) this.ui.updateSimSpeedButton();
         return this.effectiveSimSpeed();
     }
 
-    effectiveSimSpeed() { return this.anyWonderStanding() ? 1 : (this.simSpeed || 1); }
-
-    // The match's own source of randomness, and the reason it is not Math.random: terrain
-    // already owns a seeded PRNG (mulberry32, terrain.js:88) because two models cannot be
-    // compared on "identical terrain" unless the map really is identical — but that was the
-    // ONLY thing the seed reached. Everything else the simulation's trajectory depends on
-    // (spawn scatter, where a worker parks on a farm, the angle a trained unit walks out at,
-    // where a builder puts a structure when the model gave no coordinates, which tile an
-    // explore order resolves to) drew from Math.random, so a seeded match reproduced the
-    // LAYOUT and not the MATCH: same island, different game, and nothing in the transcript
-    // header's mapSeed said which was which.
-    //
-    // With no seed, terrain.rand IS Math.random (terrain.js:89), so the default game is
-    // bit-for-bit the same code path it always took. With one, gameplay draws continue the
-    // generator the map was built from — which is why map generation itself is unaffected:
-    // it consumes the stream first, unchanged, before any of these calls exist.
-    //
-    // What this does NOT claim: that a live match replays. The world advances by wall-clock
-    // delta, so a 60fps tab and a backgrounded one take different numbers of steps through
-    // the same seed (measured in §7). Seeded runs are reproducible at a fixed step cadence —
-    // which is what a test harness, a replay-driven review, and a bug report need.
-    rand() {
-        return ((this.terrain && typeof this.terrain.rand === 'function') ? this.terrain.rand : Math.random)();
+    // A standing Wonder holds the match at 1x at most (b1021): 2x falls back to it, 1/2x
+    // stays where it is.
+    effectiveSimSpeed() {
+        const set = this.simSpeed || 1;
+        return this.anyWonderStanding() ? Math.min(set, Game.NORMAL_SIM_SPEED) : set;
     }
-
-    // Half-width jitter, the shape almost every call site wants: a park-and-spread offset so
-    // a crowd does not weld into one point, ±k/2. Kept as a method because the alternative
-    // was writing `(this.rand() - 0.5) * 3` thirty times and inviting a typo in the sign.
-    randJitter(k) { return (this.rand() - 0.5) * k; }
+    // How long a Wonder must stand, in game ms.
+    wonderHoldMs() { return (this.wonderRequired || 600) * 1000 * (this.wonderPace || 1); }
 
     toggleActionCam() {
         this._actionCam = !this._actionCam;
@@ -2114,13 +2353,13 @@ class Game {
     // unit, framed to the bounding radius of a group, medium on a building.
     _subjectZoom(subject) {
         if (!subject) return 34;
-        if (subject.kind === 'ent') return (subject.ent && subject.ent.isWonder) ? 44 : 30;
+        if (subject.kind === 'ent') return (subject.ent && subject.ent.isWonder) ? 60 : 30;
         const live = (subject.units || []).filter(u => u.health > 0);
         if (live.length <= 1) return 17; // a single followed unit → close-up
         const cx = live.reduce((a, u) => a + u.x, 0) / live.length;
         const cz = live.reduce((a, u) => a + u.z, 0) / live.length;
         let r = 0;
-        live.forEach(u => { r = Math.max(r, Math.hypot(u.x - cx, u.z - cz)); });
+        live.forEach(u => { r = Math.max(r, WarMath.hypot(u.x - cx, u.z - cz)); });
         return Math.max(22, Math.min(60, r * 1.5 + 14));
     }
 
@@ -2155,16 +2394,19 @@ class Game {
         if (!rnd || !rnd.worldToScreen || !rnd.canvas) return;
         const rect = rnd.canvas.getBoundingClientRect();
         const px = clientX - rect.left, py = clientY - rect.top;
-        let best = null, bestIsUnit = false, bestScore = Infinity;
-        const consider = (ent, isUnit, anchorY, radius) => {
-            if (!ent || ent.health <= 0) return;
+        let best = null, bestIsUnit = false, bestIsNode = false, bestScore = Infinity;
+        const consider = (ent, isUnit, anchorY, radius, isNode = false) => {
+            if (!ent || (isNode ? !(ent.amount > 0) : ent.health <= 0)) return;
             const s = rnd.worldToScreen(ent.x, anchorY, ent.z);
             if (!s) return;
-            const d = Math.hypot(s.x - px, s.y - py);
+            const d = WarMath.hypot(s.x - px, s.y - py);
             if (d > radius) return;
-            const score = d - (isUnit ? 8 : 0); // a unit standing on a building wins
-            if (score < bestScore) { bestScore = score; best = ent; bestIsUnit = isUnit; }
+            // A unit standing on a building wins; a resource node yields to both.
+            const score = d - (isUnit ? 8 : 0) + (isNode ? 6 : 0);
+            if (score < bestScore) { bestScore = score; best = ent; bestIsUnit = isUnit; bestIsNode = isNode; }
         };
+        // Resource nodes too (b1034): a tree, a stone or gold deposit, berries.
+        ((this.terrain && this.terrain.resources) || []).forEach(n => consider(n, false, 0.5, 22, true));
         this.aiManager.aiPlayers.forEach(o => {
             // Anchor buildings at the GROUND BASE (y≈0), not the elevated centre:
             // in the isometric view the base is where a human instinctively
@@ -2179,7 +2421,10 @@ class Game {
             this.ui.updateUnitInfo(null, null);
             return;
         }
-        if (bestIsUnit) {
+        if (bestIsNode) {
+            this._camFollow = null;
+            this.ui.updateUnitInfo(null, null, best);
+        } else if (bestIsUnit) {
             best.selected = true;
             this.ui.updateUnitInfo(best, null);
             this._camFollow = { kind: 'units', units: [best] };
@@ -2271,11 +2516,11 @@ class Game {
     static get BATTLE_MAX() { return 8; }
 
     _battleAt(x, z, open) {
-        const now = Date.now();
+        const now = this.simNow();
         const R = Game.BATTLE_RADIUS;
         this.pruneBattles();
         const near = this._battles.filter(e =>
-            (now - e.lastAt) <= Game.BATTLE_QUIET_MS && Math.hypot(e.x - x, e.z - z) <= R);
+            (now - e.lastAt) <= Game.BATTLE_QUIET_MS && WarMath.hypot(e.x - x, e.z - z) <= R);
         let b = near[0] || null;
         // Two fronts that grow together are ONE battle — models routinely split an
         // army across a village and then regroup on one spot, and separate buckets
@@ -2311,7 +2556,7 @@ class Game {
     // every state for the rest of the match. The one caller that reads _battles
     // outside combat (the state serializer) never filtered by age either.
     pruneBattles() {
-        const now = Date.now();
+        const now = this.simNow();
         this._battles = (this._battles || []).filter(b => (now - b.lastAt) <= Game.BATTLE_KEEP_MS);
     }
 
@@ -2350,7 +2595,7 @@ class Game {
         // which would make a siege look like a won field battle.
         const isBuilding = target.isWonder || !!(target.type && BUILDING_DEFS[target.type]);
         if (isBuilding) e.dmgBuildings += amount; else e.dmgUnits += amount;
-        b.lastAt = Date.now();
+        b.lastAt = this.simNow();
         // Drift toward where the blows land so a rolling fight stays ONE engagement.
         b.x += (target.x - b.x) * 0.05;
         b.z += (target.z - b.z) * 0.05;
@@ -2391,7 +2636,7 @@ class Game {
         // apart at 1x, a quarter of that at 4x, and a minute apart for a slow model, so
         // any fixed number of seconds means something different for every player in the
         // same match. A turn count means the same thing for all of them.
-        ownerObj.events.push({ at: Date.now(), seq: ownerObj._turnSeq || 0, text,
+        ownerObj.events.push({ at: this.simNow(), seq: ownerObj._turnSeq || 0, text,
                                ttl: (typeof ttl === 'number' && ttl > 0) ? ttl : 2 });
         if (ownerObj.events.length > 14) ownerObj.events.shift();
     }
@@ -2412,7 +2657,7 @@ class Game {
         if (!ownerObj || !building) return;
         const list = ownerObj._lostBuildings || (ownerObj._lostBuildings = []);
         list.push({
-            at: Date.now(),
+            at: this.simNow(),
             type: building.type,
             wonder: !!building.isWonder,
             x: Math.round(building.x),
@@ -2564,7 +2809,7 @@ class Game {
                 if (u.type !== 'worker' || u.health <= 0) return;
                 if (u.task !== 'carrying' || !u.carryingResource) return;
                 let best = null, bd = Infinity;
-                drops.forEach(tc => { const d = Math.hypot(tc.x - u.x, tc.z - u.z); if (d < bd) { bd = d; best = tc; } });
+                drops.forEach(tc => { const d = WarMath.hypot(tc.x - u.x, tc.z - u.z); if (d < bd) { bd = d; best = tc; } });
                 if (best) { u.targetX = best.x; u.targetZ = best.z; u.isMoving = true; }
             });
             return 0;
@@ -2607,7 +2852,7 @@ class Game {
         const drops = owner.buildings.filter(b => b.type === 'town_center' && !b.underConstruction && b.health > 0);
         if (!drops.length) return 0;
         const nearestTC = (x, z) => drops.reduce((best, tc) =>
-            (!best || Math.hypot(tc.x - x, tc.z - z) < Math.hypot(best.x - x, best.z - z)) ? tc : best, null);
+            (!best || WarMath.hypot(tc.x - x, tc.z - z) < WarMath.hypot(best.x - x, best.z - z)) ? tc : best, null);
         const busy = u => u.isAttacking || u.attackTarget || u.isBuilding || u.task === 'building' || u.task === 'repairing';
         let resumed = 0;
 
@@ -2634,8 +2879,8 @@ class Game {
             hand.farmRef = f;
             hand.task = 'farm_work';
             hand.isMoving = true;
-            hand.targetX = f.x + this.randJitter(3);
-            hand.targetZ = f.z + this.randJitter(3);
+            hand.targetX = f.x + (this.rand(hand, 'farm-spot') - 0.5) * 3;
+            hand.targetZ = f.z + (this.rand(hand, 'farm-spot') - 0.5) * 3;
             resumed++;
         });
 
@@ -2688,7 +2933,7 @@ class Game {
             (civForBuild?.uniqueBuildings || []).find(b => b.id === buildingType);
         if (!buildingDef) return;
 
-        // Wonder: Iron-age, one at a time, hold it wonderRequired (600s) to win.
+        // Wonder: Iron-age, one at a time, hold 600s (wonderRequired) to win.
         if (buildingDef.type === 'wonder') {
             const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
             const reqAge = buildingDef.requiredAge || 'iron';
@@ -2999,6 +3244,10 @@ class Game {
             }
             if (tech.bonus.healPower) {
                 owner.healPowerBonus = (owner.healPowerBonus || 0) + tech.bonus.healPower;
+            }
+            // Fire Arrows: ranged units' damage against buildings (combatMultiplier).
+            if (tech.bonus.buildingDamage && tech.appliesTo === 'ranged') {
+                owner.rangedBuildingBonus = (owner.rangedBuildingBonus || 0) + tech.bonus.buildingDamage;
             }
         }
     }
@@ -3364,7 +3613,8 @@ class Game {
         for (const u of workers) {
             const rank = this.workerPullRank(owner, u);
             if (rank === Infinity) continue;   // building or fighting: never pulled
-            const walk = Math.hypot(u.x - site.x, u.z - site.z) / (((u.speed || 1) * 3) || 3);
+            if (opts.skip && opts.skip(u)) continue;   // the caller's own exclusions
+            const walk = WarMath.hypot(u.x - site.x, u.z - site.z) / (((u.speed || 1) * 3) || 3);
             const cost = walk + (PULL_SECS[rank] || 0);
             if (cost < bestCost) { bestCost = cost; best = u; bestRank = rank; }
         }
@@ -3411,7 +3661,7 @@ class Game {
     // Returns the remaining lockout in ms (0 = repairs allowed).
     repairBarrierMsLeft(building) {
         if (!building || !building._lastDamageTime) return 0;
-        return Math.max(0, 10000 - (Date.now() - building._lastDamageTime));
+        return Math.max(0, 10000 - (this.simNow() - building._lastDamageTime));
     }
 
     // Assign specific workers to a friendly building: finish its construction if it
@@ -3527,7 +3777,28 @@ class Game {
     //
     // Farms are excluded there, so they are excluded here.
     static get UNIT_BUILDING_CLEARANCE() { return 4.5; }
-    static get WONDER_CLEARANCE() { return 7.0; }
+    // Wonders are 1.5x their old size (28 Sep 2026): the mesh, the ring units are kept
+    // out of, the reach needed to hit one, and the ground it needs to stand on. With
+    // towers 15 apart (TOWER_SPACING), at most five towers can reach one attacker at a
+    // Wonder -- three on the nearest ring -- where thirteen could before, so an army that
+    // commits has a chance, and the Wonder reads as the landmark it is.
+    static get WONDER_SCALE() { return 1.5; }
+    static get WONDER_CLEARANCE() { return 7.0 * Game.WONDER_SCALE; }
+    static get TOWER_SPACING() { return 15; }
+    static get WONDER_BUILD_GAP() { return 11 * Game.WONDER_SCALE; }
+
+    // How far a new building must stand from an existing one. `base` is the caller's own
+    // gap (the placement paths grew up with slightly different ones, and the rule-based
+    // AI's are recorded in the golden traces); on top of it, one rule for everybody: a
+    // Wonder, new or standing, keeps WONDER_BUILD_GAP, and a tower keeps TOWER_SPACING
+    // from every other tower. Shared by the models' placement, the rule-based AI and the
+    // human player's, so the three can never disagree about where a tower may go.
+    static buildingGap(base, newType, newIsWonder, existing) {
+        let gap = base;
+        if (newIsWonder || (existing && existing.isWonder)) gap = Math.max(gap, Game.WONDER_BUILD_GAP);
+        if (newType === 'tower' && existing && existing.type === 'tower') gap = Math.max(gap, Game.TOWER_SPACING);
+        return gap;
+    }
 
     clampSlot(x, z) {
         const p = this.clampToMap(x, z);
@@ -3543,7 +3814,7 @@ class Game {
             if (!b || b.health <= 0 || b.type === 'farm') continue;
             const clr = (b.isWonder ? Game.WONDER_CLEARANCE : Game.UNIT_BUILDING_CLEARANCE) + 0.5;
             const dx = sx - b.x, dz = sz - b.z;
-            const d = Math.hypot(dx, dz);
+            const d = WarMath.hypot(dx, dz);
             if (d >= clr) continue;
             if (d < 0.01) { sx = b.x + clr; continue; }   // dead centre: any direction out
             sx = b.x + (dx / d) * clr;
@@ -3564,7 +3835,7 @@ class Game {
     // walkable ring is left around the node for harvesters to reach it. Scales with
     // the building's footprint (Town Centers / Wonders are larger).
     resourceClearance(buildingType, isWonder) {
-        const half = (buildingType === 'town_center' || isWonder) ? 5 : 3.5;
+        const half = isWonder ? 5 * Game.WONDER_SCALE : buildingType === 'town_center' ? 5 : 3.5;
         return half + 4.5; // ~2 node radius + ~2.5 worker gap
     }
 
@@ -3575,7 +3846,7 @@ class Game {
         const clr = this.resourceClearance(buildingType, isWonder);
         for (const r of res) {
             if (r.amount !== undefined && r.amount <= 0) continue; // depleted node won't block
-            if (Math.hypot(r.x - x, r.z - z) < clr) return true;
+            if (WarMath.hypot(r.x - x, r.z - z) < clr) return true;
         }
         return false;
     }
@@ -3645,6 +3916,14 @@ class Game {
 
     resetTimeline() {
         this._environmentSeconds = 0;
+        this.clock = Game.newClock();   // a new match starts at simulated time zero
+        this._simAccumulator = 0;       // ...and no part-step carried over from the last one
+        this._rng = WarRng.keyed(this.mapSeed);   // ...and at the first draw of every key
+        // ...and the brain's discovery beat from zero. The manager lives as long as the
+        // page, so this carried over from the last match, and a Rematch scanned the map
+        // on a different beat than the match it repeats. (Think clocks are per seat.)
+        if (this.aiManager) this.aiManager.discoveryTimer = 0;
+        this._lockstep = null;          // a match that wants lockstep sets it after this
         this._standingOrders = null;
         this._timeline = { t0: Date.now(), samples: [], ages: [], exhausted: [], wonders: [] };
         // Handles are per MATCH: without this they keep climbing across restarts in one
@@ -3762,7 +4041,7 @@ class Game {
         let idx = -1, best = 6;
         res.forEach((r, i) => {
             if (r.amount !== undefined && r.amount <= 0) return;
-            const d = Math.hypot(r.x - x, r.z - z);
+            const d = WarMath.hypot(r.x - x, r.z - z);
             if (d < best) { best = d; idx = i; }
         });
         // Report civ AND seat: two players can field the SAME civilization, so
@@ -3848,8 +4127,8 @@ class Game {
         info.forEach((g, gid) => {
             seen.add(gid);
             if (!g.n || !g.target) return;
-            const d = Math.hypot(g.cx / g.n - g.target.x, g.cz / g.n - g.target.z);
-            const now = Date.now();
+            const d = WarMath.hypot(g.cx / g.n - g.target.x, g.cz / g.n - g.target.z);
+            const now = this.simNow();
             const st = chase.get(gid) || { min: d, minAt: now, charging: false };
             // A real gain, not noise: two units of jitter must not keep resetting the
             // clock and hold the charge off forever.
@@ -4120,7 +4399,7 @@ class Game {
             cx /= myEyes.length; cz /= myEyes.length;
             let reach = 0;
             myEyes.forEach(s => {
-                const d = Math.hypot(s.e.x - cx, s.e.z - cz) + Math.max(s.r, Game.CONTACT_CAMERA_RANGE);
+                const d = WarMath.hypot(s.e.x - cx, s.e.z - cz) + Math.max(s.r, Game.CONTACT_CAMERA_RANGE);
                 if (d > reach) reach = d;
             });
 
@@ -4134,7 +4413,7 @@ class Game {
                 targets.forEach(t => {
                     // Cheap rejection first: outside the circle round everything I own,
                     // no eye of mine can see it and no unit of mine is near it.
-                    if (Math.hypot(t.x - cx, t.z - cz) > reach) return;
+                    if (WarMath.hypot(t.x - cx, t.z - cz) > reach) return;
                     // Both answers in one pass: the CLOSEST of my things to it (the
                     // camera's question, which counts near misses nobody saw) and
                     // whether any of them could actually see it (the event's question).
@@ -4143,7 +4422,7 @@ class Game {
                     // is merely the first one tried.
                     let best = Infinity, sawAt = null, nearMine = null;
                     for (const src of myEyes) {
-                        const d = Math.hypot(src.e.x - t.x, src.e.z - t.z);
+                        const d = WarMath.hypot(src.e.x - t.x, src.e.z - t.z);
                         // Prefer a UNIT over a building at equal distance: the shot is
                         // "from the thing that walked into them", and a barracks did not
                         // walk anywhere.
@@ -4162,10 +4441,10 @@ class Game {
                         // model was already told; saying it again spends a line to
                         // repeat a coordinate. After a few turns it is worth confirming.
                         const back = !was && gone.get(key);
-                        const parked = back && Math.hypot(t.x - back.x, t.z - back.z) < Game.CONTACT_FLAP_DIST
+                        const parked = back && WarMath.hypot(t.x - back.x, t.z - back.z) < Game.CONTACT_FLAP_DIST
                                             && (turnSeq - back.seq) < Game.CONTACT_FLAP_TURNS && back.carrying === carrying;
                         // New, or it has gone somewhere since we last said so.
-                        const moved = was && Math.hypot(t.x - was.rx, t.z - was.rz) >= Game.CONTACT_MOVED_DIST;
+                        const moved = was && WarMath.hypot(t.x - was.rx, t.z - was.rz) >= Game.CONTACT_MOVED_DIST;
                         const report = (!was && !parked) || moved || (was && was.carrying !== carrying);
                         if (back) gone.delete(key);
                         // TWO positions are kept, and the difference between them is the
@@ -4228,7 +4507,7 @@ class Game {
                 gone.set(key, { x: was.x, z: was.z, seq: turnSeq, carrying: was.carrying });
                 // Lost where it was found: the pair draws no line, so it is one fact
                 // reported twice. The sighting already said where it is.
-                if (Math.hypot(was.x - was.sx, was.z - was.sz) < Game.CONTACT_FLAP_DIST) return;
+                if (WarMath.hypot(was.x - was.sx, was.z - was.sz) < Game.CONTACT_FLAP_DIST) return;
                 const k = was.who + '|' + was.type + '|lost|' + (was.carrying || '');
                 const cur = lost.get(k);
                 if (!cur) lost.set(k, { n: 1, x: was.x, z: was.z, who: was.who, type: was.type, carrying: was.carrying });
@@ -4301,7 +4580,7 @@ class Game {
                     if (gx < 0 || gx >= G || gz < 0 || gz >= G) continue;
                     const wx = (gx + 0.5) * cell - half;
                     const wz = (gz + 0.5) * cell - half;
-                    if (Math.hypot(wx - x, wz - z) <= range) grid[gz * G + gx] = 1;
+                    if (WarMath.hypot(wx - x, wz - z) <= range) grid[gz * G + gx] = 1;
                 }
             }
         };
@@ -4341,9 +4620,11 @@ class Game {
         if (!viewer) return;
         if (!viewer._metRivals) viewer._metRivals = new Set();
         const isHuman = viewer === this.player;
+        // Built only if some rival is still unmet: most calls find everyone met.
+        let see = null;
         const canSee = (x, z) => isHuman
             ? !!(this.fogOfWar && this.fogOfWar.isPositionVisible(x, z))
-            : this.aiManager.isVisibleTo(viewer, x, z);
+            : (see || (see = buildVisionTest(this, viewer)))(x, z);
         const consider = (owner, key) => {
             if (owner === viewer || viewer._metRivals.has(key)) return;
             const spotted = (owner.units || []).some(u => u.health > 0 && canSee(u.x, u.z)) ||
@@ -4414,7 +4695,7 @@ class Game {
                 u.task === 'building' && u.buildTarget === b);
             if (hasBuilder) continue;
             if (!unit) return b;
-            const d = Math.hypot(b.x - unit.x, b.z - unit.z);
+            const d = WarMath.hypot(b.x - unit.x, b.z - unit.z);
             if (d < bestD) { bestD = d; best = b; }
         }
         return best;
@@ -4453,8 +4734,8 @@ class Game {
                 unit.task = 'farm_work';
                 unit.farmRef = f.farmRef;
                 unit.isMoving = true;
-                unit.targetX = f.farmRef.x + this.randJitter(3);
-                unit.targetZ = f.farmRef.z + this.randJitter(3);
+                unit.targetX = f.farmRef.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+                unit.targetZ = f.farmRef.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
                 return;
             }
             if ((f.task === 'harvesting' || f.task === 'carrying') && f.harvestTarget) {
@@ -4475,8 +4756,8 @@ class Game {
             unit.task = 'farm_work';
             unit.farmRef = site;
             unit.isMoving = true;
-            unit.targetX = site.x + this.randJitter(3);
-            unit.targetZ = site.z + this.randJitter(3);
+            unit.targetX = site.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+            unit.targetZ = site.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
             return;
         }
         // A worker that just finished building looks for ANOTHER unfinished site with
@@ -4503,6 +4784,13 @@ class Game {
     }
 
     // Get the owner data (player or AI) for a unit or building
+    // Fire Arrows: the attacker's owner's bonus against buildings, found by owner id.
+    rangedBuildingBonusOf(unit) {
+        const owner = !unit ? null : unit.owner === 'player' ? this.player
+            : (this.aiManager && this.aiManager.aiPlayers.find(a => a.id === unit.owner));
+        return (owner && owner.rangedBuildingBonus) || 0;
+    }
+
     getOwner(entity) {
         if (entity.owner === 'player') return this.player;
         return this.aiManager.aiPlayers.find(a => a.units.includes(entity) || a.buildings.includes(entity));
@@ -4614,7 +4902,7 @@ class Game {
                 ? (!this.fogOfWar || this.fogOfWar.isPositionVisible(r.x, r.z))
                 : !!(owner._knownResIdx && owner._knownResIdx.has(idx));
             if (!known) return;
-            const d = Math.hypot(r.x - fromX, r.z - fromZ);
+            const d = WarMath.hypot(r.x - fromX, r.z - fromZ);
             if (d < bestDist) { bestDist = d; best = r; }
         });
         if (!best) return; // nothing of this type discovered & left → idle
@@ -4622,8 +4910,8 @@ class Game {
         unit.task = 'harvesting';
         unit.harvestTarget = best;
         unit.isMoving = true;
-        unit.targetX = best.x + this.randJitter(2);
-        unit.targetZ = best.z + this.randJitter(2);
+        unit.targetX = best.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
+        unit.targetZ = best.z + (this.rand(unit, 'node-spot') - 0.5) * 2;
     }
 
     updateWorkerTasks(deltaTime) {
@@ -4709,11 +4997,11 @@ class Game {
                             const RIM = { stone: 2.1, gold: 1.9, food: 1.45, wood: 0.9 };
                             const rim = RIM[n.type] || 1.2;
                             let rx = unit.x - n.x, rz = unit.z - n.z;
-                            let rd = Math.hypot(rx, rz);
+                            let rd = WarMath.hypot(rx, rz);
                             if (rd < rim) {
                                 if (rd < 0.01) { // dead-center: spread by a stable per-unit angle
                                     const a = ((unit.id || '').length * 2.4 + n.x * 0.13 + n.z * 0.17) % 6.283;
-                                    rx = Math.cos(a); rz = Math.sin(a); rd = 1;
+                                    rx = WarMath.cos(a); rz = WarMath.sin(a); rd = 1;
                                 }
                                 unit.x = n.x + (rx / rd) * rim;
                                 unit.z = n.z + (rz / rd) * rim;
@@ -4868,8 +5156,8 @@ class Game {
                         : (unit.harvestTarget.amount > 0);
                     
                     if (hasMoreResources) {
-                        unit.targetX = unit.harvestTarget.x + this.randJitter(2);
-                        unit.targetZ = unit.harvestTarget.z + this.randJitter(2);
+                        unit.targetX = unit.harvestTarget.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
+                        unit.targetZ = unit.harvestTarget.z + (this.rand(unit, 'node-spot') - 0.5) * 2;
                         unit.isMoving = true;
                         unit.task = 'harvesting';
                     } else if (!unit.harvestTarget.isFarm) {
@@ -4887,8 +5175,8 @@ class Game {
                 if (unit.farmRef && unit.farmRef.assignedWorker === unit && unit.farmRef.health > 0) {
                     unit.task = 'farm_work';
                     unit.isMoving = true;
-                    unit.targetX = unit.farmRef.x + this.randJitter(3);
-                    unit.targetZ = unit.farmRef.z + this.randJitter(3);
+                    unit.targetX = unit.farmRef.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+                    unit.targetZ = unit.farmRef.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
                 }
                 // Nothing resumed the job (harvestTarget was cleared mid-carry and there
                 // is no farm): become idle. Without this the worker lingered with
@@ -5108,8 +5396,8 @@ class Game {
                     // Return to farm
                     unit.task = 'farm_work';
                     unit.isMoving = true;
-                    unit.targetX = farm.x + this.randJitter(3);
-                    unit.targetZ = farm.z + this.randJitter(3);
+                    unit.targetX = farm.x + (this.rand(unit, 'farm-spot') - 0.5) * 3;
+                    unit.targetZ = farm.z + (this.rand(unit, 'farm-spot') - 0.5) * 3;
                     return;
                 }
                 
@@ -5121,8 +5409,8 @@ class Game {
                     const dist = Math.sqrt(dx*dx + dz*dz);
                     if (dist > 3) {
                         unit.isMoving = true;
-                        unit.targetX = farm.x + this.randJitter(2);
-                        unit.targetZ = farm.z + this.randJitter(2);
+                        unit.targetX = farm.x + (this.rand(unit, 'farm-spot') - 0.5) * 2;
+                        unit.targetZ = farm.z + (this.rand(unit, 'farm-spot') - 0.5) * 2;
                     }
                 }
             }
@@ -5162,8 +5450,8 @@ class Game {
                         unit.task = 'farm_work';
                         unit.farmRef = nearestFarm;
                         unit.isMoving = true;
-                        unit.targetX = nearestFarm.x + this.randJitter(2);
-                        unit.targetZ = nearestFarm.z + this.randJitter(2);
+                        unit.targetX = nearestFarm.x + (this.rand(unit, 'farm-spot') - 0.5) * 2;
+                        unit.targetZ = nearestFarm.z + (this.rand(unit, 'farm-spot') - 0.5) * 2;
                     }
                 }
             }
@@ -5224,11 +5512,11 @@ class Game {
                     // Create the unit clearly OUTSIDE the building's footprint (bigger
                     // buildings push the unit further out) so it never spawns half-hidden
                     // inside the mesh.
-                    const spawnAngle = this.rand() * Math.PI * 2;
-                    const footRadius = (building.isWonder || building.type === 'town_center') ? 5 : 3.5;
-                    const spawnDist = footRadius + 3 + this.rand() * 1.5; // clear of the mesh + a little spread
-                    const spawnX = building.x + Math.cos(spawnAngle) * spawnDist;
-                    const spawnZ = building.z + Math.sin(spawnAngle) * spawnDist;
+                    const spawnAngle = this.rand(building, 'train-exit') * Math.PI * 2;
+                    const footRadius = building.isWonder ? 5 * Game.WONDER_SCALE : building.type === 'town_center' ? 5 : 3.5;
+                    const spawnDist = footRadius + 3 + this.rand(building, 'train-exit') * 1.5; // clear of the mesh + a little spread
+                    const spawnX = building.x + WarMath.cos(spawnAngle) * spawnDist;
+                    const spawnZ = building.z + WarMath.sin(spawnAngle) * spawnDist;
                     
                     // Determine the age/tier for the unit
                     const age = (owner && owner.age) || 'stone';
@@ -5657,11 +5945,12 @@ class Game {
             });
         }
 
-        // Draw AI players (only in visible areas) — always their civ color,
-        // matching the world view's team tints in campaign AND spectator mode.
+        // Draw AI players (only in visible areas) — in the colour the world view tints
+        // them: their civ's, or their seat's when two seats share a civ (js/identity.js).
         this.aiManager.aiPlayers.forEach(ai => {
             const civ = getCivilization(ai.civilization);
-            const colorHex = '#' + (civ?.color || 0xff0000).toString(16).padStart(6, '0');
+            const colorHex = typeof WarIdentity !== 'undefined' ? WarIdentity.hex(ai.id, ai.civilization, ai.seat)
+                : '#' + (civ?.color || 0xff0000).toString(16).padStart(6, '0');
             const unitColor = colorHex;
             const buildingColor = colorHex;
 
@@ -5687,7 +5976,7 @@ class Game {
         if (this._combatPings && this._combatPings.length) {
             const now = Date.now();
             this._combatPings = this._combatPings.filter(p => p.until > now);
-            const pulse = 2.5 + Math.sin(now / 120) * 1.5;
+            const pulse = 2.5 + WarMath.sin(now / 120) * 1.5;
             ctx.strokeStyle = 'rgba(255, 70, 40, 0.9)';
             ctx.lineWidth = 1.5;
             this._combatPings.forEach(p => {
@@ -5727,7 +6016,7 @@ class Game {
         );
 
         if (playerWonders.length > 0) {
-            const required = (this.wonderRequired || 600) * 1000;
+            const required = this.wonderHoldMs(), pace = this.wonderPace || 1;
             this.wonderTimer += deltaTime;
             // Spectacular one-time announcement the moment the Wonder is finished.
             if (!this._wonderAnnounced) {
@@ -5735,7 +6024,7 @@ class Game {
                 this.ui.announceWonder(playerWonders[0]);
             }
             // Live victory countdown overlay.
-            this.ui.showWonderTimer(Math.max(0, required - this.wonderTimer), required);
+            this.ui.showWonderTimer(Math.max(0, required - this.wonderTimer) / pace, required / pace);
             if (this.wonderTimer >= required) {
                 this.ui.hideWonderTimer();
                 this.ui.showVictory();
@@ -5768,56 +6057,85 @@ class Game {
         }
     }
 
-    // A player is ELIMINATED only when it has no way left to EVER field a military
-    // unit again. Used consistently for arena win detection AND for stopping a
-    // defeated model's LLM pipeline, so the two never disagree:
-    //   - still in if it has any military unit;
-    //   - still in with paid military production, or an affordable trainer that
-    //     is finished or being completed by a living assigned worker — and room
-    //     on the field to stand the unit in (a population cap of 0 means the seat
-    //     owns no Town Center and no house, so it can afford everything and field
-    //     nothing);
-    //   - otherwise still in only if it can (re)start the chain — it has a Town
-    //     Center, OR a worker plus the resources to build a new Town Center.
+    // A player is ELIMINATED once it can no longer actively play (asp67, 1 Oct 2026): no
+    // unit on the field that can fight or build something, and no building that can
+    // actively produce such a unit -- because it is unfinished, or cannot pay for one.
+    // One rule for arena win detection AND for retiring a defeated model's pipeline, so
+    // the two never disagree. Still in with any of:
+    //   1. a unit that can fight: anything but workers and priests (a priest can
+    //      neither fight nor build);
+    //   2. a unit already paid for and in training;
+    //   3. a finished building that can produce such a unit and pay for one now: a
+    //      Town Center a worker, a trainer one of its units of this age -- and room on
+    //      the field to stand the unit in, because a seat at its population cap can pay
+    //      for a unit nothing will let it train (no Town Center and no house leaves the
+    //      cap at 0; the gate is in canAffordAnyMilitary below);
+    //   4. a worker that can build something: a producing building's foundation to
+    //      finish, the resources for a Town Center or a trainer, or a finished Town
+    //      Center to gather into until it has them.
+    // Not: an unfinished site with no worker left, a Town Center with no worker and no
+    // food for one, towers, or a Wonder alone.
     isPlayerEliminated(ai) {
         if (!ai || ai._eliminated) return true;
-        if (ai.units && ai.units.some(u => u.health > 0 && u.type !== 'worker')) return false; // has an army
-        if (this.canAffordAnyMilitary(ai)) return false;                            // can build military now
-        if (ai.buildings && ai.buildings.some(b => b.health > 0 && b.type === 'town_center')) return false; // has a TC
-        const tcDef = (typeof getBuildingDef === 'function') ? getBuildingDef('town_center') : null;
-        const tcCost = (tcDef && tcDef.cost) || { food: 100, wood: 100, stone: 100, gold: 100 };
-        if (ai.units && ai.units.some(u => u.health > 0 && u.type === 'worker') &&
-            ai.resources && ai.resources.hasResources(tcCost)) return false;        // can rebuild a TC
+        const units = (ai.units || []).filter(u => u.health > 0);
+        if (units.some(u => u.type !== 'worker' && u.unitType !== 'support')) return false;   // 1
+        const buildings = (ai.buildings || []).filter(b => b.health > 0);
+        if (buildings.some(b => !b.underConstruction && b.isProducing && b.productionType)) return false;   // 2
+        if (this.canAffordAnyMilitary(ai)) return false;   // 3, trainers
+        const can = cost => !!(ai.resources && cost && ai.resources.hasResources(cost));
+        const def = id => (typeof getUnitDefFor === 'function' ? getUnitDefFor(ai.civilization, id) : null);
+        const workerCost = (def('worker') || {}).cost || { food: 50 };
+        const townCenter = buildings.some(b => b.type === 'town_center' && !b.underConstruction);
+        if (townCenter && can(workerCost)) return false;   // 3, Town Center
+        if (!units.some(u => u.type === 'worker')) return true;   // nobody left to build: out
+        const producer = b => b.type === 'town_center' || this.militaryOptions(ai, b.type).length > 0;
+        if (buildings.some(b => b.underConstruction && producer(b))) return false;   // 4, a site to finish
+        if (townCenter) return false;   // 4, gathers into it
+        const bdef = t => (typeof getBuildingDef === 'function' ? getBuildingDef(t) : null);
+        const tcCost = (bdef('town_center') || {}).cost || { food: 100, wood: 100, stone: 100, gold: 100 };
+        if (can(tcCost)) return false;   // 4, can found a Town Center
+        for (const t of ['barracks', 'archery_range', 'stable']) if (can((bdef(t) || {}).cost)) return false;   // 4, a trainer
         return true;
     }
 
-    // A paid unit is already on its way. An actively staffed construction site
-    // also counts if the owner can afford military production when it finishes.
+    // The military units a building trains for this owner at its age (civ uniques in,
+    // excluded units out). Falls back to the standard table where the rules files that
+    // know it are not loaded.
+    // DIVERGENCE(merge): BUILDING_TRAIN_TIERS names only the three military hosts, so a
+    // temple answers "nothing trains here" and a seat whose last trainer is a temple is
+    // condemned by this rule (here and in the `producer` above) while its own controller
+    // is still told priests are available. Upstream's read of the tier table is kept; the
+    // fall-through our side had to the building def's own trainOptions is unresolved here
+    // (ours at 33a1f11, trainOptionsFor), and tests/elimination-predicate.test.cjs pins it.
+    militaryOptions(ai, type) {
+        let ids = null;
+        if (typeof getTrainOptionsForBuilding === 'function') ids = getTrainOptionsForBuilding(type, ai.age || 'stone', ai.civilization);
+        else ids = ({ barracks: ['militia', 'warrior', 'champion'], archery_range: ['archer', 'crossbowman', 'elite_archer'],
+            stable: ['scout_cavalry', 'cavalry', 'heavy_cavalry'] })[type] || [];
+        return (ids || []).filter(id => id !== 'worker');
+    }
+
+    // 3 for trainers: a FINISHED building that can train one of its units of this age
+    // and pay for it now. (Foundations count through the workers who can finish them.)
     canAffordAnyMilitary(ai) {
         if (!ai || !ai.buildings || !ai.resources) return false;
-        // A slot to put it in is part of being able to field it. trainUnit and the
-        // model-facing executor both refuse at `population >= maxPopulation`, and the cap is
-        // derived purely from buildings (recomputeMaxPopulation) — a seat with no Town Center
-        // and no house has a cap of ZERO, so it cannot train anything however rich it is.
-        // Without this clause such a seat was kept in the match by its own temple: the state
-        // it was shown correctly reported every unit blockedBy ["pop"] (openai-ai.js:3263 —
-        // that gate was added after one seat spent 227 of 474 turns hitting it), the executor
-        // correctly refused, and only the survival rule disagreed, so the match would not end.
-        // A seat that still has a living worker is spared by the
-        // rebuild-a-TC clause in isPlayerEliminated, so this only ever condemns a seat holding
-        // no units at all — one that cannot build, gather, or train, and is therefore out by
-        // the rule stated above. Missing figures leave it alone (undefined >= undefined is
-        // false), so a bare seat is still judged on cost and age alone.
+        // A slot to stand the unit in is part of being able to field it. trainUnit and the
+        // model-facing executor both refuse at `population >= maxPopulation`, and the cap comes
+        // purely from buildings (recomputeMaxPopulation) — a seat with no Town Center and no
+        // house has a cap of ZERO, so however rich it is it can train nothing. (That executor
+        // gate was added after one seat spent 227 of 474 turns hitting it.) Without this clause
+        // the survival rule was the one part of the game that disagreed: the seat was shown
+        // every unit blockedBy ["pop"], the executor correctly refused, and the match would not
+        // end. A seat with a living worker is still spared by the worker clauses of
+        // isPlayerEliminated (4), so this only ever condemns a seat holding no units at all —
+        // one that cannot build, gather or train. Missing figures leave it alone
+        // (undefined >= undefined is false), so a bare seat is judged on cost and age alone.
         if (ai.resources.population >= ai.resources.maxPopulation) return false;
         const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
         const aIdx = ageOrder.indexOf(ai.age);
         for (const b of ai.buildings) {
-            if (!(b.health > 0)) continue;
-            if (!b.underConstruction && b.isProducing && b.productionType && b.productionType !== 'worker') return true;
-            if (b.underConstruction && !(ai.units || []).some(u =>
-                u.health > 0 && u.type === 'worker' && u.task === 'building' && u.buildTarget === b)) continue;
-            for (const uid of this.trainOptionsFor(ai, b)) {
-                if (uid === 'worker') continue; // a villager is not a reason to spare a seat
+            if (!(b.health > 0) || b.underConstruction) continue;
+            for (const uid of this.militaryOptions(ai, b.type)) {
                 const def = (typeof getUnitDefFor === 'function') ? getUnitDefFor(ai.civilization, uid) : null;
                 if (!def) continue;
                 if (ageOrder.indexOf(def.tier || 'stone') > aIdx) continue; // not available at this age
@@ -5825,27 +6143,6 @@ class Game {
             }
         }
         return false;
-    }
-
-    // What this building can train for this owner right now, read from the game's own
-    // tables: the age- and civ-resolved tier list where one exists (barracks, stable,
-    // archery_range), otherwise the building's own options — which is where the temple's
-    // priest lives, since BUILDING_TRAIN_TIERS only covers the three military hosts. That
-    // is the same resolution order the training panel (ui.js) and the model-facing
-    // trainableUnitsFor (openai-ai.js) use, and it replaces a hand-copied map of three
-    // hosts here. The copy had consequences: a seat whose only remaining trainer was a
-    // temple was reported unable to ever field a unit again and deleted from the match,
-    // while its own controller was still being told priests were available; and every
-    // civ-unique unit (Egypt's chariot) was invisible to it, so a seat that COULD train
-    // one was spared or condemned by which building it happened to own, not by the rules.
-    trainOptionsFor(owner, building) {
-        if (typeof getTrainOptionsForBuilding === 'function') {
-            const tiered = getTrainOptionsForBuilding(building.type, owner.age, owner.civilization);
-            if (tiered && tiered.length) return tiered;
-        }
-        if (building.trainOptions && building.trainOptions.length) return building.trainOptions;
-        const def = (typeof getBuildingDef === 'function') ? getBuildingDef(building.type) : null;
-        return (def && def.canTrain && def.trainOptions) || [];
     }
 
     // Decide the arena: a held wonder, last player standing, or wipeout.
@@ -5858,7 +6155,7 @@ class Game {
         players.forEach(ai => { if (this.isPlayerEliminated(ai)) ai._eliminated = true; });
 
         const wonderTypes = ['pyramid', 'akropolis', 'firetemple', 'shrine'];
-        const required = (this.wonderRequired || 600) * 1000;
+        const required = this.wonderHoldMs();
         let wonderHolder = null;
         players.forEach(ai => {
             if (ai._eliminated) { ai._wonderHold = 0; return; }
@@ -5971,97 +6268,16 @@ class Game {
         this.endArena(winner, reason);
     }
 }
+// The speed a match starts at, labelled 1x (b1020; it was 1 until then).
+Game.NORMAL_SIM_SPEED = 2;
 
-// Initialize game when page loads
+// The one game instance, created by js/boot.js when the page loads. Declared here so
+// every rule file can name it; this file itself touches no browser API at load, so it
+// runs as it is in a bare VM (tests, the Platform's headless server).
 let game;
-
-// A copy served from somewhere else is a SHOWCASE, not an installation.
-//
-// The analyzer needs no API key and no endpoint -- it reads a file -- which makes it the
-// one part of this project that is safe to hand a stranger. The arena and the campaign
-// are not: they ask for keys, and a key pasted into a page someone else controls is a
-// different proposition from one pasted into a page you are serving yourself, even
-// though both only ever keep it in your own browser. So a hosted copy opens straight
-// into the analyzer with the bundled match and offers no route to the rest.
-//
-// The rule is where the page came FROM, not who is looking: served off your own network
-// you get everything, served from the public internet you get the showcase. ?full=1 opts
-// back in.
-//
-// It used to be loopback only, which made the tablet in the same room a stranger: serving
-// on 192.168.x and opening it from the sofa dropped you into the analyzer with no way to
-// start a match. That is a configuration people actually run, and the address it comes
-// from is one they own.
-//
-// What this can and cannot check. The honest test would be "same subnet as the device I
-// am holding", but a page only ever sees the address it was SERVED from, never the
-// client's own -- WebRTC candidate discovery, the old way of learning it, returns mDNS
-// .local placeholders in every current browser. So the test is whether the host is
-// private at all: RFC1918, loopback, link-local, IPv6 ULA, an mDNS name, or a
-// single-label hostname. None of those are routable from outside.
-//
-// Parsed as an address rather than matched as a prefix, which matters more than it looks.
-// /^192\.168\./ against a hostname also accepts 192.168.1.1.evil.com -- a legal, public,
-// resolvable domain -- and would have handed the full app to anyone who registered one.
-// An IPv4 literal is therefore matched whole and then judged by its octets, and anything
-// that is not a literal has to earn "private" some other way.
-//
-// Wider than one subnet by exactly the amount that matters: a hostile LAN you did not set
-// up -- cafe wifi, a hotel -- could serve a page from a private address and would now
-// open the key fields. It still cannot read a key back out; the risk is a page you were
-// persuaded to visit AND paste into. Judged worth it against a real configuration being
-// locked out, and the case this was built for is unchanged -- github.io is a public name
-// with no private form, so it stays a showcase.
-const WAR_PRIVATE_HOST = (() => {
-    const h = (location.hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
-    if (!h) return false;
-    const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (v4) {
-        const o = v4.slice(1).map(Number);
-        if (o.some(n => n > 255)) return false;          // not an address at all
-        if (o[0] === 127) return true;                   // loopback
-        if (o[0] === 10) return true;                    // 10/8
-        if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return true;   // 172.16/12
-        if (o[0] === 192 && o[1] === 168) return true;   // 192.168/16
-        if (o[0] === 169 && o[1] === 254) return true;   // link-local
-        return false;                                    // every other literal is public
-    }
-    if (h.indexOf(':') >= 0) {                           // IPv6 literal (DNS names have no colon)
-        if (h === '::1') return true;                    // loopback
-        if (/^f[cd][0-9a-f]{0,2}:/.test(h)) return true;  // unique local, fc00::/7
-        if (/^fe[89ab][0-9a-f]?:/.test(h)) return true;   // link-local, fe80::/10
-        return false;
-    }
-    if (h === 'localhost' || /\.localhost$/.test(h)) return true;
-    if (/\.local$/.test(h)) return true;                  // mDNS / Bonjour
-    if (/^[a-z0-9-]+$/.test(h)) return true;             // single-label name: cannot be public
-    return false;
-})();
-const WAR_LOCAL = location.protocol === 'file:' || WAR_PRIVATE_HOST;
-const WAR_DEMO_ONLY = !WAR_LOCAL && !/[?&]full=1(&|$)/.test(location.search);
-
-// A renderer that cannot be built used to throw out of here and stop, leaving a page
-// that LOOKED fine: the menus are DOM and kept working, so the app invited a match it
-// could never draw. Pressing Start then walked into null.clearScene, which is what the
-// report "the normal player UI appears and then nothing happens" actually was.
-//
-// The engine asks for plain WebGL 1, so a machine without it usually has hardware
-// acceleration switched off, a blocklisted driver, or no GPU at all (a remote desktop
-// session is the classic). None of that is something the page can fix -- but it can say
-// so, instead of pretending and failing later.
-function warNoWebGL(e) {
-    console.error('[boot] renderer unavailable', e);
-    const box = document.createElement('div');
-    box.className = 'boot-error';
-    const p1 = document.createElement('p');
-    p1.textContent = t('boot.noWebGL');
-    const p2 = document.createElement('p');
-    p2.className = 'boot-why';
-    p2.textContent = t('boot.noWebGLWhy');
-    box.appendChild(p1); box.appendChild(p2);
-    document.body.appendChild(box);
-    document.body.classList.add('boot-failed');
-}
+// The boot-time half of the start-up story (the showcase trust boundary, warNoWebGL, the
+// load handler that builds the one game) moved to js/boot.js; only the mid-session
+// notice stays here, because it is a rule of the running match, not of the page.
 
 // The GPU went away mid-session. Deliberately NOT the full-screen treatment warNoWebGL
 // gets: that one is a boot failure with nothing behind it, while here the simulation keeps
@@ -6085,27 +6301,3 @@ function warContextLost() {
     box.appendChild(head); box.appendChild(why); box.appendChild(close);
     document.body.appendChild(box);
 }
-
-window.addEventListener('load', () => {
-    game = new Game();
-    try {
-        game.init();
-    } catch (e) {
-        // Only the machine's fault is handled here. Anything else is a bug in the game
-        // and must keep its stack rather than be dressed up as a hardware notice.
-        if (e && e.noWebGL) { warNoWebGL(e); return; }
-        throw e;
-    }
-    if (WAR_DEMO_ONLY) {
-        document.body.classList.add('demo-only');
-    }
-    const viewerParams = new URLSearchParams(location.search);
-    if (viewerParams.has('match') || WAR_DEMO_ONLY) {
-        game.ui.anOpen();
-        if (viewerParams.has('match')) {
-            game.ui.anLoadLinkedMatch(viewerParams.get('match'));
-        } else {
-            game.ui.anLoadSample();
-        }
-    }
-});

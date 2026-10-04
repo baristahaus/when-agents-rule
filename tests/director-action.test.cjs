@@ -157,7 +157,7 @@ test('the game sends every hit to the director even when visual pings are thrott
     const source = fs.readFileSync(path.join(__dirname, '../js/game.js'), 'utf8');
     const scope = { console };
     vm.createContext(scope);
-    vm.runInContext(source.slice(0, source.indexOf('\nconst WAR_PRIVATE_HOST')), scope);
+    vm.runInContext(source, scope);
     const Game = vm.runInContext('Game', scope);
     const calls = [];
     const game = Object.create(Game.prototype);
@@ -197,4 +197,124 @@ test('an off-scene fight immediately interrupts the aftermath pause',()=>{
  d.update(100200);assert.equal(d.shot.key,oldKey);
  const other=duel(250,2);hit(other,100201);const pose=d.update(100217);
  assert.notEqual(d.shot.key,oldKey);assert.equal(d.shot.type,'brawl');assert.equal(pose.cut,true);
+});
+
+test('while a decision bubble is read the camera holds, and only a battle cuts away', () => {
+    const { director: d, game, duel, hit } = setup();
+    let reading = true;
+    game.ui = { intentBubblesInView: () => reading };
+    d.update(100000);
+    const shot = d.shot;
+    assert.ok(shot && shot.priority < 2, 'a calm shot to start with');
+    // It runs out while a bubble is up: held on, not cut.
+    shot.until = 100001;
+    d.update(100200); d.update(100400);
+    assert.equal(d.shot, shot, 'held while the bubble is read');
+    // The bubble goes: the shot may end.
+    reading = false;
+    d.update(100700);
+    assert.notEqual(d.shot, shot, 'free again once nothing is being read');
+    // A battle cuts through a reading hold at once.
+    reading = true;
+    d.update(101000);
+    const calm = d.shot;
+    const fight = duel(); hit(fight, 101001);
+    const pose = d.update(101017);
+    assert.notEqual(d.shot, calm);
+    assert.equal(d.shot.type, 'brawl'); assert.equal(pose.cut, true);
+});
+
+test('a reading hold is capped, so a busy base cannot keep the camera', () => {
+    const { director: d, game } = setup();
+    game.ui = { intentBubblesInView: () => true };
+    d.update(100000);
+    const shot = d.shot;
+    shot.until = shot.planned = 100001;
+    d.update(100001 + 19000);
+    assert.equal(d.shot, shot, 'still held inside the cap');
+    d.update(100001 + 20500);
+    assert.notEqual(d.shot, shot, 'released past it');
+});
+
+test('a calm shot is not replaced by a better calm one before five seconds', () => {
+    const { director: d } = setup();
+    d.update(100000);
+    const shot = d.shot;
+    // Make whatever is on screen look poor next to the rest, without letting it end.
+    shot.until = 200000;
+    const adj = d.adjust.bind(d);
+    d.adjust = (c, now) => c.key === shot.key ? -1000 : adj(c, now);
+    d.update(103000);
+    assert.equal(d.shot, shot, 'held at three seconds');
+    d.update(105200);
+    assert.notEqual(d.shot, shot, 'replaced after five');
+});
+
+// Close-ups (b1010, asp67's framing from a posed preview): one unit, low, from in front at
+// a three-quarter angle, aimed at its chest so the face sits in the upper third.
+test('a calm close-up frames one worker at chest height from in front, and comes once in a while', () => {
+    const { director: d, game, players } = setup();
+    game.renderer = { _yaw: 0, unitFacing: () => 0 };
+    const w = { owner: 'a', type: 'worker', x: 100, z: 100, health: 40, isHarvesting: true, isMoving: false };
+    players[0].units.push(w);
+    const now = 200000;
+    const c = d.candidates(now).find(x => x.type === 'closeup');
+    assert.ok(c, 'a close-up is offered');
+    const pose = c.make();
+    assert.deepEqual([pose.closeup, pose.halfH, pose.lookY, +pose.yaw.toFixed(2)], [true, 3.6, 1.0, 0.6], 'front three-quarter, chest height, a quarter of the screen');
+    assert.equal(pose.subject.units[0], w);
+    assert.equal(d.candidates(now + 20000).some(x => x.type === 'closeup'), false, 'not again within 30 s');
+    assert.ok(d.candidates(now + 31000).some(x => x.type === 'closeup'), 'again after 30 s');
+});
+
+test('a harvester close-up keeps the camera where the shot began; other close-ups carry no eye', () => {
+    const { director: d, game, players } = setup();
+    game.renderer = { _yaw: 0, unitFacing: () => 0 };
+    const w = { owner: 'a', type: 'worker', x: 100, z: 100, health: 40, isHarvesting: true, isMoving: false };
+    players[0].units.push(w);
+    const pose = d.candidates(200000).find(x => x.type === 'closeup').make();
+    const p = 0.17, dist = pose.halfH / Math.tan(10 * Math.PI / 180);
+    const want = [100 + Math.cos(p) * Math.sin(pose.yaw) * dist, pose.lookY + Math.sin(p) * dist, 100 + Math.cos(p) * Math.cos(pose.yaw) * dist];
+    assert.ok(pose.eye.every((v, i) => Math.abs(v - want[i]) < 1e-6), 'the eye of the opening frame: ' + pose.eye + ' vs ' + want);
+    const builder = { owner: 'a', type: 'worker', x: 100, z: 100, health: 40, isBuilding: true, isMoving: false };
+    players[0].units.length = 0; players[0].units.push(builder);
+    const d2 = setup(); d2.game.renderer = game.renderer; d2.players[0].units.push(builder);
+    const other = d2.director.candidates(200000).find(x => x.type === 'closeup').make();
+    assert.equal(other.eye, undefined, 'a builder is followed as before');
+});
+
+test('a close-up looks past what stands in front of its subject, and skips one it cannot see', () => {
+    const { director: d, game, players } = setup();
+    game.renderer = { _yaw: 0, unitFacing: () => 0 };
+    const w = { owner: 'a', type: 'worker', x: 100, z: 100, health: 40, isHarvesting: true, isMoving: false };
+    players[0].units.push(w);
+    const tree = a => ({ type: 'wood', amount: 100, x: 100 + Math.sin(a) * 3, z: 100 + Math.cos(a) * 3 });
+    game.terrain.resources = [tree(0.6)];   // the woodcutter's tree, right where the camera would look from
+    let pose = d.closeupPose(w);
+    assert.ok(pose && Math.abs(pose.yaw - 0.6) > 0.5, 'the other side: ' + (pose && pose.yaw));
+    game.terrain.resources = [0.6, -0.6, 1.2, -1.2].map(tree);
+    assert.equal(d.closeupPose(w), null, 'every side blocked: no close-up of it');
+    assert.equal(d.candidates(300000).some(x => x.type === 'closeup'), false);
+});
+
+test('a fight gets a fighter close up once it has been shown twice, and the pose carries the aim', () => {
+    const { director: d, game, duel, hit } = setup();
+    game.renderer = { _yaw: 0, unitFacing: () => 1 };
+    const f = duel(); hit(f, 100001);
+    d.update(100017);
+    assert.equal(d.shot.type, 'brawl');
+    const key = d.shot.key;
+    assert.equal(d.candidates(100100).some(x => x.type === 'clash'), false, 'not on the first look');
+    d._shotNo[key] = 2;
+    const c = d.candidates(100200).find(x => x.type === 'clash');
+    assert.ok(c, 'after two shots of it');
+    assert.equal(c.priority, d.candidates(100200).find(x => x.key === key).priority, 'as urgent as its fight');
+    const pose = c.make();
+    assert.equal(pose.closeup, true);
+    assert.equal(pose.subject.units[0].isAttacking, true, 'a fighter');
+    d.shot = d.begin('clash', c.key, d.adjust(c, 100300), pose, 100300); d.shot.priority = c.priority;   // as update() takes it
+    const out = d.update(100310);
+    assert.deepEqual([out.closeup, out.lookY], [true, 1.0], 'the renderer is told to aim at the chest');
+    assert.equal(d.update(101500).closeup, true, 'and it is held: the fight does not take the camera straight back');
+    assert.equal(d.candidates(100400).some(x => x.type === 'clash'), false, 'not again so soon');
 });

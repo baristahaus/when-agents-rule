@@ -77,7 +77,7 @@ Most quick LLM demos reward a single clever answer. A full match rewards the thi
 
 **The models**
 - **🔌 Bring any model** — OpenAI-compatible (OpenAI, vLLM, LM Studio, LiteLLM, Groq, OpenRouter, …), **Anthropic**, **Ollama**, **Google (Gemini)**, with auto-detection. Mix local and cloud in one match.
-- **🔐 Every auth style** — none, API key (Bearer), header secret, Basic, or OAuth2.
+- **🔐 Every auth style** — none, API key (Bearer), header secret, Basic, or an OAuth2 login button: one click for OpenRouter, or any login server that issues a client ID.
 - **🧰 Model library** — add, **test connection**, pick the served model, and set per-model **max tokens**, **context budget**, **language**, **temperature / top-p / top-k**, **thinking/reasoning** settings, and a raw request-body passthrough for anything newer than this harness. Connection, model/budgets, and collapsible advanced settings keep the basics together. Saved locally, exportable/importable.
 - **🧠 Rolling context that scales with the model** — history is sized to each model's context budget, so a 128K model remembers more of the match than a 32K one. Default is a real multi-turn conversation; a **minimize-tokens** toggle switches to compact one-line history.
 - **🪙 Token accounting** — provider-reported prompt + completion usage per model, next to latency.
@@ -86,7 +86,7 @@ Most quick LLM demos reward a single clever answer. A full match rewards the thi
 - **🛰️ Live spectator dashboard** — ranked leaderboard, streaming **decision log** (every move plus the model's stated reason, rejections flagged), per-model **advice chat**, and play/pause per model. Collapse the decisions panel to the latest turn’s command headlines for each seat.
 - **🏛️ Antiquity visual milestone** — warm directional light, cast shadows, irregular coastal water reflections, sculpted miniature units with cultural facial hair, angled handheld equipment and proportionate horses, continuous tree crowns, layered meadow/snow/sand surfaces with close-up ground detail, refined Greek architecture and camera controls integrated with the minimap. Arena configuration and the model library share the charcoal/bronze theme. Try **Explore civilizations** locally: choose civilization, summer/winter/desert, Stone through Iron Age, and time of day. Iron Age includes the civilization's Wonder; **Inspect workers** gives a close-up. Direct links: `/?showcase=1&civ=greek` (also `egyptian`, `yamato`, `persian`). The live transcript uses eight-turn pages to keep long matches responsive. [Scope, graphics settings and verification](docs/VISUAL_MILESTONE.md).
 - **🎬 A battlefield worth watching** — feathered fog of war, arrows and tower stones, hit flashes, animated deaths, battle pings, per-map ground cover, and an optional **action camera** that follows the fighting.
-- **📊 End-of-match evaluation** — latency, decisions, action-success rate, format fidelity, reasoning rate, error breakdown, behavior tags, and a transparent 0–100 strategy score.
+- **📊 End-of-match evaluation** — latency, decisions, action-success rate, format fidelity, reasoning rate, error breakdown, behavior tags, and a transparent 0–100 match heuristic (not a capability score). Each seat carries a conditions id: seats sharing it had the same declared conditions.
 - **📄 Exports** — the evaluation as a self-describing `results_<datetime>.md`, and the full **transcript** as JSONL: every state sent, every reply, every harness answer, with the results and the economy timeline appended at the end.
 - **🎞️ [Analyze Transcript](#-analyze-transcript)** — load a saved transcript and read a finished match back, turn by turn, in the same 3D engine.
 - **🌍 Fully localized UI** — English, German, Spanish, Simplified Chinese, with the *model's* language chosen separately from the interface language.
@@ -99,19 +99,16 @@ Most quick LLM demos reward a single clever answer. A full match rewards the thi
 
 ## 🚀 Quick start
 
-No install, no bundler. Serve the folder over HTTP (the app uses `fetch`, so `file://` won't work).
+No install, no bundler, nothing downloaded. Serve the folder over HTTP (the app uses `fetch`, so `file://` won't work).
 
 ```bash
 git clone https://github.com/asp67/when-agents-rule.git
 cd when-agents-rule
-
-# pick any static server:
-npx http-server . -p 8080 -o          # Node
-# python3 -m http.server 8080         # Python
-# php -S localhost:8080               # PHP
+node serve.cjs --open                 # Node 18+, built-ins only
+# python3 -m http.server 8088         # or any static server
 ```
 
-Then open **http://localhost:8080** and click **Play → 🏟️ Arena**.
+Then open **http://localhost:8088** and click **Play → 🏟️ Arena**. `serve.cjs` answers only this computer by default; add `--host 0.0.0.0` to reach it from other devices on your network, or `--port` to move it. The default is 8088 rather than 8080 because llama.cpp's server listens on 8080.
 
 > 💡 **Fastest path to a match:** install [Ollama](https://ollama.com), pull something small and quick (`ollama pull qwen2.5:7b`), and point a couple of seats at `http://localhost:11434`. Small + fast beats large + slow in a real-time arena.
 >
@@ -153,9 +150,9 @@ For left-button-only campaign navigation, open the minimap's camera-options chev
 
 </div>
 
-> 💡 **The context budget is a real lever.** Default **32768** tokens; **↺ Max** fills in the model's true maximum. History is sized to it, in one of two modes: **multi-turn** (past turns replayed as compact state recaps plus the model's replies — richest memory) or **minimize tokens** (each past move as one line — cheapest, still coherent). Either way the prompt is rebuilt from scratch every turn, and if an endpoint rejects a request as too large the harness shrinks the window and keeps playing.
+> 💡 **The context budget is a real lever.** Default **65536** tokens; **↺ Max** fills in the model's true maximum. History is sized to it, in one of two modes: **multi-turn** (past turns replayed as compact state recaps plus the model's replies — richest memory) or **minimize tokens** (each past move as one line — cheapest, still coherent). Either way the prompt is rebuilt from scratch every turn, and if an endpoint rejects a request as too large the harness shrinks the window and keeps playing.
 >
-> **Lower budgets are much faster** — on Ollama the budget also sets `num_ctx`, and an oversized window can spill the model onto the CPU. For small local models 32K is a good default. If a model overthinks, raise its **max tokens** (the *output* budget), not its context, so it can finish reasoning *and* still emit the JSON action.
+> **Lower budgets are much faster** — on Ollama the budget also sets `num_ctx`, and an oversized window can spill the model onto the CPU. For small local models, 32K is often enough and noticeably faster. If a model overthinks, raise its **max tokens** (the *output* budget), not its context, so it can finish reasoning *and* still emit the JSON action.
 
 ## 🔧 Tool calls, and which stack served them
 
@@ -190,13 +187,13 @@ Load a `match-*.jsonl` and you get:
 - **Visible camera controls.** Open Camera for a whole-map overview, selection focus, reset, zoom, and rotation. Manual camera input turns automatic following off. These controls are also available in live play.
 - **Click anything** to inspect it. Remembered enemy positions render translucent and say when they were last seen, so a stale sighting never looks like a live one.
 
-**Seven real matches ship with the game**, in `samples/`, with every plan, command and reasoning block in them. No key, no endpoint, nothing to configure: the analyzer only ever reads a file. `samples/index.json` lists them with their models, tempo and result.
+**Eight real matches ship with the game**, in `samples/`, with every plan, command and reasoning block in them. No key, no endpoint, nothing to configure: the analyzer only ever reads a file. `samples/index.json` lists them with their models, tempo and result.
 
-Direct match links open the viewer with a specific catalogue entry loaded: [Episode 6](https://asp67.github.io/when-agents-rule/?match=match-20260907-120324) and [Episode 7](https://asp67.github.io/when-agents-rule/?match=match-20260909-211941). Use `?match=` followed by the entry's `matchId`; unknown IDs show a loading error rather than a different match.
+Direct match links open the viewer with a specific catalogue entry loaded: [Episode 6](https://asp67.github.io/when-agents-rule/?match=match-20260907-120324), [Episode 7](https://asp67.github.io/when-agents-rule/?match=match-20260909-211941) and [Episode 8](https://asp67.github.io/when-agents-rule/?match=match-20261001-200050). Use `?match=` followed by the entry's `matchId`; unknown IDs show a loading error rather than a different match.
 
 - `2026-07-26_opus5-grok4.5-gpt-oss_36min.jsonl` — 271 turns, **turn-based** (60 s a round). Opus 5 as Persia, Grok 4.5 as Egypt, and gpt-oss on a single consumer GPU as Yamato. Opus 5 wins.
 - `2026-08-09_kimi-k3-gemma4-qwen3.8-ornith9b_25min.jsonl` — 490 turns, **real time**, nobody waiting for anybody. Kimi K3 as Yamato, a local Gemma 4 26B as the Greeks, Qwen 3.8 Max as Persia, and a 9B quant on a desktop GPU as Egypt. Kimi K3 wins, having issued three commands a turn to the others' one.
-- `2026-08-11_muse-glimmer-qwen3.6-gemma4_88min.jsonl` — 484 turns, **real time**, and the longest of the three-player games. Muse-Glimmer 30B as the Greeks, Gemma 4 31B as Egypt, Qwen 3.6 27B as Persia. Persia wins on 3039 power against 164 and 117.
+- `2026-08-11_muse-glimmer-qwen3.6-gemma4_88min.jsonl` — 471 turns, **turn-based** (60 s a round), and the longest of the three-player games. Muse-Glimmer 30B as the Greeks, Gemma 4 31B as Egypt, Qwen 3.6 27B as Persia. Persia wins on 3039 power against 164 and 117.
 - `2026-08-17_qwen3.8-opus4.6-qwen3.6-muse-glimmer_125min.jsonl` — 544 turns over two hours, **turn-based** (120 s a round), four seats. Qwen 3.8 27B as Yamato, Claude Opus 4.6 as Egypt, Qwen 3.6 27B as Persia, Muse-Glimmer 30B as the Greeks. Yamato finishes last one standing on 4617 power; Egypt finishes fourth on 129, its town centre destroyed and its last recorded thought reading “Need food desperately.” The 27B open model beats the frontier model on this board — one board, one seed, not a verdict.
 - `2026-08-26_deepseek-v4-glm5.3-qwen3.8-gpt5.6_103min.jsonl` — 389 turns, **turn-based** (150 s a round), four seats, and the one where a Wonder nearly changed the result. deepseek-v4-flash as Persia, glm-5.3-flash as the Greeks, Qwen3.8 27B running locally as Egypt, gpt-5.6-luna as Yamato. Persia commits to the Iron Age at 38:32 while everyone else is still in Bronze, then trains champions and nothing else for forty minutes. Greece pays everything it has for a Wonder at 75:00 — hold it 600 seconds and the match is yours — and loses it after **154**. Egypt is eliminated with 10,070 food and zero workers left to spend it.
 
@@ -204,11 +201,13 @@ Direct match links open the viewer with a specific catalogue entry loaded: [Epis
 
 - `2026-09-09_gemini3.8-deepseek-v4-gpt5.6-qwen3.8_121min.jsonl` — Episode 7, **The Cartographers and the Procession**: 723 turns over 121:23, **turn-based** (180 s rounds), on a snow map. Gemini 3.8 Flash as Egypt, DeepSeek v4 Flash Pro as the Greeks, GPT 5.6 Luna as Persia, and local Qwen3.8 Flash Next as Yamato. The transcript follows worker travel calculations, the marching armies, the Wonder countdown and the search for the last town centre, with all four closing statements.
 
-Nothing is interpolated between snapshots. Replay also bypasses live positional separation, so recorded units stay at their recorded coordinates. They arrive seconds to minutes apart depending on the seat, so every frame is a moment the file actually attests to — and each turn shows how stale the other seats' pictures are.
+- `2026-10-01_glm5.3-space-bunny-deepseek-v4-mimo-v2.6_70min.jsonl` — Episode 8, **Fighting Blind**: 419 turns over 69:59, **real time**, four seats on easy. GLM5.3 Flash, running locally on a DGX Spark, plays Egypt; space-bunny-alpha, an OpenRouter stealth model, the Greeks; DeepSeek V4 Flash, Persia; MiMo V2.6 Flash, Yamato. The bunny builds a second town centre beside its gold, MiMo follows its gold carriers there and burns it at 16:26, GLM takes the capital half a minute later, and the Greeks are out at 18:20. GLM repairs its forward town centre from nine percent under fire, completes a Pyramid at 59:34 and holds it, winning on 4753 power against 1746, 106 and 74. MiMo's last worker, five gold short of a new town centre, builds a house and a barracks instead and sends a single militia at the Wonder. All four closing statements are included.
+
+Nothing is interpolated between snapshots. Replay runs no simulation, so recorded units stay at their recorded coordinates, overlaps included. They arrive seconds to minutes apart depending on the seat, so every frame is a moment the file actually attests to — and each turn shows how stale the other seats' pictures are.
 
 ## 🧮 How a model is scored
 
-The **Strategy Score** (0–100) is a transparent composite — no black box:
+The **match heuristic** (0–100; called "strategy score" before build 922) is a transparent composite — no black box. It summarizes one match and is not a capability score:
 
 | Weight | Factor |
 |:---:|---|
@@ -302,7 +301,7 @@ js/
 ├── i18n.js             # 4-language UI dictionary + game-content translations
 ├── civilizations.js    # civs, units, buildings, tech trees
 ├── buildings.js / units.js / resources.js / terrain.js / fogofwar.js / input.js
-game-state-schema.json  # the JSON contract handed to every model each turn
+game-state-schema.json  # documents the JSON state every model receives each turn (checked by tests)
 ```
 
 Plain HTML + CSS + JavaScript, nothing else. The 3D world is drawn by the in-house engine in `js/engine/`: a locked dimetric camera, every material painted procedurally into canvases at load, meshes composed from primitives. No framework, no bundler, no transpile, no CDN. Cache-busting is a `?v=` query on each script tag.

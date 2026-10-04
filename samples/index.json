@@ -40,7 +40,7 @@
      "winner": false
     }
    ],
-   "bytes": 3906369,
+   "bytes": 3876103,
    "default": false
   },
   {
@@ -90,7 +90,7 @@
      "winner": false
     }
    ],
-   "bytes": 6689558,
+   "bytes": 6637765,
    "default": false
   },
   {
@@ -98,12 +98,12 @@
    "matchId": "match-20260811-222813",
    "date": 1786514286000,
    "duration": "88:38",
-   "turns": 484,
+   "turns": 471,
    "outcome": "last_standing",
    "seed": "rmsp44ea95s82",
    "difficulty": "easy",
-   "turnBased": false,
-   "promptVersion": "agents-rule-v62",
+   "turnBased": true,
+   "promptVersion": "agents-rule-v64",
    "build": 565,
    "winner": "OR3 qwen3.6-27b",
    "players": [
@@ -132,7 +132,7 @@
      "winner": false
     }
    ],
-   "bytes": 8346756,
+   "bytes": 8262786,
    "default": false
   },
   {
@@ -182,7 +182,7 @@
      "winner": false
     }
    ],
-   "bytes": 9163298,
+   "bytes": 9067240,
    "default": false
   },
   {
@@ -232,7 +232,7 @@
      "winner": false
     }
    ],
-   "bytes": 6710739,
+   "bytes": 6655434,
    "default": true
   },
   {
@@ -282,7 +282,7 @@
      "winner": false
     }
    ],
-   "bytes": 7168419,
+   "bytes": 7089889,
    "default": false
   },
   {
@@ -332,7 +332,57 @@
      "winner": false
     }
    ],
-   "bytes": 11797354,
+   "bytes": 11679590,
+   "default": false
+  },
+  {
+   "file": "2026-10-01_glm5.3-space-bunny-deepseek-v4-mimo-v2.6_70min.jsonl",
+   "matchId": "match-20261001-200050",
+   "date": 1790877651214,
+   "duration": "69:59",
+   "turns": 419,
+   "outcome": "wonder",
+   "seed": "rmupubbbbnur8",
+   "difficulty": "easy",
+   "turnBased": false,
+   "promptVersion": "agents-rule-v101",
+   "build": 1023,
+   "winner": "DGX GLM5.3 Flash",
+   "players": [
+    {
+     "seat": 0,
+     "name": "DGX GLM5.3 Flash",
+     "model": "GLM5.3",
+     "civ": "Egyptians",
+     "power": 4753,
+     "winner": true
+    },
+    {
+     "seat": 2,
+     "name": "O deepseek-v4-flash",
+     "model": "deepseek/deepseek-v4-flash-0731",
+     "civ": "Persians",
+     "power": 1746,
+     "winner": false
+    },
+    {
+     "seat": 3,
+     "name": "O mimo-v2.6 flash",
+     "model": "xiaomi/mimo-v2.6-flash",
+     "civ": "Yamato",
+     "power": 106,
+     "winner": false
+    },
+    {
+     "seat": 1,
+     "name": "O space-bunny",
+     "model": "stealth/space-bunny-alpha",
+     "civ": "Greeks",
+     "power": 74,
+     "winner": false
+    }
+   ],
+   "bytes": 8420352,
    "default": false
   }
  ]

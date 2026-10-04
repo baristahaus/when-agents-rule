@@ -50,6 +50,22 @@ class OpenAIAIManager {
     // through, and then "from" fails an enum it never meant to answer. For
     // coordinates it was worse than an error — Number(" ") is 0 and finite, so a
     // blank targetX was silently accepted as the map centre.
+    // A model's own tool-call markup left inside a call's arguments (GLM's <tool_call>,
+    // <arg_key>, <arg_value>): its tags came out broken and the server's parser cut the
+    // calls apart in the wrong places. Seen 28 Sep 2026 as a reason that swallowed the
+    // whole next command, and as a key reading 'archer</arg_value><arg_key>reason'.
+    static get RAW_TOOL_MARKUP() { return /<\/?(?:tool_call|arg_key|arg_value)>/; }
+    static hasRawToolMarkup(v) {
+        if (typeof v === 'string') return OpenAIAIManager.RAW_TOOL_MARKUP.test(v);
+        if (Array.isArray(v)) return v.some(x => OpenAIAIManager.hasRawToolMarkup(x));
+        if (v && typeof v === 'object') return Object.keys(v).some(k => OpenAIAIManager.RAW_TOOL_MARKUP.test(k) || OpenAIAIManager.hasRawToolMarkup(v[k]));
+        return false;
+    }
+    // For display only (the log, the bubbles): the text before the first stray tag.
+    static clipRawToolMarkup(text) {
+        const s = String(text == null ? '' : text), m = s.search(OpenAIAIManager.RAW_TOOL_MARKUP);
+        return m < 0 ? s : s.slice(0, m).trim() + ' …';
+    }
     static given(v) {
         return !(v === undefined || v === null || (typeof v === 'string' && v.trim() === ''));
     }
@@ -104,7 +120,8 @@ class OpenAIAIManager {
                unitIds: { type: 'array', items: { type: 'integer' }, description: 'Exact unit ids to send. Optional.' } }, ['tile']],
             ['move_units', 'Persistent movement order. Nearby combat interrupts march/guard/patrol; survivors regroup and resume. Scout never initiates combat. Incoming damage overrides all modes: fighters retaliate together, towers first; mobile threats obey chase limits. Regroup and resume afterward.',
              Object.assign({mode:{type:'string',enum:['march','scout','guard','patrol'],description:'Default march. Scout: travel without initiating combat; retaliate if attacked. Guard: travel then defend the position. Patrol: repeat between current group position and destination. New orders replace old ones for selected units.'},
-                targets:{type:'string',enum:['any','military'],description:'Guard/patrol/march incidental targets: any enemy unit (default), or military only. Pursuit is bounded; explicit attack_target remains a commitment.'}}, XZ, WHO), ['targetX', 'targetZ']],
+                targets:{type:'string',enum:['any','military'],description:'Guard/patrol/march incidental targets: any enemy unit (default), or military only. Pursuit is bounded; explicit attack_target remains a commitment.'}}, XZ,
+                { tile: S('Tile label from map.exploration, e.g. "C5". Used only when targetX/targetZ are not given: the units go to the centre of that tile.') }, WHO), []],
             ['attack_target', 'Attack a unit or building by id, or attack-move to a position. Coordinates start a march; "ordersInProgress" in the state carries its secondsRemaining.',
              Object.assign({ targetId: S('Copy the exact string id from enemyUnits or enemyBuildings, including the unit_ or building_ prefix and full suffix. Do not shorten it or convert it to a number. Use this OR targetX/targetZ.') }, XZ, WHO), []],
             ['delete_unit', 'Delete your own units, e.g. to free population.',
@@ -253,6 +270,64 @@ class OpenAIAIManager {
     // arguments is a JSON STRING the model wrote, so it can break exactly the way an
     // inline object breaks. A broken one costs its own call and nothing else -- which
     // is the whole reason for going this way.
+    // Each tool call answered with its OWN result. A turn resolves into one combined
+    // outcome ("Command i/n: ..." per command), and that used to be replayed as the
+    // result of the FIRST call, with the others told to look above. In 28% of
+    // multi-call turns the first call was the plan, so the plan call "returned" the
+    // game commands' results and the calls that made them got a pointer.
+    //
+    // Calls are matched to results in the order envelopeFromToolCalls built the
+    // commands: game commands in call order, then calls it could not use. A plan call
+    // is answered for what happened to it: saved, not applied because an earlier plan
+    // call in the same reply already set those fields, or not applied because it held
+    // neither field. Returns null when the counts do not line up -- a call too long to
+    // replay was left out of the record -- and the caller keeps the combined answer.
+    static resultsPerCall(toolCalls, outcome) {
+        const text = String(outcome == null ? '' : outcome);
+        const parts = text.split(/\n(?=Command \d+\/\d+: )/).map(x => x.replace(/^Command \d+\/\d+: /, ''));
+        let objTaken = false, planTaken = false;
+        const kinds = (toolCalls || []).map(c => {
+            let args;
+            try { args = JSON.parse((c && c.args) || '{}'); } catch (e) { return 'broken'; }
+            if (!args || typeof args !== 'object') return 'broken';
+            if (c.name === 'plan') {
+                const obj = typeof args.objective === 'string' && !objTaken;
+                const plan = Array.isArray(args.plan) && !planTaken;
+                objTaken = objTaken || typeof args.objective === 'string';
+                planTaken = planTaken || Array.isArray(args.plan);
+                if (obj || plan) return 'plan';
+                return (typeof args.objective === 'string' || Array.isArray(args.plan)) ? 'planRepeat' : 'planEmpty';
+            }
+            if (OpenAIAIManager.ACTION_NAMES.has(c.name) || typeof args.action === 'string') return 'command';
+            return 'broken';
+        });
+        const commands = kinds.filter(k => k === 'command').length;
+        const broken = kinds.filter(k => k === 'broken').length;
+        const PLAN_REPEAT = 'Not applied: an earlier plan call in this reply already set the objective and plan.';
+        const PLAN_EMPTY = 'Not applied: a plan call needs "objective" (text) and/or "plan" (a list of steps).';
+        let ci = 0, bi = commands, planSaid = false;
+        if (!commands && !broken) {
+            // Plan-only: the whole outcome describes the plan save.
+            return kinds.map(k => k === 'plan' && !planSaid ? (planSaid = true, text)
+                : (k === 'planEmpty' ? PLAN_EMPTY : PLAN_REPEAT));
+        }
+        if (commands + broken !== parts.length) return null;
+        return kinds.map(k => k === 'command' ? parts[ci++]
+            : k === 'broken' ? parts[bi++]
+            : k === 'plan' ? 'OK - Plan saved.'
+            : k === 'planEmpty' ? PLAN_EMPTY : PLAN_REPEAT);
+    }
+    // The tool-role answers for one recorded turn. `pending` marks a turn that had not
+    // resolved: every call then gets the same honest "not resolved" line.
+    static answerCalls(toolCalls, outcome, pending) {
+        const per = pending ? null : OpenAIAIManager.resultsPerCall(toolCalls, outcome);
+        return toolCalls.map((c, k) => ({
+            id: c.id, name: c.name,
+            content: per ? String(per[k])
+                : (pending || k === 0 ? String(outcome) : '(covered by the result of ' + toolCalls[0].name + ' above)')
+        }));
+    }
+
     static envelopeFromToolCalls(calls) {
         const cmds = [];
         const head = {};
@@ -347,7 +422,10 @@ class OpenAIAIManager {
 
     // Private request context: identities and order tokens never enter model JSON.
     rememberWorkerPools(controller) {
-        controller._shownWorkerPools = new Map(controller.aiPlayer.units
+        controller._shownWorkerPools = this.workerPoolsOf(controller);
+    }
+    workerPoolsOf(controller) {
+        return new Map(controller.aiPlayer.units
             .filter(u => u.type === 'worker' && u.health > 0)
             .map(u => [u, { job: OpenAIAIManager.workerJob(this.game, u), token: u._orderToken }]));
     }
@@ -450,6 +528,49 @@ class OpenAIAIManager {
     // English text. See ui.renderOutcome / I18N_OUTCOMES.
     outcome(code, params) { this._pendingOutcome = { code, params: params || {} }; return true; }
 
+    // Match-clock seconds, the clock the analyzer reads every transcript line against.
+    matchSecondsNow() {
+        const now = Date.now();
+        return Math.max(0, Math.round((now - ((this.game && this.game._timeline && this.game._timeline.t0) || now)) / 1000));
+    }
+    // A transcript line saying that something the model did not choose changed what it
+    // saw or did: a human's advice or pause, or the harness adapting its request. Written
+    // and flushed at once rather than at match end, so a crash cannot lose it -- a result
+    // whose record does not mark an assist reads as unassisted.
+    noteChange(ai, entry) {
+        try {
+            const id = ai && (ai.id || ai);
+            if (!this.transcripts || !id) return;
+            this.transcripts.note(id, Object.assign({ at: Date.now(), matchSeconds: this.matchSecondsNow() }, entry));
+            this.transcripts.flush(id);
+        } catch (e) { /* recording must never break a turn */ }
+    }
+    // Step-stamped inputs (review #9): everything that changed an ARENA match's world --
+    // a committed observation, a batch, a speed, a demotion -- at the step it took effect,
+    // in order (seq), with the state hash it left. Enough to re-simulate the match and
+    // certify it step by step. Not in Campaign, where a human's clicks are not recorded.
+    noteInput(kind, playerId, payload = {}) {
+        try {
+            const g = this.game;
+            if (!this.transcripts || !this.transcripts.matchId || !g || !g.clock || !g.spectatorMode) return;
+            this._inputSeq = (this._inputSeq || 0) + 1;
+            this.transcripts.noteInput(Object.assign({ type: 'input', kind, step: g.clock.stepNo, seq: this._inputSeq },
+                playerId ? { playerId } : {}, payload, { stateHash: g.stateHash ? g.stateHash() : null }));
+        } catch (e) { /* recording must never break a turn */ }
+    }
+    // The same for the match as a whole -- global pause and speed. It has no seat.
+    noteMatchEvent(entry) {
+        try {
+            if (this.transcripts) this.transcripts.noteMatch(
+                Object.assign({ type: 'match_event', at: Date.now(), matchSeconds: this.matchSecondsNow() }, entry));
+        } catch (e) { /* recording must never break a turn */ }
+    }
+    // Counted on the seat, for the results: how often a human or the harness stepped in.
+    countChange(controller, key) {
+        const st = controller && controller.stats;
+        if (st) st[key] = (st[key] || 0) + 1;
+    }
+
     // Rejections the state cannot honestly forewarn, and which therefore must not count
     // against a model. Every OTHER rejection is now a gate the model was shown before it
     // acted — blockedBy, a published tally, or a rule in the system prompt — so trying
@@ -497,6 +618,33 @@ class OpenAIAIManager {
                         'targetGone', 'orderedUnitsGone', 'assignIdleRaced', 'assignIdleFighting',
                         'laneResearchBusy', 'assignFromRaced']);
     }
+    // ONE verdict per command, read by the results metrics and written to the transcript,
+    // so the two can never disagree:
+    //   ok          executed
+    //   avoidable   refused on a gate the state had shown (actionsRejected)
+    //   contended   refused on something no snapshot could forewarn (UNFOREWARNED)
+    //   invalid     not a callable action: unknown name, wrong shape, unparsable call
+    //   harnessFault the harness failed while carrying out a valid command
+    static verdictFor(actionResult, code) {
+        if (!String(actionResult || '').startsWith('[ERROR]')) return 'ok';
+        // "not a string" is an invented shape rather than an invented name, but both are
+        // the model failing to produce a callable action, and neither is a rejected move.
+        if (/Unknown action/i.test(actionResult) || /must be the action NAME as a string/i.test(actionResult)) return 'invalid';
+        return OpenAIAIManager.UNFOREWARNED.has(code) ? 'contended' : 'avoidable';
+    }
+    // The command's outcome as the transcript records it: position, action, code, verdict.
+    noteOutcome(controller, entry) {
+        (controller._turnOutcomes || (controller._turnOutcomes = [])).push(entry);
+        // The latest one alone, for a caller that runs commands one by one and keeps its
+        // own record (the platform server's submit).
+        controller._lastOutcome = entry;
+    }
+    takeOutcomes(controller) {
+        const list = (controller._turnOutcomes || []).map((o, i) => Object.assign({ n: i + 1 }, o));
+        controller._turnOutcomes = [];
+        return list;
+    }
+
     // haveString / haveObj lived here: the player's stock as a sentence and as an object,
     // built for the four affordability rejections and used nowhere else. Both are gone
     // with the tail they served. The state hands the model its own resources block and
@@ -594,6 +742,17 @@ class OpenAIAIManager {
         return { row, col };
     }
 
+    // The centre of a tile label ("C5"), or null when it is not one. A move's
+    // destination, so the plain centre -- explore's aim at unseen ground is a scouting
+    // choice that belongs to explore.
+    tileCentre(game, label) {
+        const T = game.EXPLORE_TILES || 7;
+        const t = this.parseTile(label, T);
+        if (!t) return null;
+        const size = (game.terrain && game.terrain.size) || 800, cell = size / T;
+        return { x: -size / 2 + (t.col + 0.5) * cell, z: -size / 2 + (t.row + 0.5) * cell };
+    }
+
     // Which tile is this world position in?
     tileAt(game, x, z) {
         return game.tileLabelAt(x, z);
@@ -653,16 +812,16 @@ class OpenAIAIManager {
             // bestVal >= 1 means every reachable cell is already seen; fall through to
             // the old behaviour so a re-sweep for enemies still spreads out.
             if (cands.length && bestVal < 1) {
-                const [cx, cz] = cands[Math.floor(game.rand() * cands.length)];
+                const [cx, cz] = cands[Math.floor(game.rand(owner, 'explore') * cands.length)];
                 // Jitter inside the cell so two scouts at one cell do not stack.
-                return game.clampToMap(cx + (game.rand() - 0.5) * cw * 0.6,
-                                       cz + (game.rand() - 0.5) * cw * 0.6);
+                return game.clampToMap(cx + (game.rand(owner, 'explore') - 0.5) * cw * 0.6,
+                                       cz + (game.rand(owner, 'explore') - 0.5) * cw * 0.6);
             }
         }
         const pad = Math.min(inset || 0, cell / 2 - 1);
         const x0 = col * cell - half + pad, x1 = (col + 1) * cell - half - pad;
         const z0 = row * cell - half + pad, z1 = (row + 1) * cell - half - pad;
-        return game.clampToMap(x0 + game.rand() * (x1 - x0), z0 + game.rand() * (z1 - z0));
+        return game.clampToMap(x0 + game.rand(owner, 'explore') * (x1 - x0), z0 + game.rand(owner, 'explore') * (z1 - z0));
     }
 
     // Every unit this civilization can EVER train: the id, the building that makes
@@ -1016,7 +1175,7 @@ class OpenAIAIManager {
         units.forEach(u => { cx += u.x; cz += u.z; });
         cx /= units.length; cz /= units.length;
         let dx = tx - cx, dz = tz - cz;
-        const d = Math.hypot(dx, dz);
+        const d = WarMath.hypot(dx, dz);
         // Already standing on the destination: no direction to face, so no rotation to
         // apply. Point north rather than dividing by zero.
         if (d < 0.001) { dx = 0; dz = -1; } else { dx /= d; dz /= d; }
@@ -1083,7 +1242,7 @@ class OpenAIAIManager {
         const g = this.game;
         const base = (g && g.moveSpeedOf) ? g.moveSpeedOf(unit) : ((unit && unit.speed) || 1.0);
         const sp = ((base || 1.0) * 3) || 3;
-        const d = Math.hypot(((unit && unit.x) || 0) - tx, ((unit && unit.z) || 0) - tz);
+        const d = WarMath.hypot(((unit && unit.x) || 0) - tx, ((unit && unit.z) || 0) - tz);
         return Math.max(1, this.realSecs((d / sp) * 1000));
     }
 
@@ -1113,11 +1272,7 @@ class OpenAIAIManager {
         // Resolve a single primary credential string from the common auth types.
         const primaryKey = async () => {
             if (a.type === 'bearer') return (a.key || '').trim();
-            if (a.type === 'oauth') {
-                let token = (a.accessToken || '').trim();
-                if (!token && a.tokenUrl && a.clientId) token = await OpenAIAIManager.fetchOAuthToken(a);
-                return token;
-            }
+            if (a.type === 'oauth') return OpenAIAIManager.oauthAccessToken(a);
             return '';
         };
         const applyCustomHeaders = () => {
@@ -1243,9 +1398,20 @@ class OpenAIAIManager {
     //   anthropic  thinking: { type: 'enabled', budget_tokens: N }
     //   google     generationConfig.thinkingConfig: { thinkingBudget: N }  (0 off, -1 auto)
     //   ollama     think: true | false
-    static reasoningFor(provider, raw) {
+    static reasoningFor(provider, raw, send = null) {
         if (raw === '' || raw == null) return null;
         const s = String(raw).trim().toLowerCase();
+        // Options read from the server (b1028) go out in the one form that server reads.
+        // A key it does not know is ignored without a word, so this is never guessed.
+        const sw = s === 'on' || s === 'true' ? true : s === 'off' || s === 'false' ? false : null;
+        if (send === 'openrouter' && provider === 'openai')
+            return { kind: 'patch', patch: { reasoning: sw === false ? { effort: 'none' } : sw === true ? { enabled: true } : { effort: s } } };
+        if (send === 'llamacpp' && provider === 'openai')
+            return sw === null ? { kind: 'kwargs', patch: { reasoning_effort: s } } : { kind: 'enableThinking', value: sw };
+        if (send === 'unsloth' && provider === 'openai')
+            return { kind: 'patch', patch: sw === null ? { reasoning_effort: s } : { enable_thinking: sw } };
+        if (send === 'ollama' && provider === 'ollama') return { kind: 'think', value: sw === null ? s : sw };
+        if (send === 'google' && provider === 'google' && sw === false) return { kind: 'budget', value: 0 };
         if (provider === 'openai') {
             // Two different things share this branch. OpenAI's own reasoning models take
             // reasoning_effort; a Qwen served through vLLM or SGLang ignores that entirely
@@ -1404,10 +1570,111 @@ class OpenAIAIManager {
         return out;
     }
 
+    // ---- Thinking options, read from the server (b1028) --------------------------
+    // What the chosen model offers, from the one place each server states it: OpenRouter's
+    // model list (reasoning.supported_efforts), Ollama's /api/show (thinking.values),
+    // llama.cpp's chat template (/props), Unsloth Studio's /v1/status, and OpenAI's own
+    // documented efforts. Everything else (vLLM, SGLang, other gateways) does not say,
+    // and returns source null: the card then says "not provided" rather than offer a key
+    // the server would ignore in silence. Anthropic and Google keep their budget field.
+    // Never throws. { source, send, levels, canOn, canOff, def, unsupported }
+    static async discoverThinking(conn, timeoutMs = 6000) {
+        const none = { source: null };
+        try {
+            const endpoint = OpenAIAIManager.stripSlash((conn && conn.endpoint) || '');
+            if (!endpoint || !conn.model) return none;
+            const prov = OpenAIAIManager.resolveProvider(conn);
+            if (prov === 'anthropic' || prov === 'google') return OpenAIAIManager.thinkingByProtocol(conn) || none;
+            if (prov !== 'openai' && prov !== 'ollama') return none;
+            let headers = { 'Content-Type': 'application/json' };
+            try { headers = await OpenAIAIManager.buildAuthHeaders(conn.auth || { type: 'none' }, prov); } catch (e) { /* unauthenticated is still worth asking */ }
+            const root = OpenAIAIManager.stripSlash(endpoint.replace(/\/(v1|api)$/i, ''));
+            const getJson = async (url, opts) => {
+                try {
+                    const r = await OpenAIAIManager.fetchWithTimeout(url, Object.assign({ method: 'GET', headers }, opts || {}), timeoutMs);
+                    return r && r.ok ? await r.json() : null;
+                } catch (e) { return null; }
+            };
+            const id = String(conn.model).replace(/^models\//, '');
+            const found = (source, send, levels, canOn, canOff, def) => {
+                levels = (levels || []).map(String).filter(v => v && v !== 'none');
+                return { source, send, levels, canOn: !!canOn, canOff: !!canOff, def: def || null,
+                         unsupported: !levels.length && !canOn && !canOff };
+            };
+            if (prov === 'ollama') {
+                const show = await getJson(root + '/api/show', { method: 'POST', body: JSON.stringify({ model: conn.model }) });
+                if (!show) return none;
+                const th = show.thinking;
+                if (th && Array.isArray(th.values))
+                    return found('Ollama', 'ollama', th.values.filter(v => typeof v === 'string'), th.values.includes(true), th.values.includes(false), th.default);
+                if (!(show.capabilities || []).includes('thinking')) return found('Ollama', 'ollama', [], false, false);
+                // Ollama before thinking.values (0.34 does not send it): gpt-oss takes levels
+                // and ignores true/false, per Ollama's own docs; the rest switch on and off.
+                if (show.details && show.details.family === 'gptoss') return found('Ollama', 'ollama', ['low', 'medium', 'high'], false, false, 'medium');
+                return found('Ollama', 'ollama', [], true, true);
+            }
+            if (OpenAIAIManager.isOpenRouter(endpoint)) {
+                const list = await getJson(endpoint + '/models');
+                const mdl = list && Array.isArray(list.data) ? list.data.find(x => x && x.id === id) : null;
+                if (!mdl) return none;
+                const r = mdl.reasoning;
+                if (!r) return found('OpenRouter', 'openrouter', [], false, false);
+                const efforts = Array.isArray(r.supported_efforts) ? r.supported_efforts : [];
+                // A model without effort levels states only whether it thinks by default.
+                const def = r.default_effort || (efforts.length ? null : r.default_enabled === false ? 'off' : r.default_enabled ? 'on' : null);
+                return found('OpenRouter', 'openrouter', efforts, !efforts.length, !r.mandatory, def);
+            }
+            const props = await getJson(root + '/props');
+            if (props && typeof props.chat_template === 'string') {
+                const tpl = props.chat_template, sw = /enable_thinking/.test(tpl);
+                const lv = OpenAIAIManager.templateEffortLevels(tpl);
+                return found('llama.cpp', 'llamacpp', lv.levels, sw, sw, lv.def);
+            }
+            const st = await getJson(root + '/v1/status');
+            if (st && ('reasoning_effort_levels' in st || 'supports_reasoning' in st)) {
+                const sw = !!st.supports_reasoning && st.reasoning_style === 'enable_thinking';
+                return found('Unsloth Studio', 'unsloth', st.supports_reasoning ? st.reasoning_effort_levels : [], sw, sw && !st.reasoning_always_on);
+            }
+            if (/(^|\.)api\.openai\.com$/i.test(new URL(endpoint).hostname))
+                return found('OpenAI', 'openai', OpenAIAIManager.REASONING_EFFORTS, false, false);
+        } catch (e) { /* asking is optional; not knowing is the old behaviour */ }
+        return none;
+    }
+    // Anthropic's and Google's own APIs take a token budget, documented and the same for
+    // every model, so they need no asking (b1030). The same protocol spoken by another
+    // server (vLLM, Unsloth, a gateway) does not promise to read it: null there.
+    static thinkingByProtocol(conn) {
+        const prov = OpenAIAIManager.resolveProvider(conn);
+        let host = '';
+        try { host = new URL(OpenAIAIManager.stripSlash((conn && conn.endpoint) || '')).hostname; } catch (e) { return null; }
+        const f = (source, send, levels, canOff) => ({ source, send, levels, canOn: false, canOff, def: null, unsupported: false });
+        if (prov === 'anthropic' && /(^|\.)api\.anthropic\.com$/i.test(host))
+            return f('Anthropic', 'anthropic', ['1024', '2048', '4096', '8192', '16000', '32000'], false);
+        if (prov === 'google' && /(^|\.)generativelanguage\.googleapis\.com$/i.test(host))
+            return f('Google', 'google', ['-1', '1024', '4096', '8192', '16384', '24576'], true);
+        return null;
+    }
+    // The effort words a Jinja template compares reasoning_effort against, and the one it
+    // falls back to -- the template is what consumes the value, so it is the list.
+    static templateEffortLevels(tpl) {
+        const levels = new Set(); let m, def = null;
+        const cmp = /reasoning_effort\s*(?:==|!=)\s*['"]([A-Za-z_]+)['"]/g;
+        while ((m = cmp.exec(tpl))) levels.add(m[1]);
+        const inList = /reasoning_effort\s+(?:not\s+)?in\s*[\[(]([^\])]*)[\])]/g;
+        while ((m = inList.exec(tpl))) m[1].replace(/['"]([A-Za-z_]+)['"]/g, (_, v) => levels.add(v));
+        const d = /reasoning_effort\s*\|\s*default\(\s*['"]([A-Za-z_]+)['"]/.exec(tpl)
+            || /reasoning_effort\s*=\s*['"]([A-Za-z_]+)['"]/.exec(tpl);
+        if (d) { def = d[1]; levels.add(d[1]); }
+        return { levels: [...levels], def };
+    }
+
     static async probeServedBy(conn) {
         try {
             const prov = OpenAIAIManager.resolveProvider(conn);
-            if (prov !== 'openai') return prov;   // the others name themselves
+            // Only Ollama's own protocol names its server. Anthropic's and Google's are
+            // spoken by vLLM, Unsloth and gateways too, so those are asked like the rest
+            // (b1027: this returned the protocol, and the header recorded vLLM as Anthropic).
+            if (prov === 'ollama') return prov;
             const r = await OpenAIAIManager.testConnection(
                 conn.endpoint, conn.auth || (conn.apiKey ? { type: 'bearer', key: conn.apiKey } : { type: 'none' }),
                 prov, 6000);
@@ -1434,7 +1701,9 @@ class OpenAIAIManager {
             // Recorded because it changes what a number MEANS: a seat allowed to fall
             // back is scored on a softer contract than one that is not.
             toolFallback: !!conn.toolFallback,
-            language: conn.language || 'en'
+            language: conn.language || 'en',
+            // The last "Check tool calls" result for this library entry, if one was run.
+            preflight: conn.preflight || null
         };
         // EXPERIMENTAL — rolling inference. Recorded only when it is not 1, because at
         // 1 it describes ordinary play and belongs in no header. When it IS set it is
@@ -1797,7 +2066,7 @@ class OpenAIAIManager {
         const model = modelId || 'default';
         // Only ever add a key we actually have a value for.
         const put = (obj, key, val) => { if (val !== undefined && !Number.isNaN(val)) obj[key] = val; return obj; };
-        const reasoning = opts.omitReasoning ? null : OpenAIAIManager.reasoningFor(provider, opts.reasoning);
+        const reasoning = opts.omitReasoning ? null : OpenAIAIManager.reasoningFor(provider, opts.reasoning, opts.thinkingSend);
         // Anthropic forbids temperature, top_p and top_k while extended thinking is on.
         // Suppressed here rather than left to 400, and the library says so on the card so
         // it does not look like the settings were quietly ignored.
@@ -1927,6 +2196,8 @@ class OpenAIAIManager {
             body.tool_choice = 'auto';
         }
         if (reasoning && reasoning.kind === 'effort') body.reasoning_effort = reasoning.value;
+        if (reasoning && reasoning.kind === 'patch') Object.assign(body, reasoning.patch);
+        if (reasoning && reasoning.kind === 'kwargs') body.chat_template_kwargs = Object.assign({}, body.chat_template_kwargs, reasoning.patch);
         // Qwen and friends. Merged rather than assigned: a raw extra body may also carry
         // chat_template_kwargs, and clobbering it would lose whatever else was in there.
         if (reasoning && reasoning.kind === 'enableThinking') {
@@ -2042,26 +2313,76 @@ class OpenAIAIManager {
         return null;
     }
 
-    // OAuth2 client-credentials grant. Token is cached on the auth object.
-    static async fetchOAuthToken(auth) {
-        const now = Date.now();
-        if (auth._token && auth._tokenExp && now < auth._tokenExp) return auth._token;
-        const body = new URLSearchParams();
-        body.set('grant_type', 'client_credentials');
-        body.set('client_id', auth.clientId || '');
-        if (auth.clientSecret) body.set('client_secret', auth.clientSecret);
-        if (auth.scope) body.set('scope', auth.scope);
+    // ---- OAuth login (b1024) ------------------------------------------------
+    // A "Log in" button instead of credentials to fill in: the browser's own login
+    // (authorization code with PKCE, no client secret), in a popup that comes back to
+    // oauth-callback.html. OpenRouter needs nothing configured and hands back a
+    // lasting key; any other OAuth server needs its authorize URL, token URL and client
+    // ID, and its tokens are refreshed here as they run out.
+    static isOpenRouter(endpoint) {
+        try { return /(^|\.)openrouter\.ai$/i.test(new URL(endpoint).hostname); } catch (e) { return false; }
+    }
+    static oauthCallbackUrl() { return new URL('oauth-callback.html', location.href.split(/[?#]/)[0]).href; }
+    static b64url(bytes) {
+        let s = ''; bytes.forEach(b => { s += String.fromCharCode(b); });
+        return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    static async oauthPkce() {
+        const verifier = OpenAIAIManager.b64url(crypto.getRandomValues(new Uint8Array(32)));
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+        return { verifier, challenge: OpenAIAIManager.b64url(new Uint8Array(digest)), state: OpenAIAIManager.b64url(crypto.getRandomValues(new Uint8Array(16))) };
+    }
+    // Where the popup goes: OpenRouter's login, or the configured server's.
+    static oauthAuthorizeUrl(auth, endpoint, pkce) {
+        const redirect = OpenAIAIManager.oauthCallbackUrl();
+        if (OpenAIAIManager.isOpenRouter(endpoint)) {
+            const u = new URL('https://openrouter.ai/auth');
+            u.search = new URLSearchParams({ callback_url: redirect, code_challenge: pkce.challenge, code_challenge_method: 'S256', state: pkce.state });
+            return u.href;
+        }
+        const u = new URL(auth.authorizeUrl);
+        const q = { response_type: 'code', client_id: auth.clientId || '', redirect_uri: redirect,
+            code_challenge: pkce.challenge, code_challenge_method: 'S256', state: pkce.state };
+        if (auth.scope) q.scope = auth.scope;
+        Object.entries(q).forEach(([k, v]) => u.searchParams.set(k, v));
+        return u.href;
+    }
+    // The code from the callback, traded for what the requests will carry. Returns the
+    // fields to store on the auth object.
+    static async oauthExchange(auth, endpoint, code, pkce) {
+        if (OpenAIAIManager.isOpenRouter(endpoint)) {
+            const resp = await OpenAIAIManager.fetchWithTimeout('https://openrouter.ai/api/v1/auth/keys', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, code_verifier: pkce.verifier, code_challenge_method: 'S256' })
+            }, 15000);
+            if (!resp.ok) throw new Error(`OpenRouter did not hand out a key (HTTP ${resp.status})`);
+            const data = await resp.json();
+            if (!data.key) throw new Error('OpenRouter answered without a key');
+            return { accessToken: data.key, refreshToken: '', tokenExp: 0 };
+        }
+        return OpenAIAIManager.oauthTokenRequest(auth, { grant_type: 'authorization_code', code,
+            redirect_uri: OpenAIAIManager.oauthCallbackUrl(), code_verifier: pkce.verifier });
+    }
+    static async oauthTokenRequest(auth, fields) {
+        const body = new URLSearchParams(Object.assign({ client_id: auth.clientId || '' }, fields));
         const resp = await OpenAIAIManager.fetchWithTimeout(auth.tokenUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body
-        }, 8000);
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+        }, 15000);
         if (!resp.ok) throw new Error(`OAuth token request failed (HTTP ${resp.status})`);
         const data = await resp.json();
         if (!data.access_token) throw new Error('OAuth response had no access_token');
-        auth._token = data.access_token;
-        auth._tokenExp = now + ((data.expires_in || 3600) - 60) * 1000;
-        return auth._token;
+        return { accessToken: data.access_token, refreshToken: data.refresh_token || fields.refresh_token || '',
+                 tokenExp: data.expires_in ? Date.now() + data.expires_in * 1000 : 0 };
+    }
+    // The token a request carries: refreshed a minute before it runs out, when the
+    // server gave a refresh token. One refresh at a time per auth object.
+    static async oauthAccessToken(a) {
+        const live = !a.tokenExp || Date.now() < a.tokenExp - 60000;
+        if (live || !a.refreshToken || !a.tokenUrl) return (a.accessToken || '').trim();
+        if (!a._refreshing) a._refreshing = OpenAIAIManager.oauthTokenRequest(a, { grant_type: 'refresh_token', refresh_token: a.refreshToken })
+            .then(t => { Object.assign(a, t); }).finally(() => { a._refreshing = null; });
+        await a._refreshing;
+        return (a.accessToken || '').trim();
     }
 
     // Probe an endpoint: returns { ok, models:[], error }. Used by the setup UI's
@@ -2070,6 +2391,61 @@ class OpenAIAIManager {
     // to an ar.err.* i18n key so the UI shows the message in the active GUI language
     // (these used to be hardcoded German regardless of language); `error` stays an
     // English fallback for logs/non-UI callers.
+    // "Check tool calls": one real request that replays a short synthetic tool history
+    // (a plan call and a wait call, with their results) and asks for one more call.
+    // Test connection only lists models; this says, before a match, whether this
+    // (model x server) can take part -- whether a tool call comes back, whether the chat
+    // template accepts tool history, whether the server failed to parse a call the model
+    // wrote. It uses the seat's own request settings and changes nothing: the result is
+    // shown, and recorded in the transcript header as preflight.
+    static async checkToolCalling(conn, timeoutMs = 90000) {
+        const provider = OpenAIAIManager.resolveProvider(conn);
+        const plan = { id: 'check_plan_1', name: 'plan', args: JSON.stringify({ objective: 'Tool check', plan: ['Wait once'] }) };
+        const wait = { id: 'check_wait_1', name: 'wait', args: JSON.stringify({ reason: 'Tool check' }) };
+        const turns = [
+            { role: 'user', content: 'Tool check, not a game. Save a plan.' },
+            { role: 'assistant', content: null, toolCalls: [plan] },
+            { role: 'tool', results: [{ id: plan.id, name: 'plan', content: 'OK - Plan saved.' }] },
+            { role: 'user', content: 'Call wait once.' },
+            { role: 'assistant', content: null, toolCalls: [wait] },
+            { role: 'tool', results: [{ id: wait.id, name: 'wait', content: 'OK - Waited this turn.' }] },
+            { role: 'user', content: 'Call the wait tool once more, with reason "tool check". Do not answer in text.' }
+        ];
+        const system = 'This is a check of tool calling, not a game. Use the provided tools.';
+        const started = Date.now();
+        let res, text;
+        try {
+            const headers = await OpenAIAIManager.buildAuthHeaders(conn.auth, provider);
+            const req = OpenAIAIManager.buildChatRequest(provider, conn.endpoint, conn.model || 'default', system, turns,
+                { temperature: conn.temperature, topP: conn.topP, topK: conn.topK, minP: conn.minP,
+                  reasoning: conn.reasoning, thinkingSend: conn.thinkingSend, extraBody: conn.extraBody, maxTokens: conn.maxTokens, numCtx: conn.contextSize });
+            const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                res = await fetch(req.url, { method: 'POST', headers, mode: 'cors', body: JSON.stringify(req.body), signal: ctrl.signal });
+                text = await res.text();
+            } finally { clearTimeout(timer); }
+        } catch (e) {
+            return { ok: false, code: e && e.name === 'AbortError' ? 'timeout' : 'network',
+                     detail: String((e && e.message) || e).slice(0, 200), latencyMs: Date.now() - started };
+        }
+        const latencyMs = Date.now() - started;
+        if (!res.ok) {
+            const code = (res.status === 401 || res.status === 403) ? 'auth' : res.status === 404 ? 'notFound'
+                : /template|role|alternat|jinja|tool/i.test(text) ? 'template' : 'http';
+            return { ok: false, code, status: res.status, detail: String(text).slice(0, 300), latencyMs };
+        }
+        let data;
+        try { data = JSON.parse(text); } catch (e) { return { ok: false, code: 'http', status: res.status, detail: String(text).slice(0, 300), latencyMs }; }
+        const a = OpenAIAIManager.normalizeResponse(provider, data);
+        const calls = a.tool_calls || [];
+        if (calls.length) return { ok: true, code: 'ok', via: 'tool_call', tool: ((calls[0].function || {}).name) || calls[0].name || null, latencyMs };
+        const said = String(a.content || '') + '\n' + String(a.reasoning || '');
+        const syntax = OpenAIAIManager.toolSyntaxInText(said);
+        if (syntax) return { ok: false, code: 'parser', detail: syntax, latencyMs };
+        if (/length|max_tokens|MAX_TOKENS/.test(String(a.finish_reason || ''))) return { ok: false, code: 'truncated', latencyMs };
+        return { ok: false, code: 'noCall', detail: String(a.content || '').slice(0, 200), latencyMs };
+    }
+
     static async testConnection(endpoint, auth, provider = 'auto', timeoutMs = 9000) {
         endpoint = OpenAIAIManager.normalizeLocalEndpoint(endpoint);
         if (!endpoint) return { ok: false, errorCode: 'noEndpoint', error: 'No endpoint URL set.' };
@@ -2156,9 +2532,11 @@ class OpenAIAIManager {
             // and then the per-model map is the honest answer and the summary stays null.
             const eigner = Object.values(ownedById);
             const einig = eigner.length && eigner.every(x => x === eigner[0]) ? eigner[0] : null;
-            // Anthropic and Google ARE the service; Ollama speaks its own protocol and is
-            // already distinguishable. Only the openai-compatible crowd needs asking.
-            const servedBy = (prov === 'openai') ? einig : prov;
+            // Who serves is what the server says, whatever protocol it speaks: vLLM or
+            // Unsloth speaking Anthropic's protocol are not Anthropic (asp67, b1026 -- the
+            // protocol used to be recorded here as the server). Only Ollama's own protocol
+            // names its server, because nothing else speaks it.
+            const servedBy = (prov === 'ollama') ? 'ollama' : einig;
             return { ok: true, models, provider: prov, contextById, ownedById, servedBy, endpoint };
         } catch (e) {
             if (e && e.name === 'AbortError') {
@@ -2239,10 +2617,13 @@ class OpenAIAIManager {
         // Read the round mode from the saved arena config. A manager is built fresh per
         // match, so the flag has to be pulled in here or every new match silently
         // reverts to independent pipelines — which is a different benchmark.
-        this.turnBased = !!(this.game && this.game.ui && this.game.ui.turnBasedEnabled
+        // An arena match carries its own spec (game.arenaSpec), which a Quick match or a
+        // Rematch sets without touching the saved config; a Campaign reads the config.
+        const spec = (this.game && this.game.spectatorMode && this.game.arenaSpec) || null;
+        this.turnBased = spec ? !!spec.turnBased : !!(this.game && this.game.ui && this.game.ui.turnBasedEnabled
             && this.game.ui.turnBasedEnabled());
-        this._roundTimeoutMs = (this.game && this.game.ui && this.game.ui.roundTimeoutMs)
-            ? this.game.ui.roundTimeoutMs() : OpenAIAIManager.ROUND_TIMEOUT_DEFAULT_MS;
+        this._roundTimeoutMs = (spec && spec.roundTimeoutMs) || ((this.game && this.game.ui && this.game.ui.roundTimeoutMs)
+            ? this.game.ui.roundTimeoutMs() : OpenAIAIManager.ROUND_TIMEOUT_DEFAULT_MS);
         this._roundPhase = 'ask';
         this._roundNo = 0;
         this._roundStartedAt = 0;
@@ -2297,6 +2678,8 @@ class OpenAIAIManager {
                     // hundreds of models played, so it must not be guessable-looking
                     // when it is absent. null means none was configured.
                     model: c ? (OpenAIAIManager.publicModelId(c.model) || null) : 'ki',
+                    // A rule-based seat's anchor style (AI_PROFILES); model seats have none.
+                    ...(c ? {} : { profile: (ai && ai.profile) || 'standard' }),
                     // The name the results block will use, so the two agree.
                     name: c ? this._seatNames[i] : null,
                     settings: c ? OpenAIAIManager.publicModelSettings(c, s, sharedPrompt, bedient[i]) : null
@@ -2311,8 +2694,14 @@ class OpenAIAIManager {
                 mapSize: (this.game.terrain && this.game.terrain.size) || null,
                 turnBased: !!this.turnBased,
                 roundTimeoutMs: this.turnBased ? this.roundTimeoutMs() : null,
+                // Lockstep: world milliseconds per round (the world is frozen while seats
+                // think). null = the world runs on while they do. See WarConditions.protocolOf.
+                lockstepSliceMs: (this.turnBased && this.game && this.game._lockstep) ? this.game._lockstep.sliceMs : null,
                 simSpeed: this.game.simSpeed || 1,
                 wonderRequired: this.game.wonderRequired || null,
+                // Game seconds per countdown second; absent before build 1021, where it was 1.
+                wonderPace: this.game.wonderPace || 1,
+                promptVersion: (this.game.ui && this.game.ui.ARENA_PROMPT_VERSION) || null,
                 // …and the machine is one of those conditions, not a detail: the renderer decides
                 // the frame cadence, the cadence decides how many simulation steps a seat's turn
                 // contains, and a 3x cadence difference between a software rasteriser and a real
@@ -2321,7 +2710,20 @@ class OpenAIAIManager {
                 // the file said which it was.
                 renderer: (this.game.renderer && this.game.renderer.glInfo) ? this.game.renderer.glInfo.renderer : null,
                 maxTextureSize: (this.game.renderer && this.game.renderer.glInfo) ? this.game.renderer.glInfo.maxTextureSize : null,
-                promptVersion: (this.game.ui && this.game.ui.ARENA_PROMPT_VERSION) || null
+                // What kind of record this is. `schema` lets a reader tell "not recorded"
+                // from "none happened" -- a file without it predates interventions,
+                // adaptations and per-command outcomes, so their absence says nothing.
+                // `build` is stamped here as well as in the results tail, because an
+                // interrupted match has no tail. And a Campaign match, where a human
+                // changed the world, must never pass for an arena run of models.
+                schema: 'war-transcript/2',
+                build: (typeof UIManager !== 'undefined' && UIManager.buildVersion) ? UIManager.buildVersion() : null,
+                mode: this.game.spectatorMode ? 'arena' : 'campaign',
+                humanSeat: this.game.spectatorMode ? null
+                    : ((this.game.player && this.game.player.seat != null) ? this.game.player.seat : 0),
+                // How the lineup was chosen: 'quick-match' when the one-click match picked
+                // it, null when the user set it up. A Rematch keeps the original's value.
+                preset: (this.game.spectatorMode && this.game.arenaSpec && this.game.arenaSpec.preset) || null
             });
         }
 
@@ -2363,6 +2765,7 @@ class OpenAIAIManager {
                 presencePenalty: (conn.presencePenalty == null) ? null : conn.presencePenalty,
                 repetitionPenalty: (conn.repetitionPenalty == null) ? null : conn.repetitionPenalty,
                 reasoning: conn.reasoning == null ? '' : conn.reasoning,
+                thinkingSend: conn.thinkingSend || null,
                 extraBody: conn.extraBody || null,
                 maxTokens: conn.maxTokens || 8192, // per-model cap on reply length (default 8192)
                 contextSize: conn.contextSize || null, // context budget (tokens); also Ollama num_ctx (null = 65536)
@@ -2463,15 +2866,117 @@ class OpenAIAIManager {
         // (Colliding names were suffixed #1/#2 before the header was written, above.)
 
         console.log(`[OpenAIAI] Initialized ${this.aiControllers.length} LLM controllers from Arena setup`);
+        // Not awaited: it only reads files this page already loaded, and the match need
+        // not wait for its own fingerprint.
+        this.writeContract().catch(e => console.warn('[OpenAIAI] contract not recorded', e));
+    }
+
+    // What one seat is offered. The system prompt is rendered per seat -- its edit, its
+    // civilization, its language -- which is why this runs after the controllers exist.
+    contractFor(controller) {
+        const model = controller.model || {};
+        const tools = (model._reqOpts && model._reqOpts.omitTools) ? null
+            : OpenAIAIManager.toolsFor(model.provider || 'auto');
+        return {
+            system: this.buildSystemPrompt(controller.aiPlayer),
+            template: model.customSystemPrompt || OpenAIAIManager.defaultSystemPrompt(),
+            tools,
+            shared: {
+                dialect: model.provider || 'auto',
+                limits: { commands: OpenAIAIManager.MAX_COMMANDS_PER_TURN, planSteps: OpenAIAIManager.PLAN_MAX_STEPS },
+                history: model.minimizeTokens ? 'compact' : 'multi-turn',
+                toolFallback: !!model.toolFallback,
+            },
+        };
+    }
+
+    // The contract every seat was offered, fingerprinted, as a line right after the
+    // header. Texts are stored once and named by their hash, so four seats on one
+    // template cost one copy. familyHash leaves out what is seat-specific by design
+    // (civilization, language); see WarConditions for the rule that reads it. Nothing
+    // here comes from connection settings, so no endpoint, key or path can reach it.
+    async writeContract() {
+        if (typeof WarConditions === 'undefined' || !this.transcripts || !this.transcripts.matchId) return null;
+        const { coreHash, harnessHash } = await WarConditions.sourceHashes();
+        const texts = {};
+        const keep = v => { if (v == null) return null; const k = WarConditions.hash(v); texts[k] = v; return k; };
+        const seats = this.aiControllers.map(c => {
+            const p = this.contractFor(c);
+            const family = Object.assign({ template: WarConditions.hash(p.template),
+                                           tools: p.tools ? WarConditions.hash(p.tools) : null, harnessHash }, p.shared);
+            const exact = Object.assign({}, family, { system: WarConditions.hash(p.system),
+                language: (c.model && c.model.language) || 'en', civilization: c.aiPlayer.civilization });
+            return { playerId: c.aiPlayer.id, seat: c.aiPlayer.seat, system: keep(p.system), tools: keep(p.tools),
+                     parts: exact,
+                     familyHash: harnessHash ? WarConditions.hash(family) : null,
+                     hash: harnessHash ? WarConditions.hash(exact) : null };
+        });
+        // The rule-based seats: anchors, not contracts. A tier is a yardstick for the
+        // rules it ran under and nothing more -- a rules change can move it -- so each is
+        // keyed to this core hash and says outright it is not contract-identical.
+        const driven = new Set(this.aiControllers.map(c => c.aiPlayer));
+        const anchors = ((this.game.aiManager && this.game.aiManager.aiPlayers) || [])
+            .filter(ai => !driven.has(ai))
+            .map(ai => ({ playerId: ai.id, seat: ai.seat, profile: ai.profile || 'standard',
+                          coreHash, contractIdentical: false }));
+        const record = { type: 'contract', schema: WarConditions.SCHEMA, rulesId: WarConditions.RULES_ID,
+                         coreHash, harnessHash, coreFiles: WarConditions.CORE_FILES, seats, anchors, texts };
+        this.contract = record;
+        this.transcripts.addHeaderLine(record);
+        return record;
     }
 
     // ----------------------------------------------------------------
     // 3. Build COMPACT game state JSON for a specific AI player
     //    Target: < 25,000 tokens (server limit: 32,000)
     // ----------------------------------------------------------------
+    // The state a seat is sent, built and then committed. Two steps (review #6 step 7):
+    // observe() only LOOKS -- it reads the world and returns the state together with
+    // what the seat must remember for having been shown it, and changes nothing. So the
+    // same moment can be observed twice with the same result, which a replay, a fork or
+    // a spectator's preview all need. commitObservation() then records what was shown:
+    // the turn counter, remembered enemy buildings, node counts and any "node emptied"
+    // event, and the snapshot the executor later checks commands against. A turn does
+    // both; nothing else should commit.
     buildGameStateJSON(controller) {
+        const { state, pending } = this.observe(controller);
+        this.commitObservation(controller, pending);
+        return state;
+    }
+
+    commitObservation(controller, p) {
+        const ai = controller.aiPlayer, game = this.game;
+        // Events first: they carry the turn counter as it stood when they happened.
+        if (game.logPlayerEvent) p.events.forEach(text => game.logPlayerEvent(ai, text));
+        ai._turnSeq = p.turnSeq;
+        if (!ai._knownResIdx) ai._knownResIdx = new Set();
+        if (p.nodes.touched) {
+            if (!ai._knownResAmt) ai._knownResAmt = Object.create(null);
+            for (const [idx, amount] of p.nodes.seen) { ai._knownResIdx.add(idx); ai._knownResAmt[idx] = amount; }
+        }
+        ai._lastNodeCounts = p.lastNodeCounts;
+        ai._knownEnemyBuildings = p.knownEnemyBuildings;
+        controller._sentIdle = p.sentIdle;
+        controller._shownWorkers = p.shownWorkers;
+        controller._shownWorkerPools = p.workerPools;
+        controller.seat._idleTaken = 0;
+        controller.seat._shownTargetIds = p.shownTargetIds;
+        controller._shownBuildings = p.shownBuildings;
+        controller._shownResearched = p.shownResearched;
+        controller._shownResearching = p.shownResearching;
+        controller._shownAgeUpgrading = p.shownAgeUpgrading;
+        if (controller.seat._peak) Object.assign(controller.seat._peak, p.peak);
+        else controller.seat._peak = p.peak;
+        // With the seat's turn counter: explore's scout choice reads it, so a replay sets it.
+        this.noteInput('observe', ai.id, Object.assign({ turnCount: (controller.seat || controller).turnCount || 0 },
+            controller.laneNo != null ? { lane: controller.laneNo } : {}));
+    }
+
+    observe(controller) {
         const ai = controller.aiPlayer;
         const game = this.game;
+        // Everything this look would once have written, collected for the commit.
+        const pending = { events: [], nodes: { touched: false, seen: new Map() } };
         const civ = getCivilization(ai.civilization);
         const ages = ['stone', 'neolithic', 'bronze', 'iron'];
         const ageOrder = ages;
@@ -2560,9 +3065,12 @@ class OpenAIAIManager {
         // defaulting to the 2 this has always used. A CONTACT asks for 1, because a
         // sighting repeated next turn reads as a second sighting of the same scout.
         const buildRecentEvents = () => {
-            const seq = ai._turnSeq = (ai._turnSeq || 0) + 1;
-            return (ai.events || []).filter(e => (e.seq || 0) >= seq - (e.ttl || 2)).slice(-8).map(e =>
-                `${Math.max(0, Math.round((Date.now() - e.at) / 1000))}s ago: ${e.text}`);
+            const seq = pending.turnSeq = (ai._turnSeq || 0) + 1;
+            // Events found by this look are shown now and logged on commit; here they
+            // take the shape logPlayerEvent will give them.
+            const found = pending.events.map(text => ({ at: game.simNow(), seq: ai._turnSeq || 0, text, ttl: 2 }));
+            return (ai.events || []).concat(found).filter(e => (e.seq || 0) >= seq - (e.ttl || 2)).slice(-8).map(e =>
+                `${Math.max(0, Math.round(this.game.realSecsSince(e.at)))}s ago: ${e.text}`);
         };
 
         // --- Orders in progress: accepted, not yet carried out ---
@@ -2605,7 +3113,7 @@ class OpenAIAIManager {
             if (u.attackMove && !inContact) {
                 to = u.attackMove; order = 'attack_target';
             } else if (u._moveOrderTo && u.isMoving && !u.task && !u.attackMove && !u.isAttacking
-                       && Math.hypot(u.targetX - u._moveOrderTo.x, u.targetZ - u._moveOrderTo.z) < NEAR) {
+                       && WarMath.hypot(u.targetX - u._moveOrderTo.x, u.targetZ - u._moveOrderTo.z) < NEAR) {
                 to = u._moveOrderTo; order = 'move_units';
             }
             if (!to) return;
@@ -2639,7 +3147,7 @@ class OpenAIAIManager {
                 const tc = (ai.buildings || [])
                     .filter(b => b.type === 'town_center' && !b.underConstruction)
                     .reduce((best, b) => {
-                        const d = Math.hypot(b.x - u.x, b.z - u.z);
+                        const d = WarMath.hypot(b.x - u.x, b.z - u.z);
                         return (!best || d < best.d) ? { b, d } : best;
                     }, null);
                 if (tc) { row.timed = true; row.eta = Math.max(row.eta, this.travelEtaSec(u, tc.b.x, tc.b.z)); }
@@ -2670,7 +3178,7 @@ class OpenAIAIManager {
         // engagements this player took part in; the numbers are stated and never
         // interpreted — "their 2 heavy cavalry dealt 1800 to my 3 archers" IS the
         // counter lesson, and drawing it is the model's job, not the harness's.
-        const battleNow = Date.now();
+        const battleNow = game.simNow();
         const sideJson = (side) => {
             const involved = {};
             Object.entries(side.involved).forEach(([type, e]) => {
@@ -2704,8 +3212,9 @@ class OpenAIAIManager {
                     // turn to read them — far too long for "not ongoing" to carry it
                     // alone, since that says the same at 11 seconds and at 110. Only
                     // present once the fight has ended, so a live one pays nothing.
-                    ...(ongoing ? {} : { endedSecondsAgo: Math.round(quiet / 1000) }),
-                    secondsElapsed: Math.max(0, Math.round((b.lastAt - b.startedAt) / 1000)),
+                    // Stamps are simulated time; what a model is told is real seconds.
+                    ...(ongoing ? {} : { endedSecondsAgo: Math.round(game.realSecsSince(b.lastAt)) }),
+                    secondsElapsed: Math.max(0, Math.round((game.matchMsAt(b.lastAt) - game.matchMsAt(b.startedAt)) / 1000)),
                     you: sideJson(b.sides[ai.id]),
                     enemy
                 };
@@ -2787,7 +3296,6 @@ class OpenAIAIManager {
         // Nothing is taken away: assign_workers still resolves any discovered node by
         // coordinate (discoveredNodesOfType sees them all), so a remembered far node
         // stays targetable — it just is not recited every turn.
-        if (!ai._knownResIdx) ai._knownResIdx = new Set();
         // Every node of each type still standing in the world, found or not. Shipped
         // beside the discovered counts under "nodes" so the two are read together: the
         // gap between them is what is still out there unscouted. Deliberately NOT
@@ -2798,7 +3306,7 @@ class OpenAIAIManager {
         const byType = { food: [], wood: [], stone: [], gold: [] };
         if (game.terrain && game.terrain.resources) {
             game.terrain.resources.forEach((res, idx) => {
-                const k = this.knownAmount(ai, res, idx, game);
+                const k = this.knownAmount(ai, res, idx, game, pending.nodes);
                 if (!k.known) return;        // undiscovered → hidden, must scout
                 // Depleted as far as THIS player knows. A node it watched run dry
                 // drops out; one a rival emptied out of sight stays listed at its
@@ -2830,7 +3338,7 @@ class OpenAIAIManager {
         //
         // A fact, not a nudge — where to look next stays the model's call.
         const prevCounts = ai._lastNodeCounts;
-        ai._lastNodeCounts = Object.assign({}, discoveredNodesOnMap);
+        pending.lastNodeCounts = Object.assign({}, discoveredNodesOnMap);
         if (prevCounts) {
             ['food', 'wood', 'stone', 'gold'].forEach(k => {
                 if (prevCounts[k] > 0 && discoveredNodesOnMap[k] === 0 && game.logPlayerEvent) {
@@ -2840,7 +3348,7 @@ class OpenAIAIManager {
                     // knows one thing and must not speak for the rest of the economy.
                     // Naming the field ties the event to the number that moved, which is
                     // the whole point of having it.
-                    game.logPlayerEvent(ai, `Your last discovered ${k} node has been emptied — nodes.discovered.${k} is now 0.`);
+                    pending.events.push(`Your last discovered ${k} node has been emptied — nodes.discovered.${k} is now 0.`);
                 }
             });
         }
@@ -2858,7 +3366,7 @@ class OpenAIAIManager {
         byType.stone.concat(byType.gold).forEach(n => nearby.set(n.x + ',' + n.z, n));
         anchors.forEach(a => ['food', 'wood'].forEach(ty => {
             byType[ty]
-                .map(n => ({ n, d: Math.hypot(a.x - n.x, a.z - n.z) }))
+                .map(n => ({ n, d: WarMath.hypot(a.x - n.x, a.z - n.z) }))
                 .sort((p, q) => p.d - q.d)
                 .slice(0, OpenAIAIManager.NEAREST_PER_ANCHOR)
                 .forEach(({ n }) => nearby.set(n.x + ',' + n.z, n));
@@ -2938,8 +3446,9 @@ class OpenAIAIManager {
                 // rival was handed secondsUntilEnemyWins — the same clock, ticking on
                 // ai._wonderHold, read only for the other side. So the one player whose
                 // victory was running was the only one who could not see it.
-                const held = constructing ? 0 : Math.round((ai._wonderHold || 0) / 1000);
-                obj.secondsUntilYouWin = constructing ? null : Math.max(0, required - held);
+                // Real seconds, as the rival's view of it below (b1021: the hold is no
+                // longer 600 game seconds, so game seconds would disagree with it).
+                obj.secondsUntilYouWin = constructing ? null : this.realSecs(game.wonderHoldMs() - (ai._wonderHold || 0));
                 // And they were not told the rule that makes them a target. Every OTHER
                 // building they own is fog-protected, so a model may reasonably infer
                 // its Wonder is hidden too, tuck it in a corner, and be punished for a
@@ -2965,16 +3474,18 @@ class OpenAIAIManager {
         // even after your units look away — with "visible:false" marking a remembered
         // (last-seen) one vs a currently-in-sight "visible:true". A WONDER is an
         // existential threat and is ALWAYS revealed to everyone (ignores fog).
-        if (!ai._knownEnemyBuildings) ai._knownEnemyBuildings = new Set();
+        const knownEnemyBuildings = pending.knownEnemyBuildings = new Set(ai._knownEnemyBuildings || []);
         const enemyBuildings = [];
         const enemyWonders = [];
+        // One visibility index for this state build; see buildVisionTest (ai.js).
+        const seeNow = this.visionTestFor(ai, game);
         game.getAllBuildings().forEach(bldg => {
             if (ai.buildings.includes(bldg)) return;
-            if (bldg.health <= 0) { ai._knownEnemyBuildings.delete(bldg); return; } // destroyed
+            if (bldg.health <= 0) { knownEnemyBuildings.delete(bldg); return; } // destroyed
             const isWonder = bldg.isWonder;
-            const seenNow = isWonder || this.isPositionVisibleToAI(ai, bldg.x, bldg.z, game);
-            if (seenNow) ai._knownEnemyBuildings.add(bldg);          // discover/refresh
-            if (!seenNow && !ai._knownEnemyBuildings.has(bldg)) return; // never discovered → hidden
+            const seenNow = isWonder || seeNow(bldg.x, bldg.z);
+            if (seenNow) knownEnemyBuildings.add(bldg);          // discover/refresh
+            if (!seenNow && !knownEnemyBuildings.has(bldg)) return; // never discovered → hidden
             const entry = {
                 id: bldg.id, // stable target handle for attack_target(params.targetId)
                 type: bldg.type,
@@ -2987,9 +3498,9 @@ class OpenAIAIManager {
             if (isWonder) {
                 entry.isWonder = true;
                 const ownerAi = game.aiManager.aiPlayers.find(a => a.buildings.includes(bldg));
-                const held = bldg.underConstruction ? 0 : Math.round(((ownerAi && ownerAi._wonderHold) || 0) / 1000);
+                const held = bldg.underConstruction ? 0 : ((ownerAi && ownerAi._wonderHold) || 0);
                 entry.state = bldg.underConstruction ? 'under_construction' : 'complete';
-                entry.secondsUntilEnemyWins = bldg.underConstruction ? null : this.realSecs(Math.max(0, required - held) * 1000);
+                entry.secondsUntilEnemyWins = bldg.underConstruction ? null : this.realSecs(game.wonderHoldMs() - held);
                 enemyWonders.push(entry);
             }
             enemyBuildings.push(entry);
@@ -3094,14 +3605,12 @@ class OpenAIAIManager {
         // On the LANE, because it describes the snapshot THIS request was sent, and two
         // lanes are sent different ones. executeTurn republishes the answering lane's
         // value to the seat, which is where the executor's seat-lookup reads it.
-        if (controller) controller._sentIdle = wk.idle;
+        pending.sentIdle = wk.idle;
         // Keep both the published tally and private membership. Tasks may finish
         // during inference; identities let the executor fulfill that same source
         // request, while order tokens protect workers explicitly reassigned since.
-        if (controller) {
-            controller._shownWorkers = Object.assign({}, wk);
-            this.rememberWorkerPools(controller);
-        }
+        pending.shownWorkers = Object.assign({}, wk);
+        pending.workerPools = this.workerPoolsOf(controller);
         // ...and the tally of how many of them this turn's own calls spend. A reply may
         // carry three commands; if the first builds and the second asks for idle hands,
         // the pool was emptied by the model, not by the clock. That is the one version
@@ -3112,13 +3621,12 @@ class OpenAIAIManager {
         // with two lanes a sibling's state build would land between this turn's reply
         // and its commands running, resetting the tally the executor is about to fill.
         // Kept here too so a seat that never reaches executeTurn starts from zero.
-        if (controller) controller.seat._idleTaken = 0;
 
         // Enemy units (very compact)
         const enemyUnits = [];
         game.getAllUnits().forEach(unit => {
             if (ai.units.includes(unit)) return;
-            const vis = this.isPositionVisibleToAI(ai, unit.x, unit.z, game);
+            const vis = seeNow(unit.x, unit.z);
             if (!vis) return;
             enemyUnits.push({
                 id: unit.id, // target handle for attack_target(params.targetId); units move, so prefer this over stale coordinates
@@ -3338,7 +3846,7 @@ class OpenAIAIManager {
             .map(l => Object.assign(
                 { type: l.type },
                 l.wonder ? { wonder: true } : {},
-                { x: l.x, z: l.z, secondsAgo: Math.round((battleNow - l.at) / 1000) },
+                { x: l.x, z: l.z, secondsAgo: Math.round(game.realSecsSince(l.at)) },
                 l.to ? { to: l.to } : {}
             ));
 
@@ -3373,7 +3881,7 @@ class OpenAIAIManager {
         if (!game.spectatorMode && game.player) pushRival(game.player, 'player');
 
         // --- Threats (what is attacking YOU right now — go defend!) ---
-        const nowMs = Date.now();
+        const nowMs = game.simNow();
         const underAttack = [];
         const scanHit = (ent, kind) => {
             if (!ent || ent.health <= 0) return;
@@ -3404,9 +3912,13 @@ class OpenAIAIManager {
         // makes a single sample useless to plan on. And no derived "turnsRemaining" —
         // that is the model's arithmetic to do, and it would bake in an assumption
         // that cadence holds when a slowing endpoint is exactly when it does not.
+        // The match clock, in real seconds: stopped while paused, still in lockstep while
+        // the seats think. It subtracted the timeline's wall-clock origin from the
+        // simulation clock after review #6 step 3 moved battleNow onto simulated time --
+        // two different clocks -- and so read 0 on every turn of every match from build
+        // 934 to 949: 314 turns out of 314 in one recorded match.
         const clockObj = {
-            matchSeconds: Math.max(0, Math.round(
-                (battleNow - ((game._timeline && game._timeline.t0) || battleNow)) / 1000))
+            matchSeconds: Math.max(0, Math.round(((game.clock && game.clock.matchMs) || 0) / 1000))
         };
         const gaps = (controller && controller.turnGaps) || [];
         // Omitted on the first turn: no interval has been observed yet, and seeding it
@@ -3422,6 +3934,8 @@ class OpenAIAIManager {
         // deadline there, and a field that answers a question the mode never asks is
         // one more thing to reason past.
         if (this.turnBased) clockObj.secondsToAnswer = Math.round(this.roundTimeoutMs() / 1000);
+        // Lockstep: the world waits for every answer, then moves on by exactly this much.
+        if (this.turnBased && this.game && this.game._lockstep) clockObj.worldSecondsPerRound = this.game._lockstep.sliceMs / 1000;
 
         // --- Game stats ---
         const gameStatsObj = {
@@ -3458,7 +3972,7 @@ class OpenAIAIManager {
             // undefined and the final word would lose its "Peak:" line entirely.
             // Both are true at ONE lane as well -- the lane, not the seat, has built
             // state ever since the pool landed.
-            controller.seat._shownTargetIds = new Set(
+            pending.shownTargetIds = new Set(
                 [].concat(enemyUnits || [], enemyBuildings || [])
                   .map(e => String(e && e.id)).filter(x => x && x !== 'undefined'));
 
@@ -3475,20 +3989,20 @@ class OpenAIAIManager {
             (friendlyBuildings || []).forEach(b => {
                 const k = b && b.type; if (k) shownB[k] = (shownB[k] || 0) + 1;
             });
-            controller._shownBuildings = shownB;
-            controller._shownResearched = new Set(Object.keys(ai.researchedTechs || {}));
+            pending.shownBuildings = shownB;
+            pending.shownResearched = new Set(Object.keys(ai.researchedTechs || {}));
             // What the board said was RUNNING, which the completed set cannot answer.
             // null means "nothing running" and is the only value that makes a later
             // clash blind; absent (never recorded) is not null, so a caller without a
             // snapshot fails safe into the ordinary path.
-            controller._shownResearching = ai.currentResearch ? ai.currentResearch.techId : null;
-            controller._shownAgeUpgrading = !!ai.currentAgeUpgrade;
+            pending.shownResearching = ai.currentResearch ? ai.currentResearch.techId : null;
+            pending.shownAgeUpgrading = !!ai.currentAgeUpgrade;
             // High-water marks, for the closing question only. Recorded here because
             // this is the one place a seat's whole picture is already assembled, which
             // is cheaper than re-reading the recorder at match end -- and it costs a
             // handful of comparisons on a path that just built several arrays.
-            const pk = controller.seat._peak
-                || (controller.seat._peak = { buildings: 0, units: 0, workers: 0, pop: 0, maxPop: 0, at: 0 });
+            const pk = pending.peak = Object.assign({ buildings: 0, units: 0, workers: 0, pop: 0, maxPop: 0, at: 0 },
+                controller.seat._peak || {});
             const nb = (friendlyBuildings || []).length, nu = (friendlyUnits || []).length;
             if (nb > pk.buildings || nu > pk.units) {
                 pk.at = (clockObj && clockObj.matchSeconds) || pk.at;
@@ -3501,7 +4015,7 @@ class OpenAIAIManager {
                 pk.maxPop = resourcesObj.maxPopulation;
             }
         }
-        return {
+        const state = {
             player: playerObj,
             clock: clockObj,
             epoch: epochObj,
@@ -3559,6 +4073,7 @@ class OpenAIAIManager {
             threats: threatsObj,
             gameStats: gameStatsObj
         };
+        return { state, pending };
     }
 
     // Helper: get center position of AI's buildings
@@ -3624,6 +4139,14 @@ class OpenAIAIManager {
     // ----------------------------------------------------------------
     // 5. Helper: Check if position is visible to AI
     // ----------------------------------------------------------------
+    // isPositionVisibleToAI for a batch of questions: the same answers, from an index
+    // built once (buildVisionTest in ai.js). Falls back to the linear check where ai.js
+    // is not loaded.
+    visionTestFor(ai, game) {
+        if (typeof buildVisionTest === 'function') return buildVisionTest(game, ai, true);
+        return (x, z) => !!this.isPositionVisibleToAI(ai, x, z, game);
+    }
+
     isPositionVisibleToAI(ai, x, z, game) {
         // Check against AI units. Living ones only, as aiManager.isVisibleTo and
         // Game.canOwnerSee already insist: a unit in its death animation is not a scout,
@@ -3675,12 +4198,25 @@ class OpenAIAIManager {
     // is possible right now; action results correct mistakes. Strategy (build
     // orders, target priority, timing) is deliberately left to the model — that
     // is what the benchmark measures.
+    // How a match is won, as the default prompt states it. Its own constant because a
+    // WAR Bench scenario (review #8, war-scenario-v1) replaces exactly this paragraph
+    // with its objective and changes nothing else the model is told.
+    static get VICTORY_PARAGRAPH() {
+        return 'You win by either:\nDestroying the Town Centers and military buildings of ALL rivals, or Building your Wonder and holding it for gameStats.wonderRequired seconds.';
+    }
+    // `template` is the seat's own prompt when it has one (an edited arena prompt), else
+    // the default; either way it must carry the victory paragraph exactly once.
+    static scenarioSystemPrompt(objective, template = null) {
+        const base = template != null ? String(template) : OpenAIAIManager.defaultSystemPrompt();
+        if (base.split(OpenAIAIManager.VICTORY_PARAGRAPH).length !== 2) throw new Error('the victory paragraph is not in the prompt exactly once');
+        return base.replace(OpenAIAIManager.VICTORY_PARAGRAPH, 'Your objective in this scenario:\n' + String(objective).trim());
+    }
+
     static defaultSystemPrompt() {
         return `You ARE {{civilization}}, one of {{players}} rival commanders in a real-time strategy game on a square 800x800 map. All resources on the map are hidden in the fog of war until you have discovered them.
 Every other player is your enemy. No human plays for you: you command by issuing actions. Your unique bonus: {{bonus}}.
 
-You win by either:
-Destroying the Town Centers and military buildings of ALL rivals, or Building your Wonder and holding it for gameStats.wonderRequired seconds.
+${OpenAIAIManager.VICTORY_PARAGRAPH}
 
 The LAST message carries your CURRENT state as JSON; decide from it and issue one to ${OpenAIAIManager.MAX_COMMANDS_PER_TURN} actions. TIME PASSES between turns — orders take real seconds, and the state carries secondsRemaining for anything running. Work already under way continues on its own and does not occupy your turn; re-issuing it wastes the turn.
 
@@ -3740,7 +4276,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         const names = { de: 'German (Deutsch)', es: 'Spanish (Español)', zh: 'Simplified Chinese (简体中文)' };
         const name = names[lang];
         if (!name) return '';
-        return `\n\n## Language\nThink and write ALL natural-language text — especially every "reason" field — in ${name}. BUT keep the response a valid JSON object and keep all JSON keys, action names and enum values EXACTLY as specified (in English). Only the free-text values are translated.`;
+        return `\n\n## Language\nThink and write ALL natural-language text — especially every "reason" field — in ${name}. BUT keep all tool names, argument keys and enum values EXACTLY as specified (in English). Only the free-text values are translated.`;
     }
 
     buildSystemPrompt(ai) {
@@ -3823,8 +4359,19 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         if (!gs || typeof gs !== 'object') {
             try { return JSON.stringify({ pastTurnRecap: true, raw: String(gs).slice(0, 160) }); } catch (e) { return '{"pastTurnRecap":true}'; }
         }
-        const r = gs.resources || {}, ep = gs.epoch || {}, wk = gs.workers || {}, b = gs.buildings || {}, th = gs.threats || {};
+        const r = gs.resources || {}, ep = gs.epoch || {}, wk = gs.workers || {}, th = gs.threats || {};
         const fu = Array.isArray(gs.friendlyUnits) ? gs.friendlyUnits : [];
+        // Counted from friendlyBuildings. The live state's buildings tally (byType,
+        // underConstruction) was retired and "buildings" became the buildable list, so
+        // reading b.byType here replayed an empty {} into every past turn since 23 Aug.
+        const fb = Array.isArray(gs.friendlyBuildings) ? gs.friendlyBuildings : [];
+        const byType = {};
+        let constructing = 0;
+        for (const x of fb) {
+            if (!x || typeof x.type !== 'string') continue;
+            byType[x.type] = (byType[x.type] || 0) + 1;
+            if (x.state === 'under_construction') constructing++;
+        }
         // Already counts. This used to tally a 1231-entry array on every recap.
         // Reads gs.nodes.discovered since the node counts moved under "nodes" —
         // the same trap the harvesting* keys sprang after their split.
@@ -3853,8 +4400,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 farm: wk.farm, building: wk.building, idle: wk.idle, scouting: wk.scouting
             },
             militaryUnitCount: fu.filter(u => u.type !== 'worker').length,
-            buildingsByType: b.byType || {},
-            buildingsUnderConstruction: b.underConstruction || 0,
+            buildingsByType: byType,
+            buildingsUnderConstruction: constructing,
             currentResearch: gs.research && gs.research.current ? gs.research.current.techId : null,
             discoveredResourceNodeCounts: nodes,
             enemySeen: {
@@ -3940,15 +4487,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
 
             if (prevOutcome && prevViaTools) {
                 // Every call must be answered: an OpenAI-compatible server rejects a
-                // conversation with a tool_call left dangling. The harness produces ONE
-                // outcome per turn (up to three actions resolve into a single reply), so
-                // the first call carries it and the rest point at it rather than
-                // repeating several hundred characters per extra call.
-                turns.push({ role: 'tool', results: prev.toolCalls.map((c, k) => ({
-                    id: c.id, name: c.name,
-                    content: k === 0 ? String(prevOutcome)
-                                     : '(covered by the result of ' + prev.toolCalls[0].name + ' above)'
-                })) });
+                // conversation with a tool_call left dangling. Each call gets its OWN
+                // result (resultsPerCall).
+                turns.push({ role: 'tool', results: OpenAIAIManager.answerCalls(prev.toolCalls, prevOutcome) });
             }
             const userContent = ((prevOutcome && !prevViaTools)
                 ? `RESULT of your previous action: ${prevOutcome}
@@ -3978,13 +4519,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // without a call -- rather than by watching requests fail.
         const last = picked[picked.length - 1];
         if (last && last.toolCalls && last.toolCalls.length) {
-            const text = last.outcome
-                || '(this action had not resolved when the next state was built)';
-            turns.push({ role: 'tool', results: last.toolCalls.map((c, k) => ({
-                id: c.id, name: c.name,
-                content: k === 0 ? String(text)
-                                 : '(covered by the result of ' + last.toolCalls[0].name + ' above)'
-            })) });
+            turns.push({ role: 'tool', results: last.outcome
+                ? OpenAIAIManager.answerCalls(last.toolCalls, last.outcome)
+                : OpenAIAIManager.answerCalls(last.toolCalls, '(this action had not resolved when the next state was built)', true) });
         }
         return turns;
     }
@@ -4126,7 +4663,24 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     // ----------------------------------------------------------------
     // 9. Send request to OpenAI endpoint
     // ----------------------------------------------------------------
-    async sendToOpenAI(controller, gameState) {
+    // The request a seat's turn sends, built from the seat and the state alone: the
+    // system prompt, the standing objective and plan, the present state, any spectator
+    // advice and the rolling history sized to the context budget. It changes nothing --
+    // advice is read, not consumed; the caller records what it sent -- so the arena and
+    // the bench (review #8) build the very same request from the same inputs.
+    //
+    // `shrink` is the arena's self-healing context factor (_ctxShrink); the bench passes
+    // 1. `reqOpts` are the request parameters; by default the model's own, with any
+    // shape the endpoint was found to need (model._reqOpts). `withRequest: false` skips
+    // the final wire request: the arena's send loop builds that itself, once per attempt,
+    // inside its own error handling.
+    //
+    // `closing` ({ history, ask }) builds the final-word request (askFinalWord) on the
+    // same context as a turn -- objective, plan, the rolling history of the seat's own
+    // turns -- with the final state, the match in numbers and the closing question as
+    // the present message (b1035). It used to be the final state alone, and models wrote
+    // their post-mortems from a summary: "likely", "must not have", "looking at the numbers".
+    buildTurnRequest(controller, gameState, { shrink = controller._ctxShrink || 1, reqOpts = null, withRequest = true, closing = null } = {}) {
         const model = controller.model;
         const ai = controller.aiPlayer;
 
@@ -4152,14 +4706,15 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // provider returns a 400 ("maximum context length …"), losing the turn. So we
         // estimate at a pessimistic ~3 chars/token AND keep a big headroom. `_ctxShrink`
         // ratchets this down further if an overflow ever still happens (self-healing).
-        const shrink = controller._ctxShrink || 1;
         const inputBudget = Math.max(2000, Math.floor((budget - reserve) * 0.8 * shrink));
         const est = (s) => Math.ceil(String(s || '').length / 3); // conservative ~3 chars/token
 
         // (0) Standing objective/plan — frames every turn (sent in the present message).
         const head = [];
         if ((controller.objective && controller.objective.trim()) || (controller.plan && controller.plan.length)) {
-            let s = `YOUR STANDING OBJECTIVE (you set this; it persists until you change it via the "objective"/"plan" fields on any action — update it as your plan evolves):`;
+            // "fields on any action" described the reply shape from before plan became
+            // its own tool; the objective and plan now change only with a plan call.
+            let s = `YOUR STANDING OBJECTIVE (you set this; it persists until you change it with a "plan" call — update it as your plan evolves):`;
             if (controller.objective && controller.objective.trim()) s += `\nGoal: ${controller.objective}`;
             if (controller.plan && controller.plan.length) {
                 s += `\nPlan: ` + controller.plan.map((p, i) => `(${i + 1}) ${p}`).join('  ');
@@ -4197,7 +4752,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // measured. The consequence is stated as the RULE it is, not as a command.
         const enemyWonders = (gameState.threats && gameState.threats.enemyWonders) || [];
         const liveWonders = enemyWonders.filter(w => w.state === 'complete' && w.secondsUntilEnemyWins != null);
-        if (liveWonders.length) {
+        if (liveWonders.length && !closing) {
             const worst = liveWonders.reduce((a, b) => (a.secondsUntilEnemyWins <= b.secondsUntilEnemyWins ? a : b));
             // The seat id, not the civ: a controlled benchmark runs four seats on the
             // SAME civ, so "greek has completed a Wonder" would name three rivals at
@@ -4220,24 +4775,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // deciding the shape of a turn rather than describing the board -- and it sat
         // directly underneath that comment for a month. How many things to do is part
         // of what is being measured.
-        tailNow.push(`Here is your CURRENT game state. Decide what to do on THIS turn.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
-        if (controller.pendingAdvice && controller.pendingAdvice.length) {
-            const advice = controller.pendingAdvice.join(' ');
-            controller.seat.pendingAdvice = [];
+        if (closing) {
+            tailNow.push(`Here is your FINAL game state: the moment the match ended for you.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
+            if (closing.history) tailNow.push(closing.history);
+            tailNow.push(closing.ask);
+        } else tailNow.push(`Here is your CURRENT game state. Decide what to do on THIS turn.\n\nGame State JSON:\n${JSON.stringify(gameState, null, 2)}`);
+        let advice = null;
+        if (!closing && controller.pendingAdvice && controller.pendingAdvice.length) {
+            advice = controller.pendingAdvice.join(' ');
             tailNow.push(`SPECTATOR ADVICE (a human observer suggests — weigh it, you still decide): ${advice}`);
         }
 
-        // Remember a compact snapshot of THIS turn; after the reply it becomes one
-        // rolling history pair (Option C) so the next turn can replay it cheaply.
-        controller._pendingTurnUser = this.buildCompactState(gameState);
-
-        // ...and the FULL state for the transcript. Stored as the object rather than
-        // the assembled prompt text on purpose: replayed history means the message
-        // sent on turn N contains turns 1..N-1, so recording the whole payload every
-        // turn would be quadratic — by turn 200 you would have written turn 1 two
-        // hundred times. Keeping the per-turn delta lets any turn's full context be
-        // reconstructed on demand instead.
-        controller._transcriptState = gameState;
 
         // The result of the immediately previous action (rejection reason, parse error,
         // or OK + detail). The model MUST see this every turn or it will happily repeat
@@ -4271,7 +4819,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             // here would show the model the same outcome twice, once as a reply and once
             // as narration.
             if (prevResult && !this.lastTurnUsedTools(controller)) {
-                preface.push(`RESULT of your PREVIOUS action — learn from it; do NOT repeat a rejected action, fix the cause first: ${prevResult}`);
+                preface.push(closing ? `RESULT of your last action: ${prevResult}`
+                    : `RESULT of your PREVIOUS action — learn from it; do NOT repeat a rejected action, fix the cause first: ${prevResult}`);
             }
             const currentUser = [...preface, ...tailNow].join('\n\n');
             const pairBudget = inputBudget - est(systemPrompt) - est(currentUser);
@@ -4279,8 +4828,48 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             turns = [...pastTurns, { role: 'user', content: currentUser }];
         }
 
-        // Which protocol does this endpoint speak? (auto-detected when set to 'auto')
         const provider = OpenAIAIManager.resolveProvider(model);
+        const request = withRequest ? OpenAIAIManager.buildChatRequest(
+            provider, model.endpoint, model.model || 'default', systemPrompt, turns, reqOpts || this.requestOptions(model)) : null;
+        return { systemPrompt, turns, provider, advice, request };
+    }
+
+    // The parameters a turn is sent with: the model's own, overlaid with any request
+    // shape its endpoint was found to need this match (model._reqOpts).
+    requestOptions(model) {
+        return Object.assign(
+            { temperature: model.temperature, topP: model.topP, topK: model.topK,
+              minP: model.minP, presencePenalty: model.presencePenalty,
+              repetitionPenalty: model.repetitionPenalty,
+              reasoning: model.reasoning, thinkingSend: model.thinkingSend, extraBody: model.extraBody,
+              maxTokens: model.maxTokens, numCtx: model.contextSize },
+            model._reqOpts || {});
+    }
+
+    async sendToOpenAI(controller, gameState) {
+        const model = controller.model;
+        const ai = controller.aiPlayer;
+
+        const { systemPrompt, turns, provider, advice } = this.buildTurnRequest(controller, gameState, { withRequest: false });
+        if (advice != null) {
+            // Recorded exactly as delivered, at the moment it reaches the prompt.
+            controller.seat.pendingAdvice = [];
+            this.countChange(controller, 'advisedTurns');
+            this.noteChange(controller.aiPlayer, { type: 'intervention', kind: 'advice', human: true, text: advice });
+        }
+
+        // Remember a compact snapshot of THIS turn; after the reply it becomes one
+        // rolling history pair (Option C) so the next turn can replay it cheaply.
+        controller._pendingTurnUser = this.buildCompactState(gameState);
+
+        // ...and the FULL state for the transcript. Stored as the object rather than
+        // the assembled prompt text on purpose: replayed history means the message
+        // sent on turn N contains turns 1..N-1, so recording the whole payload every
+        // turn would be quadratic — by turn 200 you would have written turn 1 two
+        // hundred times. Keeping the per-turn delta lets any turn's full context be
+        // reconstructed on demand instead.
+        controller._transcriptState = gameState;
+
         console.log(`[OpenAIAI] ${ai.id}: provider=${provider}, turns=${turns.length}`);
 
         // Outside the try on purpose: the catch needs it, and `reqStart` below is
@@ -4310,13 +4899,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             // time. They are not persisted to the library: re-learning costs one request
             // per match and cannot go stale when a provider changes its mind.
             model._reqOpts = model._reqOpts || {};
-            const reqOpts = () => Object.assign(
-                { temperature: model.temperature, topP: model.topP, topK: model.topK,
-                  minP: model.minP, presencePenalty: model.presencePenalty,
-                  repetitionPenalty: model.repetitionPenalty,
-                  reasoning: model.reasoning, extraBody: model.extraBody,
-                  maxTokens: model.maxTokens, numCtx: model.contextSize },
-                model._reqOpts);
+            const reqOpts = () => this.requestOptions(model);
             // Learned refusals are worth keeping past the match: the library shows them,
             // so "this endpoint does not take top_k" survives as an observation rather
             // than being rediscovered at the cost of one request every single match.
@@ -4398,7 +4981,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 //
                 // One retry, because a second would push a seat past a deadline it
                 // cannot see and turn a recoverable blip into a missed round anyway.
-                if (OpenAIAIManager.isRateLimited(response.status, errorText) && !rateRetried) {
+                // Strict seats (WAR Bench, controller._strict) get no second chances of
+                // any kind: a benchmark scores the request it declared, not one the
+                // harness repaired, so a rate limit or a refused parameter is a failed
+                // turn like any other and is recorded as one.
+                if (OpenAIAIManager.isRateLimited(response.status, errorText) && !rateRetried && !controller._strict) {
                     rateRetried = true;
                     if (controller.stats) controller.stats.rateLimited = (controller.stats.rateLimited || 0) + 1;
                     const waitMs = OpenAIAIManager.retryAfterMs(response.headers, 1200);
@@ -4417,7 +5004,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                     continue;
                 }
 
-                const fix = (response.status === 400 && !adapted)
+                const fix = (response.status === 400 && !adapted && !controller._strict)
                     ? OpenAIAIManager.adaptToApiError(model._reqOpts, errorText, model) : null;
                 // Hint FIRST: the spectator log truncates at 90 characters, and a
                 // provider's error body will happily eat all of them on its own.
@@ -4427,6 +5014,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                     : `API error (${response.status}): ${errorText}`);
                 adapted = true;
                 Object.assign(model._reqOpts, fix);
+                // From here to the end of the match this seat is sent a different request
+                // than it started with. Said on file, not only in the console.
+                this.countChange(controller, 'adaptations');
+                this.noteChange(ai, { type: 'adaptation', kind: fix.omitTools ? 'toolsOmitted' : 'paramOmitted',
+                                      params: Object.keys(fix) });
                 try { model._onLearn(fix); } catch (e) { /* display only */ }
                 console.warn(`[OpenAIAI] ${ai.id}: endpoint rejected a parameter, retrying with`,
                     Object.keys(fix).join(', '));
@@ -4627,9 +5219,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                         `(finish_reason=${norm && norm.finish_reason}). Replaying them would make every later ` +
                         `request unparseable to the endpoint.`);
                 }
+                // A turn answered with tool calls replays only its visible text, never its
+                // reasoning. Replaying hidden reasoning as the model's own past reply was
+                // decided by a paired run (tools/paired-history.cjs, 26 Sep 2026: Gemini 3.5
+                // Flash on Episode 7's Gemini history, 40 turns x 2): same tool calls and no
+                // loss of valid calls, but about 22% more completion tokens with it replayed
+                // (2073 vs 1698 on average; 54 of 80 pairs higher, sign test p = 0.002).
+                // Prose-only turns keep their fallback, which that run did not test.
+                const replayed = toolCalls.length ? String((norm && norm.content) || '') : replyText;
                 const logTurn = {
                     user: controller._pendingTurnUser,
-                    assistant: replyText.replace(/\s+/g, ' ').trim().slice(0, 600),
+                    assistant: replayed.replace(/\s+/g, ' ').trim().slice(0, 600),
                     toolCalls: toolCalls.length ? toolCalls : null,
                     outcome: null // filled by recordAction once this turn's action resolves
                 };
@@ -4758,8 +5358,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             // the "input is too large to process". Those two cost a llama.cpp seat the
             // self-heal entirely: it would overflow, get counted against its reliability,
             // and overflow again on identical terms next turn.
-            if (/context length|context window|maximum context|context size|exceeds the available context|input is too large|prompt is too long|too many tokens|reduce the length/i.test(err.message || '')) {
+            if (!controller._strict && /context length|context window|maximum context|context size|exceeds the available context|input is too large|prompt is too long|too many tokens|reduce the length/i.test(err.message || '')) {
                 controller.seat._ctxShrink = Math.max(0.25, (controller._ctxShrink || 1) * 0.7);
+                this.countChange(controller, 'adaptations');
+                this.noteChange(ai, { type: 'adaptation', kind: 'contextShrunk',
+                                      factor: Math.round(controller._ctxShrink * 1000) / 1000 });
                 console.warn(`[OpenAIAI] ${ai.id}: context overflow — shrinking budget to ${Math.round(controller._ctxShrink * 100)}% and retrying next turn.`);
                 controller.seat.lastActionResult = `[ERROR] Your previous request was too large for the model's context and was dropped; the history window has been trimmed. Continue normally.`;
                 this.recordRequestFailure(controller, 'context_overflow', controller.seat.lastActionResult, tStart);
@@ -4883,6 +5486,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             }
             if (healed) {
                 console.warn(`[OpenAIAI] ${ai.id}: self-heal — ${healed}. Error was: ${errKey}`);
+                this.countChange(controller, 'adaptations');
+                this.noteChange(ai, { type: 'adaptation', kind: controller._healStage === 2 ? 'historyDropped' : 'toolCallsStripped',
+                                      streak: controller._sameErrStreak });
                 // The model is told, because the harness just changed what it remembers.
                 // Stated as what happened, with no instruction attached: the board did not
                 // move, and what to do about a thinner history is the model's business.
@@ -5387,7 +5993,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     // wall it can no longer afford is told so, on that command, and keeps the tower.
     // The alternative — validating all three against the state the model read — would
     // let impossible combinations through and lie about what happened.
+    // A seat's answer, run -- and recorded as an input once it has (review #9).
     executeTurn(controller, envelope) {
+        try { return this.executeTurnBody(controller, envelope); }
+        finally {
+            const ai = controller && controller.aiPlayer;
+            if (ai) this.noteInput('batch', ai.id, Object.assign(controller.laneNo != null ? { lane: controller.laneNo } : {},
+                { turnCount: (controller.seat || controller).turnCount || 0,
+                  envelope: JSON.parse(JSON.stringify(envelope == null ? null : envelope)) }));
+        }
+    }
+    executeTurnBody(controller, envelope) {
         // Publish this LANE's view of the turn onto the seat. Two of the executor's
         // inputs are found by seat lookup (from the aiPlayer, with no controller in
         // scope) and so can only be read off the seat -- but the values belong to the
@@ -5442,6 +6058,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                     // Counted, not skipped in silence. A malformed entry is a real
                     // mistake and the only way the model learns is being told which one.
                     if (controller.stats) controller.stats.invalidActions++;
+                    this.noteOutcome(controller, { action: null, code: c && c._unparsed ? 'unparsedCall' : 'notACommand', verdict: 'invalid' });
                     controller._batch.results.push(c && c._unparsed
                         ? '[ERROR] One of your calls could not be parsed, so that action was skipped — the others ran. Send complete arguments per call.'
                         : '[ERROR] Not a command object: an action needs an "action" name as a string.');
@@ -5451,12 +6068,19 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 catch (err) {
                     console.error('[OpenAIAI] Command failed for ' + controller.id + ':', err);
                     this.logExecutionFailure(controller, 'tool_call_failed', 'That command could not be carried out.');
+                    // The command threw inside the harness; whatever executeAction noted
+                    // for it before failing is replaced by the fault itself.
+                    if (controller._turnOutcomes && controller._turnOutcomes.length === controller._batch.results.length + 1) controller._turnOutcomes.pop();
+                    this.noteOutcome(controller, { action: c.action, code: 'executionFailed', verdict: 'harnessFault' });
                     controller._batch.results.push('[ERROR] That command could not be carried out.');
                 }
             }
         } finally {
             for (let i = cmds.length; i < envelope.commands.length; i++) {
                 controller._batch.results.push(this.rejectExcessCommand(controller, i));
+                const extra = envelope.commands[i];
+                this.noteOutcome(controller, { action: (extra && typeof extra.action === 'string') ? extra.action : null,
+                                               code: 'commandLimit', verdict: 'avoidable' });
             }
             const results = controller._batch.results;
             controller._batch = null;
@@ -5471,9 +6095,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 const lastTurn = this.logTurnFor(controller);
                 if (lastTurn && lastTurn.outcome == null) lastTurn.outcome = combined;
             }
+            const outcomes = this.takeOutcomes(controller);   // drained every turn, recorder or not
             try {
                 if (this.transcripts) this.transcripts.noteResult(
-                    controller.aiPlayer && controller.aiPlayer.id, combined, controller.laneNo);
+                    controller.aiPlayer && controller.aiPlayer.id, combined, controller.laneNo, outcomes);
             } catch (e) { /* recording must never break a turn */ }
         }
     }
@@ -5512,6 +6137,22 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         }
         return out;
     }
+    // What a rejected purchase is short of, counted against the stock as it stands NOW:
+    // after this turn's earlier commands have paid. A model spending one budget twice
+    // in one turn (a temple, then a tech, from the same stone and gold) read only
+    // "Cannot afford" and tried the tech again next turn, and the turn after; the
+    // state it had planned from still showed enough.
+    shortfall(ai, cost) {
+        const r = ai && ai.resources;
+        if (!r || !cost) return '';
+        const short = ['food', 'wood', 'stone', 'gold']
+            .filter(k => (cost[k] || 0) > (r[k] || 0))
+            .map(k => `${Math.ceil((cost[k] || 0) - (r[k] || 0))} ${k}`);
+        if (!short.length) return '';
+        const have = ['food', 'wood', 'stone', 'gold'].filter(k => cost[k]).map(k => `${Math.floor(r[k] || 0)} ${k}`);
+        return ` - short of ${short.join(', ')} (you have ${have.join(', ')} after this turn's earlier commands)`;
+    }
+
     executeAction(controller, actionData, validationError = null) {
         const ai = controller.aiPlayer;
         const game = this.game;
@@ -5547,7 +6188,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             move: controller._moveNo,
             latencyMs: controller._moveMs,
             action: action,
-            reason: params?.reason || '',
+            reason: OpenAIAIManager.clipRawToolMarkup(params?.reason || ''),
             params: params || {},
             failed: false,
             error: null
@@ -5608,7 +6249,14 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             if (params && typeof params.reason === 'string' && params.reason.trim()) st.reasonsGiven++;
         }
 
-        if (validationError) actionResult = `[ERROR] ${action}: ${validationError}`;
+        // Broken tool-call markup in the arguments: not run and not repaired (the harness
+        // does not play for the model) -- told, so it sends the commands again. Checked
+        // before the argument checks, so WAR and the Platform answer it the same way.
+        if (OpenAIAIManager.hasRawToolMarkup(params)) {
+            this.outcome('log.out.rawToolMarkup', {});
+            actionResult = `[ERROR] ${action}: its arguments contain raw tool-call markup (<tool_call>, <arg_key>, <arg_value>), so this call was cut apart: nothing written inside it was run, including any command after the break. Send each command as its own tool call with plain JSON arguments.`;
+        }
+        else if (validationError) actionResult = `[ERROR] ${action}: ${validationError}`;
         else switch (action) {
             case 'train_unit':
                 if (params?.unitType) {
@@ -5639,10 +6287,20 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 break;
 
             case 'move_units':
+                // Coordinates win; a tile is the fallback when none are given. Models
+                // reached for "tile" here on their own, carrying explore's vocabulary
+                // over to a scout-mode march, and were refused for the shape.
                 if (params?.targetX !== undefined && params?.targetZ !== undefined) {
                     actionResult = this.executeMoveUnits(ai, game, params.units, params.targetX, params.targetZ, params.unitIds, params.matchSpeed, params.formation, params.mode, params.targets);
+                } else if (OpenAIAIManager.given(params?.tile)) {
+                    const T = game.EXPLORE_TILES || 7, lastCol = String.fromCharCode(64 + T);
+                    const at = this.tileCentre(game, params.tile);
+                    actionResult = at
+                        ? this.executeMoveUnits(ai, game, params.units, at.x, at.z, params.unitIds, params.matchSpeed, params.formation, params.mode, params.targets)
+                        : `[ERROR] "${params.tile}" is not a map tile. Use a COLUMN LETTER then a ROW NUMBER: A-${lastCol} and 1-${T}, e.g. "C5", or give "targetX" and "targetZ".`;
+                    if (at && !/^\[ERROR\]/.test(actionResult)) actionResult += ` (centre of tile ${String(params.tile).trim().toUpperCase()})`;
                 } else {
-                    actionResult = `[ERROR] move_units requires "targetX" and "targetZ" parameters.`;
+                    actionResult = `[ERROR] move_units requires "targetX" and "targetZ" parameters, or a "tile" label from map.exploration.`;
                 }
                 break;
 
@@ -5731,20 +6389,15 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const rejected = actionResult.startsWith('[ERROR]');
             const code = String((this._pendingOutcome && this._pendingOutcome.code) || '')
                 .replace(/^log\.out\./, '');
+            const verdict = OpenAIAIManager.verdictFor(actionResult, code);
             if (controller.stats) {
                 const st = controller.stats;
-                if (rejected) {
-                    // "not a string" is an invented shape rather than an invented name,
-                    // but both are the model failing to produce a callable action, and
-                    // neither is a rejected game move. Same bucket.
-                    if (/Unknown action/i.test(actionResult)
-                        || /must be the action NAME as a string/i.test(actionResult)) st.invalidActions++;
-                    else if (OpenAIAIManager.UNFOREWARNED.has(code)) st.actionsContended++;
-                    else st.actionsRejected++;
-                } else {
-                    st.actionsSucceeded++;
-                }
+                if (verdict === 'invalid') st.invalidActions++;
+                else if (verdict === 'contended') st.actionsContended++;
+                else if (verdict === 'avoidable') st.actionsRejected++;
+                else st.actionsSucceeded++;
             }
+            this.noteOutcome(controller, { action, code: code || null, verdict });
             if (rejected) {
                 logEntry.failed = true;
                 logEntry.error = actionResult.replace(/^\[ERROR\]\s*/, '');
@@ -5796,9 +6449,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             }
             // Same for the transcript: the harness's answer is the other half of the
             // exchange, and it arrives after the reply was recorded.
+            const outcomes = this.takeOutcomes(controller);   // drained every turn, recorder or not
             try {
                 if (this.transcripts) this.transcripts.noteResult(
-                    controller.aiPlayer && controller.aiPlayer.id, actionResult, controller.laneNo);
+                    controller.aiPlayer && controller.aiPlayer.id, actionResult, controller.laneNo, outcomes);
             } catch (e) { /* recording must never break a turn */ }
         }
     }
@@ -5891,7 +6545,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // holds — the same reason ownerName answers with the seat id.
         const who = ai.civilization;
         const head = (kind === 'defeated')
-            ? `THE MATCH IS OVER FOR YOU. You have been defeated as ${who}: your Town Centers and the means to rebuild them are gone.`
+            ? `THE MATCH IS OVER FOR YOU. You have been defeated as ${who}: nothing you have left can fight, build, or train a unit that could.`
             : `THE MATCH HAS ENDED. ${extra && extra.won ? `You WON as ${who}.` : `You did not win. ${extra && extra.winner ? `${extra.winner} took it.` : ''}`}`;
         const ask = [head,
             'This is the final message you will receive; the game is closing and NOTHING you reply will be executed.',
@@ -5899,21 +6553,24 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             'If you have anything to say about how this went — what you were trying to do, what beat you, what you would',
             'do differently — say it now, in your own words. Answer however you like.'].join(' ');
         const history = this.matchHistoryText(controller, ai);
-        const turns = [{ role: 'user',
-            content: (stateText ? stateText + '\n\n' : '') + (history ? history + '\n\n' : '') + ask }];
-
-        const provider = OpenAIAIManager.resolveProvider(model);
+        // The same context as a turn (b1035): its objective and plan and the rolling
+        // history of its own turns, sized to its budget, then the final state, the
+        // numbers and the question. Only what this seat saw and did, as every turn.
+        // The single message stays as the fallback, for a state that could not be built.
+        let req, provider, turns;
+        try {
+            if (!stateJson) throw new Error('no final state');
+            const built = this.buildTurnRequest(controller, stateJson, { closing: { history, ask }, reqOpts: this.requestOptions(model) });
+            req = built.request; provider = built.provider; turns = built.turns;
+        } catch (e) {
+            provider = OpenAIAIManager.resolveProvider(model);
+            turns = [{ role: 'user', content: (stateText ? stateText + '\n\n' : '') + (history ? history + '\n\n' : '') + ask }];
+            req = OpenAIAIManager.buildChatRequest(provider, model.endpoint, model.model || 'default', this.buildSystemPrompt(ai), turns, this.requestOptions(model));
+        }
         const auth = model.auth || (model.apiKey ? { type: 'bearer', key: model.apiKey } : { type: 'none' });
         let headers;
         try { headers = await OpenAIAIManager.buildAuthHeaders(auth, provider); }
         catch (e) { headers = { 'Content-Type': 'application/json' }; }
-        const reqOpts = Object.assign({
-            temperature: model.temperature, topP: model.topP, topK: model.topK,
-            reasoning: model.reasoning, extraBody: model.extraBody,
-            maxTokens: model.maxTokens, numCtx: model.contextSize
-        }, model._reqOpts || {});
-        const req = OpenAIAIManager.buildChatRequest(
-            provider, model.endpoint, model.model || 'default', this.buildSystemPrompt(ai), turns, reqOpts);
 
         // Its OWN abort handle, NOT controller._abort. endArena calls stop() immediately,
         // which aborts whatever handle each controller holds — hanging this on the same
@@ -5961,6 +6618,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                     latencyMs: Date.now() - t0,
                     outcome: (kind === 'defeated') ? 'defeated' : ((extra && extra.won) ? 'won' : 'lost'),
                     text: text || null, tokens: tokens || null, error: error || null,
+                    // How much of its match it was shown (b1035): the messages sent and
+                    // their characters, so a thin post-mortem can be told from a thin context.
+                    context: { messages: turns.length, chars: turns.reduce((n, m) => n + String(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')).length, 0) },
                     // Same shape and same key as every turn's snapshot, so anything that
                     // already reads a state off a record reads this one without knowing
                     // it is the last.
@@ -6059,7 +6719,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         const tx = Number(params && params.targetX), tz = Number(params && params.targetZ);
         if (!Number.isFinite(tx) || !Number.isFinite(tz)) return { b: freeList[0], note: '' };
         const nearestIn = (list) => list.reduce((best, b) => {
-            const d = Math.hypot(b.x - tx, b.z - tz);
+            const d = WarMath.hypot(b.x - tx, b.z - tz);
             return (!best || d < best.d) ? { b, d } : best;
         }, null);
         const chosen = nearestIn(freeList);
@@ -6090,7 +6750,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 const first = keys.length ? String(keys[0]) : null;
                 this.outcome('log.out.unknownUnit', { unitType: first || 'object' });
                 return `[ERROR] "unitType" must be ONE unit id as a string, not ${Array.isArray(unitType) ? 'an array' : 'an object'}. `
-                    + (first ? `You sent ${JSON.stringify(unitType)} — send "unitType": "${first}" and put how many in "count" if you need more than one. ` : '')
+                    + (first ? `You sent ${JSON.stringify(unitType)} — send "unitType": "${first}". One train_unit command trains one unit. ` : '')
                     + `The {"type": count} shape belongs to "units" in move_units and attack_target, never here. ${this.trainableListString(ai)}`;
             }
             const cats = ['infantry', 'ranged', 'cavalry', 'support'];
@@ -6190,7 +6850,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         if (!ai.resources.hasResources(unitDef.cost)) {
             console.log(`[OpenAIAI] ${ai.id}: Cannot afford ${unitType}`);
             this.outcome('log.out.cannotAfford', { whatName: unitDef.name });
-            return `[ERROR] Cannot afford ${unitType}.`;
+            return `[ERROR] Cannot afford ${unitType}${this.shortfall(ai, unitDef.cost)}.`;
         }
 
         // TRAIN — at the structure the model targeted (params.targetX/Z), else the
@@ -6354,7 +7014,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         if (!ai.resources.hasResources(adjustedCost)) {
             console.log(`[OpenAIAI] ${ai.id}: Cannot afford tech "${techId}"`);
             this.outcome('log.out.cannotAfford', { whatName: tech.name });
-            return `[ERROR] Cannot afford tech "${techId}".`;
+            return `[ERROR] Cannot afford tech "${techId}"${this.shortfall(ai, adjustedCost)}.`;
         }
 
         ai.resources.spendResources(adjustedCost);
@@ -6400,7 +7060,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         if (!ai.resources.hasResources(cost)) {
             console.log(`[OpenAIAI] ${ai.id}: Cannot afford upgrade to ${nextAge}`);
             this.outcome('log.out.cannotAfford', { age: nextAge });
-            return `[ERROR] Cannot afford the upgrade to ${nextAge}.`;
+            return `[ERROR] Cannot afford the upgrade to ${nextAge}${this.shortfall(ai, cost)}.`;
         }
 
         ai.resources.spendResources(cost);
@@ -6472,7 +7132,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     sameSettlement(ai, x, z, buildingType) {
         const all = (ai.buildings || []).filter(b => b && Number.isFinite(b.x));
         const link = this.LANE_LINK_RADIUS();
-        const near = (a, b) => Math.hypot(a.x - b.x, a.z - b.z) <= link;
+        const near = (a, b) => WarMath.hypot(a.x - b.x, a.z - b.z) <= link;
         const here = { x, z };
         const reached = new Set();
         let frontier = all.filter(b => near(b, here));
@@ -6659,7 +7319,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             if (ai.resources.hasResources(buildingDef.cost)) return null;
             console.log(`[OpenAIAI] ${ai.id}: Cannot afford ${buildingType}`);
             this.outcome('log.out.cannotAfford', { whatName: buildingDef.name });
-            return `[ERROR] Cannot afford ${buildingType}.`;
+            return `[ERROR] Cannot afford ${buildingType}${this.shortfall(ai, buildingDef.cost)}.`;
         };
         const maybeDuplicate = this.couldBeBlindDuplicate(controller, ai, buildingType);
         if (!maybeDuplicate) { const poor = cannotAfford(); if (poor) return poor; }
@@ -6697,10 +7357,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         } else if (tc) {
             // Default: a ring around the town centre, so buildings spread out.
             // Roughly double the old radius so bases occupy a larger footprint.
-            const ang = game.rand() * Math.PI * 2;
-            const rad = isWonderBuild ? game.randJitter(20) : 18 + game.rand() * 28;
-            x = tc.x + Math.cos(ang) * rad;
-            z = tc.z + Math.sin(ang) * rad;
+            const ang = game.rand(ai, 'build-site') * Math.PI * 2;
+            const rad = isWonderBuild ? (game.rand(ai, 'build-site') - 0.5) * 20 : 18 + game.rand(ai, 'build-site') * 28;
+            x = tc.x + WarMath.cos(ang) * rad;
+            z = tc.z + WarMath.sin(ang) * rad;
         } else {
             this.outcome('log.out.noTCPlacement', {});
             return `[ERROR] No Town Center found for placement reference.`;
@@ -6718,19 +7378,28 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             outer:
             for (let radius = 14; radius <= 90; radius += 8) {
                 const steps = Math.max(8, Math.round((2 * Math.PI * radius) / 12));
-                const a0 = game.rand() * Math.PI * 2;
+                const a0 = game.rand(ai, 'build-site') * Math.PI * 2;
                 for (let s = 0; s < steps; s++) {
                     const ang = a0 + (s / steps) * 2 * Math.PI;
-                    const cx = tc.x + Math.cos(ang) * radius;
-                    const cz = tc.z + Math.sin(ang) * radius;
+                    const cx = tc.x + WarMath.cos(ang) * radius;
+                    const cz = tc.z + WarMath.sin(ang) * radius;
                     if (this.isSpotClear(ai, game, buildingType, true, cx, cz)) { spot = { x: cx, z: cz }; break outer; }
                 }
             }
         }
         if (!spot) {
             console.log(`[OpenAIAI] ${ai.id}: Could not find valid position for ${buildingType}`);
+            // Tower spacing is a rule, not a crowded patch of ground: say it, with the
+            // distance, so the next order can go where a tower is allowed.
+            const spacing = OpenAIAIManager.towerSpacing();
+            const nearest = buildingType !== 'tower' ? Infinity
+                : [...ai.buildings, ...game.player.buildings, ...game.aiManager.aiPlayers.flatMap(a => a.buildings)]
+                    .filter(b => b && b.type === 'tower' && b.health > 0)
+                    .reduce((m, b) => Math.min(m, WarMath.hypot(b.x - x, b.z - z)), Infinity);
             this.outcome('log.out.noClearSpot', { buildingType });
-            return `[ERROR] ${buildingType}: no clear spot near (${Math.round(x)}, ${Math.round(z)}). Occupied by buildings or resource nodes.`;
+            return nearest < spacing
+                ? `[ERROR] tower: no clear spot near (${Math.round(x)}, ${Math.round(z)}). Towers must stand at least ${spacing} apart; the nearest is ${Math.round(nearest)} away.`
+                : `[ERROR] ${buildingType}: no clear spot near (${Math.round(x)}, ${Math.round(z)}). Occupied by buildings or resource nodes.`;
         }
         ({ x, z } = spot);
 
@@ -6789,10 +7458,16 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // and returns to its old task afterwards. Without it, LLM players whose
         // workers were all gathering had their builds rejected while rule-based
         // rivals borrowed freely — an unfair asymmetry between controller types.
-        const pick = game.pickBuilder(ai, { x, z }, { forceBorrow: true });
+        const justSent = this.sentToScoutThisTurn(ai);
+        const pick = game.pickBuilder(ai, { x, z }, { forceBorrow: true, skip: justSent });
         if (pick.error === 'no_workers') {
             this.outcome('log.out.noWorkersBuild', { buildingType });
             return `[ERROR] You have no workers to build ${buildingType}.`;
+        }
+        const scoutsKept = ai.units.filter(u => u.type === 'worker' && u.health > 0 && justSent(u)).length;
+        if (pick.error === 'no_idle' && scoutsKept) {
+            this.outcome('log.out.noWorkersScouting', { n: scoutsKept });
+            return `[ERROR] ${buildingType}: no worker available. ${scoutsKept} ${scoutsKept === 1 ? 'was' : 'were'} sent to scout earlier this turn and ${scoutsKept === 1 ? 'is' : 'are'} not pulled back; the rest are constructing or fighting.`;
         }
         if (pick.error === 'no_idle') {
             this.outcome('log.out.noWorkerIdleBuild', { buildingType });
@@ -6841,8 +7516,14 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     // every live resource node's clearance ring. Up to 40 nudge attempts; returns
     // {x, z} or null. The Wonder used to skip validation entirely and could land on
     // top of the base.
+    // The rules' building gap (Game.buildingGap: Wonders and tower spacing) when the
+    // rules are loaded; the plain gap where they are not (a harness loaded on its own).
+    static buildingGap(base, newType, newIsWonder, b) {
+        return (typeof Game !== 'undefined' && Game.buildingGap) ? Game.buildingGap(base, newType, newIsWonder, b) : base;
+    }
+    static towerSpacing() { return (typeof Game !== 'undefined' && Game.TOWER_SPACING) || 15; }
     findClearSpot(ai, game, buildingType, isWonderBuild, x, z) {
-        const reqGap = b => (b.type === 'town_center' || b.isWonder) ? 11 : 9;
+        const reqGap = b => OpenAIAIManager.buildingGap((b.type === 'town_center' || b.isWonder) ? 11 : 9, buildingType, isWonderBuild, b);
         const resClr = game.resourceClearance(buildingType, isWonderBuild);
         let valid = false;
         let attempts = 0;
@@ -6857,8 +7538,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 if (d < need) {
                     valid = false;
                     const dd = d || 1;
-                    x = b.x + (dx / dd) * (need + 1) + game.randJitter(3);
-                    z = b.z + (dz / dd) * (need + 1) + game.randJitter(3);
+                    x = b.x + (dx / dd) * (need + 1) + (game.rand(ai, 'build-site') - 0.5) * 3;
+                    z = b.z + (dz / dd) * (need + 1) + (game.rand(ai, 'build-site') - 0.5) * 3;
                     break;
                 }
             }
@@ -6887,8 +7568,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 if (d < resClr) {
                     valid = false;
                     const dd = d || 1;
-                    x = r.x + (dx / dd) * (resClr + 1) + game.randJitter(3);
-                    z = r.z + (dz / dd) * (resClr + 1) + game.randJitter(3);
+                    x = r.x + (dx / dd) * (resClr + 1) + (game.rand(ai, 'build-site') - 0.5) * 3;
+                    z = r.z + (dz / dd) * (resClr + 1) + (game.rand(ai, 'build-site') - 0.5) * 3;
                     break;
                 }
             }
@@ -6905,15 +7586,15 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const c = game.clampToMap(x, z);
             if (Math.abs(c.x - x) > 0.5 || Math.abs(c.z - z) > 0.5) return false; // off-map
         }
-        const reqGap = b => (b.type === 'town_center' || b.isWonder) ? 11 : 9;
+        const reqGap = b => OpenAIAIManager.buildingGap((b.type === 'town_center' || b.isWonder) ? 11 : 9, buildingType, isWonderBuild, b);
         const allBuildings = [...ai.buildings, ...game.player.buildings, ...game.aiManager.aiPlayers.flatMap(a => a.buildings)];
         for (const b of allBuildings) {
-            if (Math.hypot(x - b.x, z - b.z) < reqGap(b)) return false;
+            if (WarMath.hypot(x - b.x, z - b.z) < reqGap(b)) return false;
         }
         const resClr = game.resourceClearance(buildingType, isWonderBuild);
         for (const r of (game.terrain && game.terrain.resources) || []) {
             if (r.amount !== undefined && r.amount <= 0) continue;
-            if (Math.hypot(x - r.x, z - r.z) < resClr) return false;
+            if (WarMath.hypot(x - r.x, z - r.z) < resClr) return false;
         }
         return true;
     }
@@ -6977,7 +7658,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const pool = live.filter(u => !chosen.has(u) &&
                 ((u.type || '').toLowerCase() === type || (u.unitType || '').toLowerCase() === type));
             if (!pool.length) { skipped.push(`${rawType} (own none)`); continue; }
-            pool.sort((a, b) => Math.hypot(a.x - dx, a.z - dz) - Math.hypot(b.x - dx, b.z - dz));
+            pool.sort((a, b) => WarMath.hypot(a.x - dx, a.z - dz) - WarMath.hypot(b.x - dx, b.z - dz));
             const take = Math.min(want, pool.length);
             if (want > pool.length) clamped.push(`${rawType} ${want}->${pool.length}`);
             for (let i = 0; i < take; i++) chosen.add(pool[i]);
@@ -7215,6 +7896,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // full-army order, only the named priests on a detachment.
         const escorted = game.escortSupportUnits(sel.support, target.x, target.z);
         const escortNote = escorted ? ` ${escorted} priest(s) escort to heal (they stand back, never engage).` : '';
+        // standing-orders.js holds a Wonder order to the Wonder: nothing on the way is
+        // picked on, only what attacks the army is answered. Said, so the model knows
+        // why its army walked past a villager.
+        const wonderNote = target.isWonder ? ' A Wonder is their only target: on the way they fight back only against what attacks them.' : '';
         game.setStandingOrder?.(this,ai,marching,{x:target.x,z:target.z},{mode:'march',target,formation,matchSpeed});
 
         console.log(`[OpenAIAI] ${ai.id}: ${unitsToAttack.length} units attacking "${target.name || target.type}"`);
@@ -7228,13 +7913,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // Same threshold the arrival resolver uses (ENGAGE = 30), so "engaging" here and
         // "engaged" there mean the same thing.
         const nearest = unitsToAttack.reduce((best, u) => {
-            const d = Math.hypot(u.x - target.x, u.z - target.z);
+            const d = WarMath.hypot(u.x - target.x, u.z - target.z);
             return (best === null || d < best.d) ? { u, d } : best;
         }, null);
         const inContact = nearest && nearest.d <= 30;
         if (inContact) {
             this.outcome('log.out.attackEngaging', { count: unitsToAttack.length, target: target.name || target.type });
-            return `OK - ${unitsToAttack.length} unit(s) engaging "${target.name || target.type}" — they are already in contact range.${sel.note}${pace.note}${escortNote}`;
+            return `OK - ${unitsToAttack.length} unit(s) engaging "${target.name || target.type}" — they are already in contact range.${sel.note}${pace.note}${escortNote}${wonderNote}`;
         }
         // The LAST unit to arrive, not the NEAREST one. Quoting the closest unit's eta
         // for a force spread across the map promises the moment the fight STARTS as
@@ -7245,7 +7930,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // "You will be told when they arrive" outlived the thing that told them, and
         // a promise the harness no longer keeps is worse than no promise. The clock is
         // in "ordersInProgress" now, and it counts down every turn instead of once.
-        return `OK - ${unitsToAttack.length} unit(s) ORDERED to attack "${target.name || target.type}" and now MARCHING there (~${eta}s). They have not fought anything yet.${sel.note}${form.note}${pace.note}${escortNote}`;
+        return `OK - ${unitsToAttack.length} unit(s) ORDERED to attack "${target.name || target.type}" and now MARCHING there (~${eta}s). They have not fought anything yet.${sel.note}${form.note}${pace.note}${escortNote}${wonderNote}`;
     }
 
     executeAttackPosition(ai, game, targetX, targetZ, unitsMap, unitIds, matchSpeed, formation) {
@@ -7313,7 +7998,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         let nearest = null, minDist = 40;
         for (const entity of [...game.getAllUnits(), ...game.getAllBuildings()]) {
             if (this.isOwnedByAI(entity, ai) || entity.health <= 0) continue;
-            const d = Math.hypot(entity.x - targetX, entity.z - targetZ);
+            const d = WarMath.hypot(entity.x - targetX, entity.z - targetZ);
             if (d < minDist) { minDist = d; nearest = entity; }
         }
         const form = this.applyFormation(game, unitsToAttack, targetX, targetZ, formation);
@@ -7389,10 +8074,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 // reports itself. Close the order and write nothing.
                 const eng = onOrder.find(u => u.isAttacking && u.attackTarget && u.attackTarget.health > 0);
                 if (eng) { resolve(null); continue; }
-                const arrived = onOrder.some(u => Math.hypot(u.x - r.tx, u.z - r.tz) <= ARRIVE) || onOrder.every(u => !u.isMoving);
+                const arrived = onOrder.some(u => WarMath.hypot(u.x - r.tx, u.z - r.tz) <= ARRIVE) || onOrder.every(u => !u.isMoving);
                 if (arrived) {
                     const enemyNear = [...this.game.getAllUnits(), ...this.game.getAllBuildings()]
-                        .some(e => e.health > 0 && !this.isOwnedByAI(e, ai) && Math.hypot(e.x - r.tx, e.z - r.tz) <= ENGAGE);
+                        .some(e => e.health > 0 && !this.isOwnedByAI(e, ai) && WarMath.hypot(e.x - r.tx, e.z - r.tz) <= ENGAGE);
                     // The one arrival worth a line. No fight starts, so no battle entry is
                     // ever written, and the order's own units go quiet in the state -- from
                     // the model's side an empty clearing and a march still in progress look
@@ -7446,17 +8131,26 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     // remembered node showed up as the number ticking down, and emptying it made the
     // node vanish from the list — enemy activity, in a place the player cannot see,
     // for free. Fog has to mean the contents are stale too, not just the position.
-    knownAmount(ai, res, idx, game) {
-        if (!ai._knownResIdx) ai._knownResIdx = new Set();
-        if (!ai._knownResAmt) ai._knownResAmt = Object.create(null);
-        if (this.isPositionVisibleToAI(ai, res.x, res.z, game)) {
-            ai._knownResIdx.add(idx);
-            ai._knownResAmt[idx] = Math.floor(res.amount);   // refresh what we can see
-            return { amount: Math.floor(res.amount), visible: true, known: true };
+    //
+    // Seeing a node refreshes what is remembered of it. A command acting on the world
+    // writes that straight away; an observation passes a `sink` and the refresh is
+    // recorded when the observation is committed, so a look changes nothing.
+    knownAmount(ai, res, idx, game, sink = null) {
+        if (sink) sink.touched = true;
+        else {
+            if (!ai._knownResIdx) ai._knownResIdx = new Set();
+            if (!ai._knownResAmt) ai._knownResAmt = Object.create(null);
         }
-        const known = ai._knownResIdx.has(idx);
+        if (this.isPositionVisibleToAI(ai, res.x, res.z, game)) {
+            const amount = Math.floor(res.amount);   // refresh what we can see
+            if (sink) sink.seen.set(idx, amount);
+            else { ai._knownResIdx.add(idx); ai._knownResAmt[idx] = amount; }
+            return { amount, visible: true, known: true };
+        }
+        const known = !!(ai._knownResIdx && ai._knownResIdx.has(idx)) || !!(sink && sink.seen.has(idx));
+        const remembered = sink && sink.seen.has(idx) ? sink.seen.get(idx) : (ai._knownResAmt && ai._knownResAmt[idx]);
         return {
-            amount: known ? (ai._knownResAmt[idx] != null ? ai._knownResAmt[idx] : Math.floor(res.amount)) : 0,
+            amount: known ? (remembered != null ? remembered : Math.floor(res.amount)) : 0,
             visible: false, known
         };
     }
@@ -7500,6 +8194,24 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     _turnOf(ai) {
         const c = this.aiControllers.find(x => x.aiPlayer === ai);
         return c ? c.turnCount : -1;
+    }
+
+    // A unit an explore sent earlier in THIS turn. The explore has already told the model
+    // "OK - Sent your worker #N", so a later command of the same reply must not quietly
+    // take that worker back: not to build (pickBuilder), not to gather or man a farm
+    // (assign_workers). Measured on 27 Sep 2026: explore, explore, then assign_workers
+    // without "from" -- the default triage took "1 from wood, 1 scouting", the scout
+    // sent one command earlier, which never left the base while the log said it had.
+    // The same rule pickScout already applies to a second explore. A scout sent in an
+    // EARLIER turn stays the last resort it always was.
+    //
+    // Scored like assignIdleTaken, not forgiven: the seat sent that scout itself earlier
+    // in the same reply and could have counted (tools/bench/taxonomy.cjs: constraint).
+    sentToScoutThisTurn(ai) {
+        const turn = this._turnOf(ai);
+        // Only a unit an explore actually marked: one never sent has no _exploreTurn,
+        // and must not match a seat whose turn is not a number.
+        return u => u._exploreTurn != null && u._exploreTurn === turn;
     }
 
     // A reply may carry three explore commands. pickScout used to answer all three with
@@ -7621,7 +8333,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
 
     nearestNodeTo(unit, nodes) {
         let best = null, bd = Infinity;
-        nodes.forEach(n => { const d = Math.hypot(n.x - unit.x, n.z - unit.z); if (d < bd) { bd = d; best = n; } });
+        nodes.forEach(n => { const d = WarMath.hypot(n.x - unit.x, n.z - unit.z); if (d < bd) { bd = d; best = n; } });
         return best || nodes[0];
     }
 
@@ -7664,10 +8376,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 this.outcome('log.out.farmNeedsCoords', {});
                 return `[ERROR] assign_workers to "farm" takes BOTH numeric "targetX" and "targetZ" (one of your farms in "buildings"), or neither — then your unmanned farms are staffed nearest-Town-Center first.`;
             }
-            open.sort((a, b) => Math.hypot(a.x - tx, a.z - tz) - Math.hypot(b.x - tx, b.z - tz));
+            open.sort((a, b) => WarMath.hypot(a.x - tx, a.z - tz) - WarMath.hypot(b.x - tx, b.z - tz));
         } else {
             const tcs = ai.buildings.filter(b => b.type === 'town_center' && !b.underConstruction);
-            const dTC = f => tcs.reduce((m, tc) => Math.min(m, Math.hypot(f.x - tc.x, f.z - tc.z)), Infinity);
+            const dTC = f => tcs.reduce((m, tc) => Math.min(m, WarMath.hypot(f.x - tc.x, f.z - tc.z)), Infinity);
             open.sort((a, b) => dTC(a) - dTC(b));
         }
         const openLen = Math.max(1, open.length);
@@ -7680,11 +8392,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // Never cannibalize a farm to feed a farm, and never take a builder or a
         // fighter — the same exclusions the resource path applies.
         const isFighting = u => u.isAttacking || u.attackTarget || u.attackMove;
+        const justSent = this.sentToScoutThisTurn(ai);
         const candidates = ai.units.filter(u =>
             u.type === 'worker' && u.health > 0 &&
-            u.task !== 'building' && !u.isBuilding && !isFighting(u) && !u.farmRef
+            u.task !== 'building' && !u.isBuilding && !isFighting(u) && !u.farmRef && !justSent(u)
             && (from === null || this.workerSourceMatches(ai, u, from)));
         if (candidates.length === 0) {
+            const kept = ai.units.filter(u => u.type === 'worker' && u.health > 0 && justSent(u)).length;
+            if (kept) {
+                this.outcome('log.out.noWorkersScouting', { n: kept });
+                return `[ERROR] No workers can be spared for your ${open.length} unmanned farm(s): ${kept} ${kept === 1 ? 'was' : 'were'} sent to scout earlier this turn and ${kept === 1 ? 'is' : 'are'} not pulled back; the rest are constructing, fighting, or already man farms.`;
+            }
             const building = ai.units.filter(u => u.type === 'worker' && (u.task === 'building' || u.isBuilding)).length;
             const fighting = ai.units.filter(u => u.type === 'worker' && isFighting(u)).length;
             this.outcome('log.out.noWorkersForFarms', { open: open.length });
@@ -7716,8 +8434,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             w.carryingResource = false;
             w.harvestAmount = 0;
             w.isMoving = true;
-            w.targetX = f.x + game.randJitter(3);
-            w.targetZ = f.z + game.randJitter(3);
+            w.targetX = f.x + (game.rand(w, 'farm-spot') - 0.5) * 3;
+            w.targetZ = f.z + (game.rand(w, 'farm-spot') - 0.5) * 3;
             manned++;
         }
         this.noteIdleTaken(ai, pulledFrom['idle'] || 0);
@@ -7738,9 +8456,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         const types=new Set();
         for(const type of ['food','wood','stone','gold'])
             for(const node of this.discoveredNodesOfType(ai,game,type))
-                if(Math.hypot(node.x-x,node.z-z)<=1)types.add(type);
+                if(WarMath.hypot(node.x-x,node.z-z)<=1)types.add(type);
         for(const farm of ai.buildings||[])
-            if(farm.type==='farm'&&farm.health>0&&Math.hypot(farm.x-x,farm.z-z)<=1)types.add('farm');
+            if(farm.type==='farm'&&farm.health>0&&WarMath.hypot(farm.x-x,farm.z-z)<=1)types.add('farm');
         if(types.size!==1)return {error:types.size?'Coordinates match more than one resource type; specify resourceType.':'No known resource node or owned farm matches these coordinates; specify resourceType or use known node coordinates.'};
         return {resourceType:[...types][0]};
     }
@@ -7807,7 +8525,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             node = discovered[0];
             for (const n of discovered) {
                 for (const tc of tcs) {
-                    const d = Math.hypot(n.x - tc.x, n.z - tc.z);
+                    const d = WarMath.hypot(n.x - tc.x, n.z - tc.z);
                     if (d < bd) { bd = d; node = n; }
                 }
             }
@@ -7911,11 +8629,17 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         const onSameRes = u => (u.task === 'harvesting' || u.task === 'carrying')
             && u.harvestTarget && u.harvestTarget.type === resourceType;
         const sameNodeMove = relocating && from !== null && from === resourceType;
+        const justSent = this.sentToScoutThisTurn(ai);
         let candidates = ai.units.filter(u =>
             u.type === 'worker' && u.health > 0 &&
-            u.task !== 'building' && !u.isBuilding && !isFighting(u) &&
+            u.task !== 'building' && !u.isBuilding && !isFighting(u) && !justSent(u) &&
             (sameNodeMove || !onSameRes(u)));
         if (candidates.length === 0) {
+            const kept = ai.units.filter(u => u.type === 'worker' && u.health > 0 && justSent(u)).length;
+            if (kept) {
+                this.outcome('log.out.noWorkersScouting', { n: kept });
+                return `[ERROR] No workers could be reassigned: ${kept} ${kept === 1 ? 'was' : 'were'} sent to scout earlier this turn and ${kept === 1 ? 'is' : 'are'} not pulled back; the rest already harvest ${resourceType}, are constructing, or are fighting.`;
+            }
             // Not a blocker when they are the ones being moved — reporting them as
             // one would name a reason that did not apply.
             const already = sameNodeMove ? 0 : ai.units.filter(u => u.type === 'worker' && onSameRes(u)).length;
@@ -8087,7 +8811,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 w._orderToken = deferToken;
                 w._queuedAssign = { token: deferToken, node, resourceType };
                 const tc = ai.buildings.filter(b => b.type === 'town_center' && !b.underConstruction)
-                    .reduce((best, b) => { const d = Math.hypot(b.x - w.x, b.z - w.z);
+                    .reduce((best, b) => { const d = WarMath.hypot(b.x - w.x, b.z - w.z);
                                            return (!best || d < best.d) ? { b, d } : best; }, null);
                 if (tc) deferSecs = Math.max(deferSecs, this.travelEtaSec(w, tc.b.x, tc.b.z));
                 deferred++; moved++;
@@ -8110,8 +8834,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             w.buildTarget = null;
             w.repairTarget = null;
             w.isMoving = true;
-            w.targetX = node.x + game.randJitter(2);
-            w.targetZ = node.z + game.randJitter(2);
+            w.targetX = node.x + (game.rand(w, 'node-spot') - 0.5) * 2;
+            w.targetZ = node.z + (game.rand(w, 'node-spot') - 0.5) * 2;
             w.isHarvesting = false;
             w.carryingResource = false;
             w.harvestAmount = 0;
@@ -8152,7 +8876,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // and it lands exactly where the decision happens.
         const tcs = ai.buildings.filter(b => b.type === 'town_center' && !b.underConstruction);
         const nearTC = tcs.reduce((best, b) => {
-            const d = Math.hypot(b.x - node.x, b.z - node.z);
+            const d = WarMath.hypot(b.x - node.x, b.z - node.z);
             return (!best || d < best.d) ? { b, d } : best;
         }, null);
         const haul = nearTC ? ` Each load is a ~${Math.max(1, Math.round(nearTC.d / (3 * 1.0)))}s walk back to your nearest Town Center.` : '';
@@ -8179,7 +8903,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             }
             let best = null, bd = Infinity;
             damaged.forEach(b => {
-                const d = Math.hypot(b.x - tx, b.z - tz);
+                const d = WarMath.hypot(b.x - tx, b.z - tz);
                 if (d < bd) { bd = d; best = b; }
             });
             if (!best || bd > 12) {
@@ -8198,7 +8922,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         }
         const workers = ai.units
             .filter(u => u.type === 'worker' && u.health > 0 && u.task !== 'building' && !u.isBuilding)
-            .sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z))
+            .sort((a, b) => WarMath.hypot(a.x - target.x, a.z - target.z) - WarMath.hypot(b.x - target.x, b.z - target.z))
             .slice(0, count);
         if (workers.length === 0) {
             this.outcome('log.out.noWorkersRepair', {});
@@ -8391,7 +9115,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         let victim = pool[0];
         if (targetX !== undefined && targetZ !== undefined) {
             let bd = Infinity;
-            pool.forEach(b => { const d = Math.hypot(b.x - targetX, b.z - targetZ); if (d < bd) { bd = d; victim = b; } });
+            pool.forEach(b => { const d = WarMath.hypot(b.x - targetX, b.z - targetZ); if (d < bd) { bd = d; victim = b; } });
         }
         const wasTC = victim.type === 'town_center';
         const remainingTC = ai.buildings.filter(b => b.type === 'town_center').length;
@@ -8729,7 +9453,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             if (this.isControllerDefeated(c)) { if (!c.defeated) this.markDefeated(c); return false; }
             return !c.paused;
         });
-        if (!live.length) return;
+        const game = this.game, lockstep = !!(game && game._lockstep);
+        // Lockstep with no model seat left to wait for (all paused, all rule-based, all
+        // defeated): the world plays slice after slice rather than standing still forever.
+        if (!live.length) { if (lockstep && game.lockstepFrozen()) game.grantLockstep(); return; }
 
         if (this._roundPhase === 'wait') {
             // Keep the pipelines full while the round runs. A seat whose second lane
@@ -8751,8 +9478,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             this.flushRound(live);
             this._roundPhase = 'ask';
             this._roundEndedAt = now;
+            // Lockstep: the round's moves are in; the world now plays its one slice.
+            if (lockstep) game.grantLockstep();
             return;
         }
+        // Lockstep: the next round is asked only once that slice has been played, so
+        // every seat reads the world exactly one slice later than the last time.
+        if (lockstep && !game.lockstepFrozen()) return;
         // A pause asked for mid-round is honoured HERE, at the boundary: the round that
         // was already asked has just flushed above, and the next one is simply not
         // opened. Pausing therefore always lands between rounds, never inside one.
@@ -8878,13 +9610,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const busy = this.aiControllers.some(c => this.seatBusy(c) || c.queuedAction);
             if (!busy) {
                 this.game.pauseState = 'paused';
+                this.noteMatchEvent({ kind: 'paused' });
                 if (this.game.ui && this.game.ui.updateSimSpeedButton) this.game.ui.updateSimSpeedButton();
                 return;   // no messages sent, no turns issued, no time passing
             }
         }
 
-        this.updateResourceDiscovery(now);
-        this.updateEnemyBuildingDiscovery();
+        // Discovery runs per simulation step (observeStep, called from Game.tick).
         this.updateAttackReports(now);
 
         if (this.turnBased) { this.updateTurnBased(now, pausing); return; }
@@ -8933,6 +9665,8 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         if (!controller || controller._demoted) return;
         controller._demoted = true;
         const ai = controller.aiPlayer;
+        this.noteChange(ai, { type: 'adaptation', kind: 'demoted' });
+        if (ai) this.noteInput('demote', ai.id);
         this.aiControllers = this.aiControllers.filter(c => c !== controller);
         this.abortLanes(controller, 'handed to the rule-based AI');
         if (ai) {
@@ -9000,6 +9734,16 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     // the node showed on the map (fog reveals per-frame) but never entered the
     // model's known set. The `.has(idx)` skip keeps this cheap: each node is
     // distance-checked only until it is first discovered, then skipped forever.
+    // Discovery, once per simulation sub-step. It ran once per update, which is once
+    // per drawn frame: what a model knew depended on the frame rate and on whether the
+    // spectator's tab was visible. A hidden tab ticks four times a second, and a unit
+    // grazing past a node between two ticks never found it.
+    observeStep() {
+        if (this._stopped || this.aiControllers.length === 0) return;
+        this.updateResourceDiscovery(Date.now());
+        this.updateEnemyBuildingDiscovery();
+    }
+
     updateResourceDiscovery(now) {
         const resources = (this.game.terrain && this.game.terrain.resources) || [];
         if (!resources.length) return;
@@ -9007,10 +9751,11 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const ai = controller.aiPlayer;
             if (!ai) continue;
             if (!ai._knownResIdx) ai._knownResIdx = new Set();
+            const see = this.visionTestFor(ai, this.game);
             for (let idx = 0; idx < resources.length; idx++) {
                 if (ai._knownResIdx.has(idx)) continue;        // already known — skip
                 const r = resources[idx];
-                if (this.isPositionVisibleToAI(ai, r.x, r.z, this.game)) ai._knownResIdx.add(idx);
+                if (see(r.x, r.z)) ai._knownResIdx.add(idx);
             }
         }
     }
@@ -9026,11 +9771,12 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             const ai = controller.aiPlayer;
             if (!ai) continue;
             if (!ai._knownEnemyBuildings) ai._knownEnemyBuildings = new Set();
+            let see = null;   // built only if some enemy building is still unknown
             for (const b of all) {
                 if (ai.buildings.includes(b)) continue;            // own building
                 if (b.health <= 0) { ai._knownEnemyBuildings.delete(b); continue; } // gone
                 if (ai._knownEnemyBuildings.has(b)) continue;      // already known
-                if (b.isWonder || this.isPositionVisibleToAI(ai, b.x, b.z, this.game)) {
+                if (b.isWonder || (see || (see = this.visionTestFor(ai, this.game)))(b.x, b.z)) {
                     ai._knownEnemyBuildings.add(b);
                 }
             }
@@ -9042,6 +9788,9 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
     setPaused(aiId, paused) {
         const controller = this.aiControllers.find(c => c.id === aiId);
         if (!controller) return null;
+        if (!!controller.paused !== !!paused) {
+            this.noteChange(controller.aiPlayer, { type: 'intervention', kind: paused ? 'seatPaused' : 'seatResumed', human: true });
+        }
         controller.paused = !!paused;
         const ai = controller.aiPlayer;
         const civ = ai ? getCivilization(ai.civilization) : null;

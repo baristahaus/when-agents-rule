@@ -23,10 +23,13 @@ class TranscriptAnalyzer {
 
     reset() {
         this.header = null;      // type:"match" — the conditions
+        this.contract = null;    // type:"contract" — what each seat was offered, fingerprinted
         this.results = null;     // type:"results" — absent if the match was interrupted
         this.timeline = null;    // type:"timeline" — ditto
         this.turns = [];         // every turn, chronological across all seats
         this.markers = [];       // type:"round_missed" and anything else non-turn
+        this.inputs = [];        // type:"input" -- what a re-simulation replays (review #9), never a row
+        this.chronicle = [];     // type:"chronicle" -- the match as a spectator was told it (review #11)
         this.chapters = [];      // derived: what a reader would want to jump to
         this.seats = new Map();  // playerId -> {id, seat, civ, model, name, turns:[]}
         this._deaths = null;     // derived once per file by deathTimes()
@@ -67,8 +70,11 @@ class TranscriptAnalyzer {
             let o;
             try { o = JSON.parse(line); } catch (e) { this.parseErrors++; continue; }
             if (o.type === 'match') { this.header = o; continue; }
+            if (o.type === 'contract') { this.contract = o; continue; }
             if (o.type === 'results') { this.results = o; continue; }
             if (o.type === 'timeline') { this.timeline = o; continue; }
+            if (o.type === 'input') { this.inputs.push(o); continue; }
+            if (o.type === 'chronicle') { this.chronicle.push(o); continue; }
             if (o.type) { this.markers.push(o); continue; }   // round_missed and future kinds
             // A turn always carries the seat that took it — record() refuses to write one
             // without a playerId. So an object that lacks it is not a turn with fields
@@ -82,19 +88,28 @@ class TranscriptAnalyzer {
         // top level; both measure from the timeline's origin, so they interleave without
         // conversion. `at` is the tiebreak so two events in the same second keep the
         // order they happened in.
-        const secOf = (r) => (r.state && r.state.clock && typeof r.state.clock.matchSeconds === 'number')
-            ? r.state.clock.matchSeconds
+        //
+        // Builds 934 to 949 wrote clock.matchSeconds as 0 on EVERY turn (the state mixed a
+        // simulated clock with a wall-clock origin). Such a file is recognised by that
+        // shape -- every turn at 0 while the turns' own wall-clock stamps span more than
+        // a few seconds -- and its turns are placed by those stamps instead, from the
+        // match's start, which is the origin the markers' own seconds are measured from.
+        const stateSec = r => (r.state && r.state.clock && typeof r.state.clock.matchSeconds === 'number') ? r.state.clock.matchSeconds : null;
+        const stamps = this.turns.map(r => r.at).filter(Number.isFinite);
+        this.clockStuck = this.turns.length > 1 && this.turns.every(r => stateSec(r) === 0)
+            && stamps.length > 1 && Math.max(...stamps) - Math.min(...stamps) > 5000;
+        const secOf = (r) => (!this.clockStuck && stateSec(r) != null)
+            ? stateSec(r)
             : (typeof r.matchSeconds === 'number' ? r.matchSeconds : null);
         const all = this.turns.concat(this.markers);
         all.forEach(r => { r._sec = secOf(r); });
         // A transcript written before matchSeconds existed still opens: fall back to the
-        // wall-clock stamp, offset from the first record so the axis starts at zero.
-        // A reduce, not Math.min(...): a long match has more records than the
-        // argument-list limit, and the fallback path is exactly where a huge
-        // legacy transcript lands.
-        let t0 = 0;
-        if (all.length) {
-            t0 = Infinity;
+        // wall-clock stamp, offset from the match's start (the header) or else from the
+        // first record, so the axis starts at zero.
+        // A loop, not Math.min(...): a long match has more records than the argument-list
+        // limit, and the fallback path is exactly where a huge legacy transcript lands.
+        let t0 = (this.header && Number.isFinite(this.header.startedAt)) ? this.header.startedAt : Infinity;
+        if (!Number.isFinite(t0)) {
             for (const r of all) if ((r.at || Infinity) < t0) t0 = r.at || Infinity;
             if (!Number.isFinite(t0)) t0 = 0;
         }
@@ -125,6 +140,37 @@ class TranscriptAnalyzer {
         return this;
     }
 
+
+    // The tale of the tape (review #11): each seat side by side, as the header declared
+    // it and as the record says it was helped -- advice, a spectator's pause, the harness
+    // adapting its requests, a demotion -- and how it finished. Counted from the notes
+    // themselves; a file from before the notes existed has none, and says nothing.
+    taleOfTheTape() {
+        const players = (this.header && this.header.players) || [];
+        const ranking = (this.results && this.results.ranking) || [];
+        const count = (id, pred) => this.markers.filter(r => r.playerId === id && pred(r)).length;
+        return players.map(p => {
+            const st = p.settings || {};
+            const seat = this.seats.get(p.id) || {};
+            const rank = ranking.find(r => r.playerId === p.id) || null;
+            const adaptations = {};
+            this.markers.filter(r => r.playerId === p.id && r.type === 'adaptation')
+                .forEach(r => { adaptations[r.kind || '?'] = (adaptations[r.kind || '?'] || 0) + 1; });
+            return {
+                id: p.id, seat: p.seat, civ: p.civ, name: seat.name || p.name || null,
+                rule: p.model === 'ki', profile: p.profile || null, model: p.model === 'ki' ? null : (p.model || null),
+                provider: st.provider || null, servedBy: st.servedBy || null, context: st.contextBudget || null,
+                maxTokens: st.maxTokens || null, temperature: st.temperature != null ? st.temperature : null,
+                reasoning: st.reasoning || null, toolFallback: !!st.toolFallback, ownPrompt: !!st.systemPrompt,
+                lanes: st.lanes || 1, turns: (seat.turns || []).filter(r => !r.type).length,   // its markers ride along in the list
+                missed: count(p.id, r => r.type === 'round_missed'),
+                advised: count(p.id, r => r.type === 'intervention' && r.kind === 'advice'),
+                paused: count(p.id, r => r.type === 'intervention' && r.kind === 'seatPaused'),
+                adaptations, demoted: !!adaptations.demoted,
+                rank: rank ? rank.rank : null, winner: !!(rank && rank.isWinner), alive: rank ? rank.alive !== false : null,
+            };
+        });
+    }
 
     // Every transcript written before this was fixed lists the raw model names in its
     // header while its results block ranks the suffixed ones — so a match between two
@@ -333,6 +379,33 @@ class TranscriptAnalyzer {
         const parts = h.split(/\n(?=Command \d+\/\d+: )/);
         if (parts.length < 2 && !/^Command \d+\/\d+: /.test(h)) return [h];
         return parts.map(x => x.replace(/^Command \d+\/\d+: /, ''));
+    }
+    // A turn failed if ANY of its commands did. A batch answers with numbered lines, so
+    // its errors sit after "Command 2/3: " -- asking whether the whole answer STARTS
+    // with [ERROR] only ever saw single-command failures: Episode 7 flagged 4 turns out
+    // of 78. Static so the live transcript viewer can ask the same question.
+    static failed(harnessResult) {
+        return typeof harnessResult === 'string'
+            && TranscriptAnalyzer.prototype.resultsOf({ harnessResult }).some(x => x.startsWith('[ERROR]'));
+    }
+    hasError(rec) { return TranscriptAnalyzer.failed(rec && rec.harnessResult); }
+    // What a turn that carried no game command actually was. They all used to be
+    // labelled "(malformed)", but most are not: a plan-only reply is a successful plan
+    // save, and a reply with no tool call or no text at all is its own failure.
+    turnKind(rec) {
+        // Lines where a human or the harness, not the model, changed something.
+        if (rec && rec.type === 'intervention') return 'intervention';
+        if (rec && rec.type === 'adaptation') return 'adaptation';
+        if (rec && rec.type === 'match_event') return 'matchEvent';
+        if (rec && rec.type === 'request_cancelled') return 'cancelled';
+        if (rec && rec.type === 'request_failed') return 'requestFailed';
+        if (this.commandsOf(rec).length) return 'commands';
+        const p = rec && rec.parsed;
+        if (!p) return 'empty';
+        if (p.noAction) return 'noAction';
+        if (p.malformed) return 'malformed';
+        if (Array.isArray(p.commands) && (p.objective != null || p.plan != null)) return 'plan';
+        return 'malformed';
     }
     // Everything to draw for one moment. `union` decides whose eyes: a single seat is
     // the honest reconstruction of what that model could see, the union is the analyst's
@@ -600,7 +673,7 @@ class TranscriptAnalyzer {
                       r.assistant,
                       // and the markers the row itself displays, so searching what is
                       // on screen works: an error row, a missed round, a fight
-                      (typeof r.harnessResult === 'string' && r.harnessResult.indexOf('[ERROR]') === 0) ? 'error' : '',
+                      this.hasError(r) ? 'error' : '',
                       r.type === 'round_missed' ? 'missed round' : '',
                       (r.state && r.state.battles && r.state.battles.length) ? 'battle combat' : ''];
         r._hay = bits.filter(Boolean).join(' \u0001 ').toLowerCase();
@@ -615,7 +688,7 @@ class TranscriptAnalyzer {
             if (q && this.haystack(r).indexOf(q) === -1) return false;
             switch (this.filter) {
                 case 'battles':  return !!(r.state && r.state.battles && r.state.battles.length);
-                case 'rejected': return typeof r.harnessResult === 'string' && r.harnessResult.startsWith('[ERROR]');
+                case 'rejected': return this.hasError(r);
                 case 'missed':   return r.type === 'round_missed';
                 case 'planned':  return !!r._planNew;
                 default:         return true;
@@ -723,13 +796,16 @@ class TranscriptAnalyzer {
         const perSeat = [...this.seats.values()].map(s => {
             const turns = s.turns.filter(r => !r.type);
             const missed = s.turns.filter(r => r.type === 'round_missed').length;
-            const rejected = turns.filter(r => typeof r.harnessResult === 'string'
-                && r.harnessResult.startsWith('[ERROR]')).length;
+            const rejected = turns.filter(r => this.hasError(r)).length;
             const lat = turns.map(r => r.latencyMs || 0).filter(x => x > 0);
             return { seat: s, turns: turns.length, missed, rejected,
                      avgLatency: lat.length ? lat.reduce((a, b) => a + b, 0) / lat.length : 0 };
         });
-        return { perSeat, total: this.turns.length, markers: this.markers.length,
+        // `markers` used to count every non-turn line as a missed round; now that the file
+        // also carries interventions and adaptations, count each kind for what it is.
+        const kind = k => this.markers.filter(r => r.type === k).length;
+        return { perSeat, total: this.turns.length, markers: kind('round_missed'),
+                 interventions: kind('intervention'), adaptations: kind('adaptation'),
                  parseErrors: this.parseErrors, duration: this.durationSec() };
     }
 }

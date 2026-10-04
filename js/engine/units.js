@@ -201,8 +201,10 @@
         for(const side of [-1,1]) part(p,'cylinder',[.025*s,.045*s,.68*s,6],'cloth',
             {x:side*.19*s,y:y-.35*s,z:z-.09*s,rz:side*-.14,rx:.12,team:true});
     };
+    // Pads sit where they always did; asp67 had them made 0.8 of their old size (b1018; 0.7 was too small).
+    const PAD = .8;
     const shoulders = (p,tex='iron',y=1.23,s=1) => {
-        for(const side of [-1,1]) oval(p,tex,side*.33*s,y,0,.16*s,.115*s,.20*s,
+        for(const side of [-1,1]) oval(p,tex,side*.33*s,y,0,.16*s*PAD,.115*s*PAD,.20*s*PAD,
             {bone:side<0?'armL':'armR'});
     };
     const humanoid = (p,opts={}) => {
@@ -272,6 +274,7 @@
         worker: (o = {}) => {
             const p = [];
             humanoid(p, o);
+            shoulders(p,'leather');   // caps the sleeve, whose top read as a flat disc
             headgear(p, o.civ, 'civil', 0, 1.49, 0);
             held(p,'axe','armR',[.37,.77,.045],q=>{
                 part(q,'cylinder',[.028,.028,.55,8],'wood',{y:.09});
@@ -284,6 +287,7 @@
             humanoid(p,o);
             headgear(p,o.civ,tier===1?'civil':'military',0,1.49,0);
             if(tier===1) {
+                shoulders(p,'leather');
                 held(p,'club','armR',[.37,.77,.045],q=>
                     part(q,'cylinder',[.075,.045,.65,9],'wood',{y:.23}),.35);
             } else {
@@ -314,7 +318,7 @@
             const tier = o.tier || 1;
             const p = [];
             humanoid(p, { ...o, sleeves: 'leather' });
-            if(tier>=2) shoulders(p,'leather');
+            shoulders(p,'leather');
             if (tier >= 2) headgear(p, o.civ, 'military', 0, 1.47, 0);
             else if (o.civ) headgear(p, o.civ, 'civil', 0, 1.49, 0);
             else part(p, 'sphere', [1, 8, 6], 'leather', { y: 1.53, sx: 0.18, sy: 0.11, sz: 0.18 }); // generic cap
@@ -337,6 +341,7 @@
         priest: (o = {}) => {
             const p=[];
             humanoid(p,{...o,sleeves:'cloth'});
+            shoulders(p,'cloth');   // in the robe's cloth, like the sleeves
             part(p,'cylinder',[.235,.37,.83,14],'cloth',{y:.51,sz:.85});
             part(p,'frustum',[.18,.035,.15,.035,.85],'cloth',{y:.12,z:.27,team:true});
             cape(p,1.25,-.23,1.12);
@@ -411,7 +416,7 @@
                 oval(p,'leather',...elbow,.085,.085,.085,{bone});
                 riderLimb(p,'forearm'+suffix,tier>=3?'leather':'skin',elbow,hand,.078,.068,bone);
                 oval(p,'skin',...hand,.082,.090,.085,{bone});
-                oval(p,tier>=2?'iron':'leather',...shoulder,.125,.10,.15,{bone});
+                oval(p,tier>=2?'iron':'leather',...shoulder,.125*PAD,.10*PAD,.15*PAD,{bone});
             }
             held(p,tier===1?'javelin':tier===2?'spear':'lance','armR',[.35,1.31,.14],q=>{
                 const length=tier===1?1.1:tier===2?1.3:1.45;
@@ -513,7 +518,19 @@
     // Cosmetic animation: returns { mats, bob } — mats maps bone name → matrix
     // (rotation about that limb's pivot), bob is a world-Y offset for the body.
     // t is seconds; phase de-synchronizes crowds.
-    EngineUnits.pose = (type, anim, t, phase = 0) => {
+    // Strike-synced (review #12): `opts.strike` is where the unit is in its attack cycle,
+    // 0..1, read from the rules' own attack timer -- the blow lands at 1, when the rules
+    // deal the damage, not on a clock of its own. `opts.stride` is the distance walked,
+    // so feet keep pace with the ground instead of skating at a fixed tempo.
+    // The arm angle through one melee cycle: recover from the last blow, wind up slowly,
+    // strike fast.
+    EngineUnits.swingAngle = (p) => {
+        p = ((p % 1) + 1) % 1;
+        if (p < 0.12) return 0.2 + (-0.35 - 0.2) * (p / 0.12);
+        if (p < 0.82) { const k = (p - 0.12) / 0.7; return -0.35 - 1.1 * k * k; }
+        return -1.45 + (0.2 + 1.45) * ((p - 0.82) / 0.18);
+    };
+    EngineUnits.pose = (type, anim, t, phase = 0, opts = {}) => {
         const m3 = M();
         const P = PIVOTS[type] || {};
         const mats = {};
@@ -522,22 +539,25 @@
             const pv = P[bone];
             if (pv) mats[bone] = m3.rotateAround(R, pv[0], pv[1], pv[2]);
         };
+        const strike = opts.strike != null ? opts.strike : null;
+        const gait = (perUnit, perSecond) => (opts.stride != null ? opts.stride * perUnit : t * perSecond) + phase;
         if (type === 'cavalry') {
             if (anim === 'walk') {
-                const s = Math.sin(t * 7 + phase);
+                const s = Math.sin(gait(1.4, 7));
                 swing('legFL', m3.rotationX(s * 0.40)); swing('legBR', m3.rotationX(s * 0.40));
                 swing('legFR', m3.rotationX(-s * 0.40)); swing('legBL', m3.rotationX(-s * 0.40));
                 swing('head', m3.rotationX(Math.sin(t * 7 + phase + 1) * 0.035)); // the trot nod
                 bob = Math.abs(s) * 0.035;
             } else if (anim === 'attack') {
-                // couch the spear forward
-                const s = Math.sin(t * 7.5 + phase);
-                swing('armR', m3.rotationX(-0.3 - Math.max(0, s) * 0.5));
+                // couch the spear forward: drawn back, then thrust home on the blow
+                const thrust = strike != null ? (strike < 0.8 ? strike / 0.8 * 0.2 : 0.2 + (strike - 0.8) / 0.2 * 0.6)
+                    : Math.max(0, Math.sin(t * 7.5 + phase)) * 0.5;
+                swing('armR', m3.rotationX(-0.3 - thrust));
             } else { // idle: a slow grazing bow of the neck
                 swing('head', m3.rotationX(Math.max(0, Math.sin(t * 0.9 + phase)) * 0.04));
             }
         } else if (anim === 'walk') {
-            const s = Math.sin(t * 6.5 + phase);
+            const s = Math.sin(gait(2.2, 6.5));
             swing('legL', m3.rotationX(s * 0.55)); swing('legR', m3.rotationX(-s * 0.55));
             swing('armL', m3.rotationX(-s * 0.35)); swing('armR', m3.rotationX(s * 0.35));
             // Ground the lower sole throughout the stride instead of lifting both feet.
@@ -550,10 +570,26 @@
             swing('armR', m3.rotationX(-0.55 - s * 0.75));
             swing('armL', m3.rotationX(-0.1 - s * 0.15));
         } else if (anim === 'attack') {
-            // snappy slash: fast down-stroke, held wind-up
-            const s = Math.sin(t * 7.5 + phase);
-            swing('armR', m3.rotationX(-0.35 - Math.max(0, s) * 1.05));
-            swing('armL', m3.rotationX(Math.min(0, s) * 0.2));
+            // the slash lands with the damage: slow wind-up, fast down-stroke, recovery
+            if (strike != null) {
+                swing('armR', m3.rotationX(EngineUnits.swingAngle(strike)));
+                swing('armL', m3.rotationX(-0.25));   // the guard hand stays up
+            } else {
+                const s = Math.sin(t * 7.5 + phase);
+                swing('armR', m3.rotationX(-0.35 - Math.max(0, s) * 1.05));
+                swing('armL', m3.rotationX(Math.min(0, s) * 0.2));
+            }
+        } else if (anim === 'shoot') {
+            // bow arm (left) held out at the target; the right draws back through the
+            // cycle and snaps forward on release, which is when the arrow flies
+            const p = strike != null ? strike : ((t * 0.9 + phase) % 1);
+            swing('armL', m3.rotationX(-1.35));
+            swing('armR', m3.rotationX(p < 0.1 ? -1.0 - p * 3.5 : -1.35 + 0.4 * ((p - 0.1) / 0.9)));
+        } else if (anim === 'channel') {
+            // a priest's heal: both hands raised toward the patient, a slow sway
+            const s = Math.sin(t * 2 + phase);
+            swing('armL', m3.rotationX(-1.05 + s * 0.08));
+            swing('armR', m3.rotationX(-1.05 - s * 0.08));
         } else { // idle: barely-there arm sway
             const s = Math.sin(t * 1.6 + phase);
             swing('armL', m3.rotationX(s * 0.06));

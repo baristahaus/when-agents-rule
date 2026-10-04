@@ -39,3 +39,7 @@ arenaConfig*.json
 results_*.md
 match-*.jsonl
 screenshots/
+
+# WAR Bench outputs (tools/bench/war-bench.cjs)
+*.warbench.jsonl.gz
+*.report.html

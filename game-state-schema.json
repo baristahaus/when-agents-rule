@@ -3,28 +3,7 @@
   "title": "When Agents Rule — per-turn game state",
   "description": "The JSON object handed to every model each turn (built by buildGameStateJSON in js/openai-ai.js). Everything is fog-limited: the model only sees what its own units/buildings have discovered. Coordinates are world units on a square map centred on (0,0). In multi-turn history mode, PAST turns are replayed as compact 'pastTurnRecap' objects (see $defs.pastTurnRecap) — the CURRENT full state is always the last message.",
   "type": "object",
-  "required": [
-    "player",
-    "clock",
-    "epoch",
-    "resources",
-    "population",
-    "bonuses",
-    "map",
-    "nodes",
-    "nearestNodes",
-    "friendlyBuildings",
-    "buildings",
-    "enemyBuildings",
-    "friendlyUnits",
-    "workers",
-    "enemyUnits",
-    "research",
-    "unlockedContent",
-    "units",
-    "threats",
-    "gameStats"
-  ],
+  "required": ["player", "clock", "epoch", "resources", "population", "bonuses", "map", "nodes", "nearestNodes", "friendlyBuildings", "buildings", "enemyBuildings", "friendlyUnits", "workers", "enemyUnits", "research", "unlockedContent", "threats", "gameStats", "units"],
   "properties": {
     "player": {
       "type": "object",
@@ -346,96 +325,46 @@
         }
       }
     },
-    "ordersInProgress": {
-      "type": "array",
-      "description": "Orders you have already given whose effect has not finished arriving — a column marching, workers assigned, a standing order holding a route. Absent when nothing is in flight. This is the harness telling a seat what it already ordered, so that repeating the order is the seat's mistake rather than ours; entries are the command spelled as it was issued, so one can be matched back to the turn that made it. Two shapes occur: a one-off order carries `units` (a count), a standing order carries `unitIds` (handles) and `mode`. `secondsRemaining` is an ETA in game seconds and is missing when the wait is on a fight rather than a clock.",
-      "items": {
-        "type": "object",
-        "required": ["order", "to"],
-        "properties": {
-          "order": {
-            "type": "string",
-            "description": "The action id that produced it: move_units, attack_target, assign_workers."
-          },
-          "mode": {
-            "type": "string",
-            "description": "Standing orders only: march, scout, guard, patrol."
-          },
-          "to": {
-            "type": "array",
-            "description": "[x, z] destination, averaged over the group for a one-off order.",
-            "items": { "type": "number" },
-            "minItems": 2,
-            "maxItems": 2
-          },
-          "from": {
-            "type": "array",
-            "description": "[x, z] patrol origin, patrol mode only.",
-            "items": { "type": "number" },
-            "minItems": 2,
-            "maxItems": 2
-          },
-          "units": {
-            "type": "integer",
-            "description": "How many units the order covers. One-off orders only."
-          },
-          "unitIds": {
-            "type": "array",
-            "description": "The handles it covers — the same ids friendlyUnits publishes. Standing orders only.",
-            "items": { "type": "integer" }
-          },
-          "targets": {
-            "type": "string",
-            "description": "'military' when an attack order was given the class filter rather than a fixed destination."
-          },
-          "secondsRemaining": {
-            "type": "number",
-            "description": "ETA in game seconds, counted down every turn. Absent when there is no clock to read."
-          }
-        }
-      }
-    },
     "battles": {
       "type": "array",
       "description": "Fighting you could not watch, one entry per ENGAGEMENT (clustered by location), CUMULATIVE since it began — a fight outlasts several turns. Absent entirely when nothing is happening. Only engagements you took part in. Numbers only: 'their 2 heavy_cavalry dealt 1800 to my 3 archers' is the counter lesson, drawing it is your job.",
       "items": {
         "type": "object",
-        "required": ["at", "ongoing", "secondsElapsed", "you", "enemy"],
+        "required": [
+          "at",
+          "ongoing",
+          "secondsElapsed",
+          "you",
+          "enemy"
+        ],
         "properties": {
-          "at": { "type": "array", "items": { "type": "integer" }, "description": "[x, z] centre of the fighting." },
-          "ongoing": { "type": "boolean", "description": "true while blows are still landing." },
-          "endedSecondsAgo": { "type": "integer", "description": "Only present once ongoing is false: how long ago the last blow landed. An entry is reported for two minutes after a fight ends, so this is what tells a finished skirmish from a stale one." },
-          "secondsElapsed": { "type": "integer", "description": "How long the fight LASTED (first blow to last), not how long ago it was — see endedSecondsAgo for that." },
-          "you": { "$ref": "#/properties/battles/items/definitions/side" },
+          "at": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "[x, z] centre of the fighting."
+          },
+          "ongoing": {
+            "type": "boolean",
+            "description": "true while blows are still landing."
+          },
+          "endedSecondsAgo": {
+            "type": "integer",
+            "description": "Only present once ongoing is false: how long ago the last blow landed. An entry is reported for two minutes after a fight ends, so this is what tells a finished skirmish from a stale one."
+          },
+          "secondsElapsed": {
+            "type": "integer",
+            "description": "How long the fight LASTED (first blow to last), not how long ago it was — see endedSecondsAgo for that."
+          },
+          "you": {
+            "$ref": "#/$defs/battleSide"
+          },
           "enemy": {
             "type": "array",
             "description": "One entry per rival involved — three-way fights are not merged.",
-            "items": { "$ref": "#/properties/battles/items/definitions/side" }
-          }
-        },
-        "definitions": {
-          "side": {
-            "type": "object",
-            "properties": {
-              "owner": { "type": "string", "description": "Present on enemy entries only." },
-              "involved": {
-                "type": "object",
-                "description": "Keyed by unit/building type — towers, drafted workers and priests all appear as themselves. Zero fields are omitted, so a priest row is just {n, healed}.",
-                "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "n": { "type": "integer", "description": "Distinct units of this type that fought or healed." },
-                    "dmgUnits": { "type": "integer", "description": "Damage dealt to UNITS." },
-                    "dmgBuildings": { "type": "integer", "description": "Damage dealt to BUILDINGS — never summed with dmgUnits, since infantry raze at 1.5x and ranged at 0.5x." },
-                    "healed": { "type": "integer", "description": "HP restored (priests). Replaces damage for support units." }
-                  }
-                }
-              },
-              "lost": {
-                "type": "object",
-                "description": "Units of yours (or theirs) that died here, by type. Absent if none.",
-                "additionalProperties": { "type": "integer" }
-              }
+            "items": {
+              "$ref": "#/$defs/battleSide"
             }
           }
         }
@@ -730,8 +659,7 @@
           "type",
           "x",
           "z",
-          "healthPct",
-          "action"
+          "healthPct"
         ],
         "properties": {
           "type": {
@@ -748,8 +676,10 @@
           },
           "action": {
             "type": "string",
+            "description": "Fighters only; workers carry none (the \"workers\" tally says what they do). \"marching\" is under a combat order but not yet in contact; \"attacking\" is in contact.",
             "enum": [
               "idle",
+              "marching",
               "attacking",
               "harvesting",
               "returning",
@@ -757,6 +687,60 @@
               "farm_work",
               "moving"
             ]
+          }
+        }
+      }
+    },
+    "ordersInProgress": {
+      "type": "array",
+      "description": "Orders your units are still carrying out, so a march or standing order you gave earlier stays visible until it completes. One entry per group.",
+      "items": {
+        "type": "object",
+        "required": [
+          "order",
+          "to"
+        ],
+        "properties": {
+          "order": {
+            "type": "string",
+            "description": "The command that started it, spelled as you sent it (e.g. \"move_units\", \"attack_target\")."
+          },
+          "mode": {
+            "type": "string",
+            "description": "Standing orders only: march, scout, guard or patrol."
+          },
+          "unitIds": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Standing orders only: the handles of the units carrying it."
+          },
+          "units": {
+            "type": "integer",
+            "description": "Timed marches only: how many units are carrying it."
+          },
+          "targets": {
+            "type": "string",
+            "description": "Standing orders only, when set: which targets the group engages."
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "[x, z] destination — averaged over the group for a one-off order."
+          },
+          "from": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "[x, z] patrol origin — the other end of the route, patrol mode only: the group repeats from ↔ to."
+          },
+          "secondsRemaining": {
+            "type": "number",
+            "description": "Estimated seconds to arrival. Absent when there is no clock to read, e.g. an assignment waiting on a fight."
           }
         }
       }
@@ -778,17 +762,42 @@
         "gold"
       ],
       "properties": {
-        "total": { "type": "integer" },
-        "idle": { "type": "integer" },
-        "building": { "type": "integer" },
-        "farm": { "type": "integer" },
-        "scouting": { "type": "integer" },
-        "moving": { "type": "integer", "description": "In transit with no resolved job yet." },
-        "fighting": { "type": "integer", "description": "Villagers hitting back. A worker under attack is counted here rather than in idle, which is why an ambush can empty workers.idle between this snapshot and the order that reads it." },
-        "food": { "type": "integer", "description": "Workers whose job is food, at ANY point of the cycle: walking out, gathering, or carrying home. Reassigning a worker who happens to be carrying a load destroys it — but which ones those are changes every few seconds, far faster than a turn, so it is not something to plan from here. assign_workers' allowSpill decides it at the moment the order runs." },
-        "wood": { "type": "integer" },
-        "stone": { "type": "integer" },
-        "gold": { "type": "integer" }
+        "total": {
+          "type": "integer"
+        },
+        "idle": {
+          "type": "integer"
+        },
+        "building": {
+          "type": "integer"
+        },
+        "farm": {
+          "type": "integer"
+        },
+        "scouting": {
+          "type": "integer"
+        },
+        "moving": {
+          "type": "integer",
+          "description": "In transit with no resolved job yet."
+        },
+        "food": {
+          "type": "integer",
+          "description": "Workers whose job is food, at ANY point of the cycle: walking out, gathering, or carrying home. Reassigning a worker who happens to be carrying a load destroys it — but which ones those are changes every few seconds, far faster than a turn, so it is not something to plan from here. assign_workers' allowSpill decides it at the moment the order runs."
+        },
+        "wood": {
+          "type": "integer"
+        },
+        "stone": {
+          "type": "integer"
+        },
+        "gold": {
+          "type": "integer"
+        },
+        "fighting": {
+          "type": "integer",
+          "description": "Villagers currently hitting back at attackers; they rejoin their job when the fight ends. A worker under attack is counted here rather than in idle, which is why an ambush can empty workers.idle between this snapshot and the order that reads it."
+        }
       }
     },
     "enemyUnits": {
@@ -1119,6 +1128,47 @@
     }
   },
   "$defs": {
+    "battleSide": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "description": "Present on enemy entries only."
+        },
+        "involved": {
+          "type": "object",
+          "description": "Keyed by unit/building type — towers, drafted workers and priests all appear as themselves. Zero fields are omitted, so a priest row is just {n, healed}.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "n": {
+                "type": "integer",
+                "description": "Distinct units of this type that fought or healed."
+              },
+              "dmgUnits": {
+                "type": "integer",
+                "description": "Damage dealt to UNITS."
+              },
+              "dmgBuildings": {
+                "type": "integer",
+                "description": "Damage dealt to BUILDINGS — never summed with dmgUnits, since infantry raze at 1.5x and ranged at 0.5x."
+              },
+              "healed": {
+                "type": "integer",
+                "description": "HP restored (priests). Replaces damage for support units."
+              }
+            }
+          }
+        },
+        "lost": {
+          "type": "object",
+          "description": "Units of yours (or theirs) that died here, by type. Absent if none.",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        }
+      }
+    },
     "blockedBy": {
       "type": "array",
       "description": "What stands between you and ordering this RIGHT NOW. Empty means nothing does. Listed structural gates first, price last — the same order the harness reports them if you try anyway. \"pop\" appears on units when you are at the population cap; buildings never consume population and never carry it. Absent on purpose: whether a trainer or research host is busy this instant, which changes several times while you are thinking and so could not be reported honestly here.",

@@ -28,10 +28,13 @@ const scope = {
   document: undefined,
 };
 vm.createContext(scope);
-for (const f of ['js/civilizations.js', 'js/units.js', 'js/buildings.js', 'js/resources.js', 'js/i18n.js', 'js/terrain.js'])
+// One list, from js/manifest.js — upstream's fix for every harness keeping its own copy, and
+// the reason this file died on `WarRng is not defined`: the hand-rolled list predated
+// js/simulation/rng.js, where the keyed draws now live. game.js has no page tail any more
+// (start-up moved to js/boot.js), so the whole file loads here and nothing is cut with a split.
+vm.runInContext('globalThis.window = globalThis', scope);   // texgen's module pattern
+for (const f of ['js/manifest.js'].concat(require('../js/manifest.js').vm))
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), scope, { filename: f });
-vm.runInContext(fs.readFileSync(path.join(ROOT, 'js', 'game.js'), 'utf8')
-  .split('\nconst WAR_PRIVATE_HOST')[0], scope, { filename: 'js/game.js' });
 
 const TerrainManager = vm.runInContext('TerrainManager', scope);
 const Game = vm.runInContext('Game', scope);
@@ -59,24 +62,34 @@ test('an unseeded terrain is Math.random, so the default game is untouched by al
   assert.equal(streamFor(null).rand, Math.random);
 });
 
-test('Game.rand delegates to the terrain stream and randJitter is that stream, centred', () => {
-  const g = Object.create(Game.prototype);
-  const seq = [0.1, 0.9, 0.5, 0.25, 0.75];
-  let i = 0;
-  g.terrain = { rand: () => seq[i++] };
-  assert.deepEqual([...Array.from({ length: 5 }, () => g.rand())], seq, 'Game.rand is not reading terrain.rand');
+test('Game.rand is a keyed draw: one seed, and a value that depends on what was drawn for', () => {
+  // The shape this test pinned is gone, deliberately. Our side had ONE stream: Game.rand() read
+  // terrain.rand directly and randJitter(k) was (rand()-0.5)*k. Upstream kept the promise and
+  // strengthened it — a draw depends on the match seed, the key (seat + purpose) and how many
+  // times THAT key has drawn, never on the global draw order (js/simulation/rng.js), and the
+  // ~50 park-and-spread call sites pass a purpose where they asked for jitter. Both halves were
+  // reaching for "a seed is a match"; this is the stronger version, so what is asserted here is
+  // what the new shape actually owes. The last block is the one a single stream could not pass.
+  const seeded = (seed) => { const g = Object.create(Game.prototype); g.mapSeed = seed; return g; };
+  const draws = (g, purpose, n) => Array.from({ length: n }, () => g.rand(null, purpose));
 
-  i = 0;
-  // randJitter(k) is (rand() - 0.5) * k: 0.1 -> -0.4k, 0.9 -> +0.4k, 0.5 -> 0
-  assert.deepEqual([...Array.from({ length: 3 }, () => g.randJitter(10))], [-4, 4, 0],
-    'randJitter changed shape; every one of the ~50 park-and-spread call sites assumes this');
+  const a = seeded('DETERM-42'), b = seeded('DETERM-42'), c = seeded('DETERM-43');
+  const aa = draws(a, 'spread', 40);
+  assert.deepEqual(aa, draws(b, 'spread', 40), 'one seed and one key gave two different sequences');
+  assert.notDeepEqual(aa, draws(c, 'spread', 40), 'two seeds gave the same sequence, so the seed never reaches the key');
+  for (const v of aa) assert.ok(v >= 0 && v < 1, 'a keyed draw left [0,1): ' + v);
 
-  // A game with no terrain (the headless test harnesses, and any call before a map exists) must
-  // still answer rather than throw, and answer from Math.random.
+  // A game with no map yet (the headless harnesses, and any call before the world exists) must
+  // answer rather than throw, exactly as the old delegation did with no terrain.
   const bare = Object.create(Game.prototype);
-  assert.equal(typeof bare.rand(), 'number', 'rand() has to work before a terrain exists');
-  const j = bare.randJitter(6);
-  assert.ok(j >= -3 && j <= 3, 'jitter must stay within +/-k/2, got ' + j);
+  assert.equal(typeof bare.rand(null, 'spread'), 'number', 'rand has to work before a map seed exists');
+
+  // Drawing on another key between two of mine must not move mine: that is what lets two
+  // machines replay one transcript seat by seat instead of in step with each other's noise.
+  const x = seeded('DETERM-7'), y = seeded('DETERM-7');
+  const mine = [];
+  for (let i = 0; i < 5; i++) { mine.push(x.rand(null, 'spread')); x.rand(null, 'something-else'); }
+  assert.deepEqual(mine, draws(y, 'spread', 5), 'a draw on another key moved this key, so replay is not position-independent');
 });
 
 test('the simulation draws its randomness through the game, apart from id minting', () => {
@@ -98,6 +111,10 @@ test('the simulation draws its randomness through the game, apart from id mintin
       if (!line.includes('Math.random')) return;
       const t = line.trim();
       if (t.startsWith('//') || t.startsWith('*')) return;           // prose may name it
+      // `// rng-exempt: <reason>` is the marker both halves of this fork invented, and
+      // upstream's code already carries it on the one draw with no game to ask (a fixture
+      // seat's id). Honouring it keeps the marker meaningful and the allowlist a last resort.
+      if (line.includes('rng-exempt:')) return;
       if (ALLOWED[f].some(a => line.includes(a))) return;
       // The delegation itself is allowed to mention Math.random as the fallback.
       if (f === 'js/game.js' && t.startsWith('return ((')) return;
@@ -106,6 +123,7 @@ test('the simulation draws its randomness through the game, apart from id mintin
   }
   assert.deepEqual(offenders, [],
     'unseeded randomness in a simulation file means a seeded match stops replaying. Route it '
-    + 'through game.rand()/game.randJitter(), or add it to the allowlist with a reason:\n  '
+    + 'through the keyed draw (WarRng / game.rand(who, purpose)), mark the line '
+    + '// rng-exempt: <reason>, or add it to the allowlist below with a reason:\n  '
     + offenders.join('\n  '));
 });

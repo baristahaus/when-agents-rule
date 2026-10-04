@@ -23,6 +23,13 @@ const onDisk=[];
 // Only index.html is held to the full contract.
 const PAGES=['index.html','engine-test.html'];
 
+// Files a browser loads OUTSIDE index.html. This page is the module graph for the tab that
+// plays a match; it is not the graph of every context that can run code. Two files are
+// loaded by a Worker instead (the analyzer's Re-simulated mode) and must NOT appear in
+// index.html or the manifest — tests/resim-worker.test.cjs asserts their absence, because a
+// second copy in the page would give the world two copies of every resim global.
+const OUTSIDE_PAGE = ['js/resim.js', 'js/resim-worker.js'];
+
 for(const page of PAGES){
  const refs=[...html(page).matchAll(SRC)].map(m=>({file:m[1],tag:m[2]}));
 
@@ -50,8 +57,11 @@ for(const page of PAGES){
   // A file on disk that nothing loads is dead code that still costs a clone, a review,
   // and an afternoon wondering why the new module never runs — in this architecture that
   // is a ReferenceError at the first call site, not a compile error.
-  const orphaned=onDisk.filter(f=>!names.includes(f));
+  const orphaned=onDisk.filter(f=>!names.includes(f)&&!OUTSIDE_PAGE.includes(f));
   assert.deepEqual(orphaned,[],`not referenced by index.html: ${orphaned.join(', ')}`);
+  // And the exemption stays honest: a file on the exemption list must genuinely be loaded
+  // somewhere, or it is dead code wearing a reason.
+  for(const f of OUTSIDE_PAGE) assert.ok(fs.existsSync(path.join(root,f)),`${f} is exempted from the page but is not in the repo`);
  });
 
  test('the build number in the badge is the game.js tag, by the same rule as the app',()=>{

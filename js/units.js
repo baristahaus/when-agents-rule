@@ -168,12 +168,40 @@ function getUnitDefFor(civilization, id) {
 // purest form: a model reads the state, unit 7 dies while it thinks, a new unit takes slot
 // 7, and its order lands on someone else — silently, and untraceably. Monotonic means a
 // stale handle names a DEAD unit, which the harness can say out loud.
+//
+// The counters live on the game, not in this file's scope. A restored match rebuilds
+// the scripts from scratch, so a module-level counter started again at 1 while the
+// saved units kept theirs, and the next unit born shared a handle with a living one
+// ([1,2,3,1]). On the game they travel with the rest of the checkpointed world.
+// The module map is only for units created with no game at all (fixtures, tools).
 const _unitSeq = new Map();
-function resetUnitHandles() { _unitSeq.clear(); }
+function unitHandleCounters() {
+    if (typeof game !== 'undefined' && game) return game._unitSeq || (game._unitSeq = new Map());
+    return _unitSeq;
+}
+function resetUnitHandles() { unitHandleCounters().clear(); _unitSeq.clear(); }
 function nextUnitHandle(owner) {
-    const n = (_unitSeq.get(owner) || 0) + 1;
-    _unitSeq.set(owner, n);
+    const seq = unitHandleCounters();
+    const n = (seq.get(owner) || 0) + 1;
+    seq.set(owner, n);
     return n;
+}
+
+// Ids are seeded (review #6 step 5): a prefix and eleven base-36 characters from the
+// match's keyed draws, keyed by the owner's seat, so the same match makes the same ids.
+// They were 'unit_<ms>_<random>': unrepeatable, 28 characters on every turn's state, and
+// the milliseconds told any model reading an enemy's id when that unit was trained. A
+// counter would be repeatable too, but would tell it how many units that seat has made.
+// Checked against the living entities, and drawn again on the (1e-8) chance of a clash.
+function mintEntityId(prefix, ownerObj, purpose) {
+    if (typeof game === 'undefined' || !game || !game.rand) {
+        return prefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9); // rng-exempt: no game at all (fixtures, tools)
+    }
+    const r = game.renderer;
+    const taken = id => !!(r && ((r.units || []).some(e => e.id === id) || (r.buildings || []).some(e => e.id === id)));
+    let id;
+    do { id = WarRng.id(prefix, () => game.rand(ownerObj, purpose)); } while (taken(id));
+    return id;
 }
 
 function createUnit(type, x, z, owner, civilization, age) {
@@ -189,7 +217,7 @@ function createUnit(type, x, z, owner, civilization, age) {
         : null;
 
     const unit = {
-        id: 'unit_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        id: mintEntityId('unit_', ownerObj, 'unit-id'),
         handle: nextUnitHandle(owner),   // short, published, per-owner, never reused
         type: type,
         name: unitDef.name,
@@ -259,7 +287,7 @@ function buildingMaxHealth(buildingDef, civ, age) {
     const healthMultiplier = (civ && civ.bonus && civ.bonus.name === 'Pyramide') ? 1.5 :
                              (civ && civ.bonus && civ.bonus.name === 'Akropolis') ? 1.3 : 1.0;
     const idx = Math.max(0, BUILDING_AGE_ORDER.indexOf(age));
-    return Math.max(50, Math.round(buildingDef.health * Math.pow(1.5, idx) * healthMultiplier / 50) * 50);
+    return Math.max(50, Math.round(buildingDef.health * WarMath.powInt(1.5, idx) * healthMultiplier / 50) * 50);
 }
 
 // Morph an existing building to a newer epoch: bump its age, rescale max HP
@@ -306,7 +334,7 @@ function createBuilding(type, x, z, owner, civilization, options) {
     const buildTime = buildingDef.buildTime || 10000;
 
     return {
-        id: 'building_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        id: mintEntityId('building_', ownerObj, 'building-id'),
         type: type,
         name: buildingDef.name,
         age: age, // epoch this building was constructed in (drives its look + HP)
@@ -315,7 +343,7 @@ function createBuilding(type, x, z, owner, civilization, options) {
         // Face the map center (doors sit on a mesh's +Z side), snapped to 90°
         // steps so walls stay parallel to the map edges. Purely visual —
         // collision gaps and vision are all radial.
-        rotationY: Math.round(Math.atan2(-x, -z) / (Math.PI / 2)) * (Math.PI / 2),
+        rotationY: Math.round(WarMath.atan2(-x, -z) / (Math.PI / 2)) * (Math.PI / 2),
         // Construction sites start partially built and ramp up as workers build them
         underConstruction: underConstruction,
         buildProgress: 0,

@@ -1,0 +1,634 @@
+[
+ {
+  "hash": "6a36b43a3b99e72a",
+  "summary": {
+   "t": 5,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 8,
+      "priest": 4,
+      "worker": 10
+     },
+     "hp": 2240,
+     "buildings": 4,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 8,
+      "priest": 4
+     },
+     "hp": 4840,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "7feaf7328c5425c3",
+  "summary": {
+   "t": 10,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 8,
+      "priest": 4,
+      "worker": 10
+     },
+     "hp": 2240,
+     "buildings": 4,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 8,
+      "priest": 4
+     },
+     "hp": 4740,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "ba43ab7d6e25d784",
+  "summary": {
+   "t": 15,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 8,
+      "priest": 4,
+      "worker": 10
+     },
+     "hp": 2240,
+     "buildings": 4,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 8,
+      "priest": 4
+     },
+     "hp": 4340,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "f51705304c3b6953",
+  "summary": {
+   "t": 20,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 8,
+      "priest": 4,
+      "worker": 10
+     },
+     "hp": 2223,
+     "buildings": 3,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 8,
+      "priest": 4
+     },
+     "hp": 4060,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "6d6c3a44b3be9baa",
+  "summary": {
+   "t": 25,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 1,
+      "priest": 2,
+      "worker": 10
+     },
+     "hp": 705,
+     "buildings": 3,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 7,
+      "priest": 4
+     },
+     "hp": 3792,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "1dc4dc45b9611de8",
+  "summary": {
+   "t": 30,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "worker": 10
+     },
+     "hp": 400,
+     "buildings": 3,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 7,
+      "priest": 4
+     },
+     "hp": 3737,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "a110cd2e11b7147a",
+  "summary": {
+   "t": 35,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "worker": 10
+     },
+     "hp": 400,
+     "buildings": 3,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 7,
+      "priest": 4
+     },
+     "hp": 3523,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "c0b9ca449a877eed",
+  "summary": {
+   "t": 40,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "worker": 10
+     },
+     "hp": 400,
+     "buildings": 2,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3421,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "ef705782406911c5",
+  "summary": {
+   "t": 45,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "worker": 10
+     },
+     "hp": 400,
+     "buildings": 1,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3516,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "74e65707aea4c7ce",
+  "summary": {
+   "t": 50,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "worker": 7
+     },
+     "hp": 280,
+     "buildings": 1,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3584,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "0220333af2e07f89",
+  "summary": {
+   "t": 55,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {},
+     "hp": 0,
+     "buildings": 1,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3625,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "6e5fed5d99908f16",
+  "summary": {
+   "t": 60,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {},
+     "hp": 0,
+     "buildings": 1,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3697,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "2e45a02916bea59c",
+  "summary": {
+   "t": 65,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {},
+     "hp": 0,
+     "buildings": 1,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3793,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ },
+ {
+  "hash": "d117bde1c7af2957",
+  "summary": {
+   "t": 70,
+   "seats": [
+    {
+     "civ": "egyptian",
+     "age": "iron",
+     "out": true,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {},
+     "hp": 0,
+     "buildings": 0,
+     "research": 0
+    },
+    {
+     "civ": "yamato",
+     "age": "iron",
+     "out": false,
+     "res": [
+      200,
+      200,
+      100,
+      50
+     ],
+     "units": {
+      "champion": 12,
+      "crossbowman": 10,
+      "heavy_cavalry": 6,
+      "priest": 4
+     },
+     "hp": 3803,
+     "buildings": 1,
+     "research": 0
+    }
+   ]
+  }
+ }
+]

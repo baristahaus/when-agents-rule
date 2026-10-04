@@ -6,16 +6,9 @@
 (function () {
     const TexGen = {};
 
-    // Deterministic RNG (mulberry32) so a map seed reproduces its textures.
-    TexGen.rng = (seed) => {
-        let s = (seed >>> 0) || 1;
-        return () => {
-            s |= 0; s = (s + 0x6D2B79F5) | 0;
-            let t = Math.imul(s ^ (s >>> 15), 1 | s);
-            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
-    };
+    // Deterministic RNG so a map seed reproduces its textures: the game's one
+    // generator (js/simulation/rng.js), with the zero-seed fallback this copy had.
+    TexGen.rng = (seed) => WarRng.stream(seed, 1);
 
     const canvas = (size) => {
         const c = document.createElement('canvas');
@@ -433,8 +426,30 @@
                     const v = 105 + rand() * 75;
                     ctx.fillStyle = `rgba(${(v * 0.5) | 0},${v | 0},${(v * 0.38) | 0},0.8)`;
                     const a = rand() * Math.PI * 2, rr = rand() * r;
-                    ctx.fillRect(x + Math.cos(a) * rr, y + Math.sin(a) * rr, 1.5, 2.5 + rand() * 2);
+                    ctx.fillRect(x + Math.cos(a) * rr, y + Math.sin(a) * rr, 1.5, 2.5 + rand() * 2); // math-exempt: paints a texture
                 }
+            }
+            return c;
+        }
+        // 'furrows' (b1006): tilled soil for a field whose crop stands on it as plants
+        // (EngineMesh.crops) rather than painted into it. Soft, broken furrows and clods:
+        // the hard stripes of 'rows' read as wooden boards once nothing covered them.
+        if (stage === 'furrows') {
+            const rows = 9, rh = size / rows;
+            for (let r = 0; r < rows; r++) {
+                const y = r * rh + rh / 2;
+                for (let x = 0; x < size; x += 2) {
+                    const j = (rand() - 0.5) * 1.6;
+                    ctx.fillStyle = `rgba(62,42,24,${0.22 + rand() * 0.14})`;
+                    ctx.fillRect(x, y - 1.4 + j, 2, 2.8);
+                    ctx.fillStyle = `rgba(168,134,92,${0.08 + rand() * 0.08})`;
+                    ctx.fillRect(x, y - 3.4 + j, 2, 1.2);
+                }
+            }
+            for (let i = 0; i < 40; i++) {
+                const x = rand() * size, y = rand() * size, rr = 1.5 + rand() * 3;
+                ctx.fillStyle = `rgba(${rand() < 0.5 ? '70,50,30' : '150,120,84'},${0.18 + rand() * 0.2})`;
+                ctx.beginPath(); ctx.ellipse(x, y, rr, rr * 0.6, rand() * 3.14, 0, Math.PI * 2); ctx.fill();
             }
             return c;
         }
@@ -452,6 +467,28 @@
                 const v = 110 + rand() * 70;
                 ctx.fillStyle = `rgba(${(v * 0.5) | 0},${v | 0},${(v * 0.38) | 0},0.8)`;
                 ctx.fillRect(x, y - 3 - rand() * 2.4, 1.4, 3 + rand() * 2.4);
+            }
+        }
+        return c;
+    };
+
+    // A crop's colour, base (v=0) to tip (v=1) (b1006): rice fresh green from a darker
+    // stem, wheat straw-yellow to a golden ear. Narrow streaks along U keep it from
+    // reading as one flat colour.
+    TexGen.crop = (kind = 'wheat', seed = 21) => {
+        const rand = TexGen.rng(seed), w = 16, h = 64;
+        const c = canvas(w), ctx = c.getContext('2d');
+        c.height = h;
+        const [base, mid, tip] = kind === 'rice'
+            ? [[38, 84, 30], [78, 150, 52], [140, 196, 86]]
+            : [[118, 104, 52], [196, 168, 84], [232, 196, 104]];
+        for (let y = 0; y < h; y++) {
+            const v = 1 - y / (h - 1), k = v < 0.6 ? v / 0.6 : (v - 0.6) / 0.4;
+            const a = v < 0.6 ? base : mid, b = v < 0.6 ? mid : tip;
+            for (let x = 0; x < w; x++) {
+                const n = 0.9 + rand() * 0.2;
+                ctx.fillStyle = `rgb(${(a[0] + (b[0] - a[0]) * k) * n | 0},${(a[1] + (b[1] - a[1]) * k) * n | 0},${(a[2] + (b[2] - a[2]) * k) * n | 0})`;
+                ctx.fillRect(x, y, 1, 1);
             }
         }
         return c;
@@ -737,7 +774,7 @@
         const img=ctx.createImageData(size,size), d=img.data;
         for(let y=0;y<size;y++) for(let x=0;x<size;x++) {
             const u=x/size,v=y/size, grain=(fine(u,v)-.5)*32;
-            const drift=Math.sin((u*12+v*4+(broad(u,v)-.5)*.5)*Math.PI*2);
+            const drift=Math.sin((u*12+v*4+(broad(u,v)-.5)*.5)*Math.PI*2); // math-exempt: paints a texture
             const i=(y*size+x)*4;
             d[i]=clamp255(128+(broad(u,v)-.5)*26+grain*.6
                 +(theme==='summer'?0:drift*(theme==='winter'?5:9)));
@@ -764,7 +801,7 @@
         for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
             const gx=x/size*cells,gz=y/size*cells,ix=Math.floor(gx),iz=Math.floor(gz);
             const [cx,cz,r]=seeds[iz*cells+ix];
-            const distance=Math.hypot(gx-ix-cx,(gz-iz-cz)*1.2);
+            const distance=Math.hypot(gx-ix-cx,(gz-iz-cz)*1.2); // math-exempt: paints a texture
             pixels[(y*size+x)*4+2]=clamp255((r-distance)*cells*80);
         }
         ctx.putImageData(gravel,0,0);
@@ -858,7 +895,7 @@
                 const lush=smooth(.28,.74,p*.6+macro*.4);
                 let variation=(m-.5)*5+(f-.5)*3;
                 if(theme==='desert' || theme==='winter') {
-                    const wind=Math.sin((u*27+v*11+(macro-.5)*3+p*.4)*Math.PI*2);
+                    const wind=Math.sin((u*27+v*11+(macro-.5)*3+p*.4)*Math.PI*2); // math-exempt: paints a texture
                     variation+=wind*(theme==='desert'?3.5:2);
                 }
                 const beach=smooth(-34,-13,h+(p-.5)*6);

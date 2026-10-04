@@ -7,6 +7,17 @@ class StandingOrders {
     static get ROUTE_CHASE_RADIUS() { return 48; }
     static get BOUNDARY_GRACE_MS() { return 900; }
     static get STALL_MS() { return 5000; }
+    // A shot gives its shooter away. A tower reaches 18 and a soldier sees 15, so towers
+    // (and anything else firing from the edge of sight) hit armies that could not see
+    // them: the hit was ignored and the siege went on under the arrows, and a unit that
+    // did turn on its shooter dropped it again as out of sight and walked back to its
+    // slot, to be hit and turn again (29 Sep 2026, a live Platform match: 9 of 47
+    // retaliations refused as "not visible", towers at 15-20). What hits a member is
+    // seen by its group for this long after each hit -- a tower firing every 1.5 s stays
+    // seen while it fires. A tower cannot move, so where it stands stays known until it
+    // falls: a group sent at it no longer turns back halfway when it stops firing.
+    // Nothing else is seen through the fog.
+    static get REVEAL_MS() { return 3000; }
     constructor(game, manager) { this.game=game;this.manager=manager;this.groups=new Set();this.time=0;this.scan=0; }
     members(g) {
         const owned=new Set(g.owner.units);
@@ -24,7 +35,8 @@ class StandingOrders {
     retaliate(victim,attacker) {
         const g=victim?._standingOrder;
         if(!g||!this.groups.has(g)||victim._orderToken!==g.token
-            ||!attacker||attacker.health<=0||!this.visible(g,attacker))return;
+            ||!attacker||attacker.health<=0)return;
+        (g.revealed||(g.revealed=new Map())).set(attacker,attacker.type==='tower'?Infinity:this.time+StandingOrders.REVEAL_MS);
         // Incoming damage overrides movement intent, even scouting. Towers take
         // priority over mobile attackers; equal-priority threats queue so each
         // incoming hit does not pull the army onto a different target.
@@ -40,7 +52,12 @@ class StandingOrders {
             // catch the attacker. Keep failed-chase protection until the normal
             // retry scan sees a closer/in-range opportunity. Towers still win.
             if(focus.type!=='tower'&&g.blocked.get(u)?.has(focus)
-                &&!(focus===attacker&&Math.hypot(u.x-focus.x,u.z-focus.z)<=this.game.attackRangeAgainst(u,focus)))continue;
+                &&!(focus===attacker&&WarMath.hypot(u.x-focus.x,u.z-focus.z)<=this.game.attackRangeAgainst(u,focus)))continue;
+            // A member far from the attacker is not pulled across the map to it -- not to
+            // a tower either: a group can be spread wide (fresh troops sent to join a
+            // fight), and one drawn 60 units toward a tower that had shot someone else
+            // lost sight of it on the way and walked back.
+            if(WarMath.hypot(u.x-focus.x,u.z-focus.z)>StandingOrders.CHASE_RADIUS)continue;
             if(!g.fighting){g.anchor=this.center(units);g.fighting=true;}
             if(u.attackTarget!==focus)g.chases.delete(u);
             g.blocked.get(u)?.delete(focus);
@@ -84,14 +101,14 @@ class StandingOrders {
         });
         const legal=p=>{
             const clamped=this.game.clampSlot(p.x,p.z);
-            return Math.hypot(p.x-clamped.x,p.z-clamped.z)<.01;
+            return WarMath.hypot(p.x-clamped.x,p.z-clamped.z)<.01;
         };
         // Prefer translating the entire shape onto nearby open ground over
         // flattening several ranks onto the same building or shoreline boundary.
         for(let ring=0;ring<=16;ring++){
             const count=ring?16:1;
             for(let k=0;k<count;k++){
-                const angle=k*Math.PI*2/count,dx=Math.cos(angle)*ring*3,dz=Math.sin(angle)*ring*3;
+                const angle=k*Math.PI*2/count,dx=WarMath.cos(angle)*ring*3,dz=WarMath.sin(angle)*ring*3;
                 const slots=desired.map(p=>({x:p.x+dx,z:p.z+dz}));
                 if(slots.every(legal))return new Map(units.map((u,i)=>[u,slots[i]]));
             }
@@ -103,8 +120,8 @@ class StandingOrders {
             let chosen=null;
             for(let i=0;i<1024;i++){
                 const radius=2*Math.sqrt(i),angle=i*2.399963229728653;
-                const q={x:p.x+Math.cos(angle)*radius,z:p.z+Math.sin(angle)*radius};
-                if(legal(q)&&placed.every(s=>Math.hypot(q.x-s.x,q.z-s.z)>=1.8)){chosen=q;break;}
+                const q={x:p.x+WarMath.cos(angle)*radius,z:p.z+WarMath.sin(angle)*radius};
+                if(legal(q)&&placed.every(s=>WarMath.hypot(q.x-s.x,q.z-s.z)>=1.8)){chosen=q;break;}
             }
             placed.push(chosen||this.game.clampSlot(p.x,p.z));
         }
@@ -130,7 +147,7 @@ class StandingOrders {
             }
             u.targetX=slot.x;u.targetZ=slot.z;
             u._moveOrderTo=slot;u.attackMove=null;u.attackTarget=null;u.isAttacking=false;
-            u.isMoving=Math.hypot(u.x-slot.x,u.z-slot.z)>1;
+            u.isMoving=WarMath.hypot(u.x-slot.x,u.z-slot.z)>1;
             u.formationOffset=null; // use formationAim on the generic mover, not target pursuit
             this.game.clearRetaliation(u);
         }
@@ -140,7 +157,7 @@ class StandingOrders {
         if(target){
             if(!g.blocked.has(u))g.blocked.set(u,new Map());
             g.blocked.get(u).set(target,{until:this.time+5000,
-                distance:Math.hypot(u.x-target.x,u.z-target.z)});
+                distance:WarMath.hypot(u.x-target.x,u.z-target.z)});
         }
         u.attackTarget=null;u.isAttacking=false;this.game.clearRetaliation(u);g.chases.delete(u);
     }
@@ -151,26 +168,31 @@ class StandingOrders {
         const fighters=units.filter(p=>p.attackTarget&&p.unitType!=='support');
         const army=this.center(fighters.length?fighters:units);
         const valid=p=>p&&p!==u&&g.owner.units.includes(p)&&p.owner===u.owner&&p.health>0
-            &&p.health<p.maxHealth&&(Math.hypot(p.x-u.x,p.z-u.z)<24
-                ||(units.includes(p)&&Math.hypot(p.x-army.x,p.z-army.z)<=StandingOrders.CHASE_RADIUS));
+            &&p.health<p.maxHealth&&(WarMath.hypot(p.x-u.x,p.z-u.z)<24
+                ||(units.includes(p)&&WarMath.hypot(p.x-army.x,p.z-army.z)<=StandingOrders.CHASE_RADIUS));
         let patient=u._formationPatient;
         if(!valid(patient)){
-            patient=g.owner.units.filter(valid).sort((a,b)=>Math.hypot(a.x-u.x,a.z-u.z)-Math.hypot(b.x-u.x,b.z-u.z))[0];
+            patient=g.owner.units.filter(valid).sort((a,b)=>WarMath.hypot(a.x-u.x,a.z-u.z)-WarMath.hypot(b.x-u.x,b.z-u.z))[0];
             u._formationPatient=patient||null;u._patientStand=null;
         }
         if(!patient)return fallback;
         // Already close enough: stand still and channel, do not march into the
         // patient's collision radius. Replan only when the patient moves away.
         const healRange=this.game.healingRange();
-        if(Math.hypot(patient.x-u.x,patient.z-u.z)<=healRange-.2)return {x:u.x,z:u.z};
+        if(WarMath.hypot(patient.x-u.x,patient.z-u.z)<=healRange-.2)return {x:u.x,z:u.z};
+        // The stand is kept while it still REACHES the patient. Kept only while the patient
+        // had moved less than 1, a soldier shuffling in a fight (0.7 outward) left the
+        // priest on a stand 10.5 away -- a hair outside its reach -- healing no one while
+        // it looked to be in range (1 Oct 2026).
         const old=u._patientStand;
-        if(old&&Math.hypot(old.px-patient.x,old.pz-patient.z)<1)return old;
-        const angle=Math.atan2(u.z-patient.z,u.x-patient.x);
+        if(old&&WarMath.hypot(old.px-patient.x,old.pz-patient.z)<1
+            &&(!StandingOrders.STAND_MUST_REACH||WarMath.hypot(old.x-patient.x,old.z-patient.z)<=healRange-.2))return old;
+        const angle=WarMath.atan2(u.z-patient.z,u.x-patient.x);
         for(let i=0;i<16;i++){
             const a=angle+i*Math.PI/8;
-            const x=patient.x+Math.cos(a)*(healRange-.7),z=patient.z+Math.sin(a)*(healRange-.7);
+            const x=patient.x+WarMath.cos(a)*(healRange-.7),z=patient.z+WarMath.sin(a)*(healRange-.7);
             const p=this.game.clampSlot(x,z);
-            if(Math.hypot(p.x-x,p.z-z)>.01)continue;
+            if(WarMath.hypot(p.x-x,p.z-z)>.01)continue;
             u._patientStand={x,z,px:patient.x,pz:patient.z};return u._patientStand;
         }
         return fallback;
@@ -182,15 +204,27 @@ class StandingOrders {
         for(const g of this.groups)this.prune(g);
         if(this.scan<150)return;this.scan=0;
         const enemies=this.game.getAllUnits();
+        // One visibility grid per owner for this scan (buildVisionTest, ai.js): the same
+        // answers as visible(), shared by every group that owner has. A scan moves no
+        // unit, so the grid cannot go stale while it is used.
+        const sight=new Map();
+        const see=(g,e)=>{
+            if(!e||e.owner===g.owner.id)return false;
+            if(g.owner.id==='player'||typeof buildVisionTest!=='function'||!this.game.aiManager)return this.visible(g,e);
+            let t=sight.get(g.owner);if(!t)sight.set(g.owner,t=buildVisionTest(this.game,g.owner));
+            return t(e.x,e.z);
+        };
         for(const g of this.groups){
             const units=g.units,center=this.center(units);
-            if(g.threats)g.threats=g.threats.filter(e=>e.health>0&&this.visible(g,e));
+            if(g.revealed)for(const [e,until]of g.revealed)if(until<=this.time||e.health<=0)g.revealed.delete(e);
+            const seen=e=>!!g.revealed?.has(e)||see(g,e);
+            if(g.threats)g.threats=g.threats.filter(e=>e.health>0&&seen(e));
             const focus=g.threats?.[0];
             // Visibility depends on the owner, not the attacker. Share its scan
             // across the formation instead of repeating it for every soldier.
             const visibility=new Map();
-            const visible=e=>{if(!visibility.has(e))visibility.set(e,this.visible(g,e));return visibility.get(e);};
-            if(g.target&&this.visible(g,g.target)&&g.target.health<=0){
+            const visible=e=>{if(!visibility.has(e))visibility.set(e,seen(e));return visibility.get(e);};
+            if(g.target&&see(g,g.target)&&g.target.health<=0){
                 // A moving objective may die between scans. Guard its final
                 // observed location rather than returning to the click location.
                 if(g.mode==='guard'){
@@ -207,38 +241,44 @@ class StandingOrders {
                 // Time alone must not restart the same hopeless chase. Re-arm
                 // when the enemy is meaningfully closer (or back in striking range).
                 for(const [e,retry]of targets){
-                    const distance=Math.hypot(u.x-e.x,u.z-e.z);
+                    const distance=WarMath.hypot(u.x-e.x,u.z-e.z);
                     if(e.health<=0||(retry.until<=this.time&&visible(e)&&
                         (distance<=this.game.attackRangeAgainst(u,e)+1||distance<=retry.distance-6)))targets.delete(e);
                 }
                 if(!targets.size)g.blocked.delete(u);
             }
-            if(g.target&&this.visible(g,g.target)&&g.target.health>0){
+            if(g.target&&see(g,g.target)&&g.target.health>0){
                 const to={x:g.target.x,z:g.target.z};
-                if(!g.fighting&&Math.hypot(to.x-g.leg.x,to.z-g.leg.z)>6)this.reform(g,to);
+                if(!g.fighting&&WarMath.hypot(to.x-g.leg.x,to.z-g.leg.z)>6)this.reform(g,to);
                 g.to=to;
             }
-            if(g.mode==='guard'&&Math.hypot(center.x-g.to.x,center.z-g.to.z)<12)g.atPost=true;
+            if(g.mode==='guard'&&WarMath.hypot(center.x-g.to.x,center.z-g.to.z)<12)g.atPost=true;
             const anchor=g.fighting?g.anchor:center;
             const routeDistance=e=>{
-                if(g.mode==='guard'&&g.atPost)return Math.hypot(e.x-g.to.x,e.z-g.to.z);
+                if(g.mode==='guard'&&g.atPost)return WarMath.hypot(e.x-g.to.x,e.z-g.to.z);
                 if(g.mode!=='patrol')return 0;
                 const dx=g.to.x-g.from.x,dz=g.to.z-g.from.z;
                 const t=Math.max(0,Math.min(1,((e.x-g.from.x)*dx+(e.z-g.from.z)*dz)/(dx*dx+dz*dz||1)));
-                return Math.hypot(e.x-g.from.x-t*dx,e.z-g.from.z-t*dz);
+                return WarMath.hypot(e.x-g.from.x-t*dx,e.z-g.from.z-t*dz);
             };
             const valid=e=>e&&e.health>0&&visible(e)&&
                 (e===focus||e===g.target||g.targets!=='military'||(e.type!=='worker'&&e.unitType!=='support'&&e.attack>0));
             const withinLeash=(e,retaining=false)=>{
                 const radius=retaining?StandingOrders.CHASE_RADIUS:StandingOrders.ACQUIRE_RADIUS;
                 const route=retaining?StandingOrders.ROUTE_CHASE_RADIUS:StandingOrders.ROUTE_ACQUIRE_RADIUS;
-                return routeDistance(e)<=route&&Math.hypot(e.x-anchor.x,e.z-anchor.z)<=radius
-                    &&Math.hypot(e.x-center.x,e.z-center.z)<=radius;
+                return routeDistance(e)<=route&&WarMath.hypot(e.x-anchor.x,e.z-anchor.z)<=radius
+                    &&WarMath.hypot(e.x-center.x,e.z-center.z)<=radius;
             };
+            // An order on a Wonder outranks everything but retaliation: the army marched
+            // for the monument and ground its way there through every villager and
+            // house within the leash, arriving late or not at all. Only the Wonder and
+            // whatever attacks the group (focus) are fair game until it falls.
+            const wonderRun=!!(g.target&&g.target.isWonder&&g.target.health>0);
             const eligible=(u,e)=>{
                 if(!valid(e))return false;
                 if(e===focus)return e.type==='tower'||!g.blocked.get(u)?.has(e);
                 if(e===g.target)return true;
+                if(wonderRun)return false;
                 return !g.blocked.get(u)?.has(e)&&withinLeash(e);
             };
             const candidates=(g.attack?enemies.concat(this.game.getAllBuildings()):enemies).filter(e=>eligible(null,e));
@@ -249,18 +289,24 @@ class StandingOrders {
             // Keep the formation on distant approaches, but once a fighter can
             // engage, let all capable members join the same local battle.
             const engaging=g.fighting||units.some(u=>u.unitType!=='support'&&u.attack>0
-                &&candidates.some(e=>eligible(u,e)&&Math.hypot(e.x-u.x,e.z-u.z)<Math.max(36,(u.range||1)+24)));
+                &&candidates.some(e=>eligible(u,e)&&WarMath.hypot(e.x-u.x,e.z-u.z)<Math.max(36,(u.range||1)+24)));
             let fighting=false;
             for(const u of units){
                 if((g.mode==='scout'&&!focus)||u.unitType==='support'||!(u.attack>0)){
                     if(u.attackTarget)this.releaseTarget(g,u);continue;
                 }
                 let target=u.attackTarget;
-                if(focus&&valid(focus)&&eligible(u,focus))target=focus;
+                // A target held from before is kept on a Wonder run only if it is the
+                // Wonder or one of the group's live threats.
+                if(wonderRun&&target&&target!==g.target&&!g.threats?.includes(target)){
+                    u.attackTarget=null;u.isAttacking=false;this.game.clearRetaliation(u);g.chases.delete(u);target=null;
+                }
+                if(focus&&valid(focus)&&eligible(u,focus)&&(target===focus
+                    ||WarMath.hypot(u.x-focus.x,u.z-focus.z)<=StandingOrders.CHASE_RADIUS))target=focus;
                 if(target){
-                    const distance=Math.hypot(u.x-target.x,u.z-target.z);
+                    const distance=WarMath.hypot(u.x-target.x,u.z-target.z);
                     let chase=g.chases.get(u);
-                    if(!chase||chase.target!==target){chase={target,sample:distance,sampledAt:this.time,at:this.time};g.chases.set(u,chase);}
+                    if(!chase||chase.target!==target){chase={target,sample:distance,sampledAt:this.time,at:this.time,from:{x:u.x,z:u.z}};g.chases.set(u,chase);}
                     const inRange=distance<=this.game.attackRangeAgainst(u,target)+.5;
                     // Measure recent progress, not the best distance ever reached:
                     // a short detour must not poison the rest of a productive chase.
@@ -269,20 +315,34 @@ class StandingOrders {
                         if(distance<chase.sample-.25)chase.at=this.time;
                         chase.sample=distance;chase.sampledAt=this.time;
                     }
-                    if(withinLeash(target,true))chase.outsideAt=null;
+                    // Answering an attacker, a soldier is leashed to where IT took up the
+                    // fight, not to the group's middle. The middle of a group spread across
+                    // the map (fresh troops sent to join) lay far from the fighting, so a
+                    // soldier 20 from the archer shooting it was told the archer had
+                    // escaped, walked back toward the group, was shot, turned, and was told
+                    // again -- 17 times in 150 s of a live Platform match (29 Sep 2026).
+                    // Still leashed: a retreating attacker cannot lure it across the map.
+                    const own=target===focus,fromDist=WarMath.hypot(target.x-chase.from.x,target.z-chase.from.z);
+                    if(own?fromDist<=StandingOrders.CHASE_RADIUS:withinLeash(target,true))chase.outsideAt=null;
                     else if(chase.outsideAt==null)chase.outsideAt=this.time;
                     const escaped=chase.outsideAt!=null&&this.time-chase.outsideAt>=StandingOrders.BOUNDARY_GRACE_MS;
-                    const tooFar=Math.hypot(target.x-anchor.x,target.z-anchor.z)>StandingOrders.CHASE_RADIUS*1.5;
+                    const tooFar=(own?fromDist:WarMath.hypot(target.x-anchor.x,target.z-anchor.z))>StandingOrders.CHASE_RADIUS*1.5;
                     const stalled=!inRange&&this.time-chase.at>=StandingOrders.STALL_MS;
                     const bounded=target===focus?target.type!=='tower':target!==g.target;
                     const defendingInRange=target===focus&&distance<=this.game.attackRangeAgainst(u,target);
                     if(!valid(target)||(bounded&&!defendingInRange&&(escaped||tooFar||stalled))){this.releaseTarget(g,u,target);target=null;}
                 }
                 if(!target){
+                    // Joining the group's fight reaches as far as a chase may run, not across
+                    // the map -- except for the order's own target, which every member is
+                    // marching to anyway. In a group spread wide, a member 300 away picked
+                    // the attacker, was at once too far from it to keep it, dropped it, and
+                    // picked it again. Beyond the reach it marches on and joins on arrival.
                     let best=engaging?Infinity:Math.max(36,(u.range||1)+24);
                     for(const e of candidates){
                         if(g.mode==='scout'&&e!==focus)continue;
-                        const d=Math.hypot(e.x-u.x,e.z-u.z);
+                        const d=WarMath.hypot(e.x-u.x,e.z-u.z);
+                        if(engaging&&e!==g.target&&d>StandingOrders.CHASE_RADIUS*1.5)continue;
                         if(d<best&&eligible(u,e)){best=d;target=e;}
                     }
                 }
@@ -315,25 +375,25 @@ class StandingOrders {
                     const ranged=fighters.filter(u=>u.range>1);
                     const escorts=ranged.length?ranged:fighters;
                     const body=this.center(escorts),enemy=this.center(escorts.map(u=>u.attackTarget));
-                    const dx=enemy.x-body.x,dz=enemy.z-body.z,d=Math.hypot(dx,dz)||1;
+                    const dx=enemy.x-body.x,dz=enemy.z-body.z,d=WarMath.hypot(dx,dz)||1;
                     const rear={x:body.x-dx/d*3,z:body.z-dz/d*3};
-                    if(!g.supportSlots||!g.supportAnchor||Math.hypot(rear.x-g.supportAnchor.x,rear.z-g.supportAnchor.z)>2){
+                    if(!g.supportSlots||!g.supportAnchor||WarMath.hypot(rear.x-g.supportAnchor.x,rear.z-g.supportAnchor.z)>2){
                         g.supportSlots=this.placeSlots(support,rear,null);g.supportAnchor=rear;
                     }
                 }
                 for(const u of units)if(!u.attackTarget){
                     const hold=u.unitType==='support'?this.supportPosition(g,u,units,g.supportSlots.get(u)):g.holdSlots.get(u);
                     u.formationOffset=null;u.formationAxis=null;u.formationGroup=null;u.marchSpeed=null;
-                    u.targetX=hold.x;u.targetZ=hold.z;u.isMoving=Math.hypot(u.x-hold.x,u.z-hold.z)>(u.unitType==='support'?.3:1);
+                    u.targetX=hold.x;u.targetZ=hold.z;u.isMoving=WarMath.hypot(u.x-hold.x,u.z-hold.z)>(u.unitType==='support'?.3:1);
                 }
             }else{
                 if(g.fighting){g.fighting=false;this.reform(g,g.to);}
                 // Arrival does not erase the order. Patrol waits for every survivor,
                 // including the slowest priest, before reversing the route.
-                const arrived=units.every(u=>{const s=g.slots.get(u);return s&&Math.hypot(u.x-s.x,u.z-s.z)<=1.6;});
+                const arrived=units.every(u=>{const s=g.slots.get(u);return s&&WarMath.hypot(u.x-s.x,u.z-s.z)<=1.6;});
                 if(arrived&&g.mode!=='patrol')g.settled=true;
-                if(arrived&&g.target&&!this.visible(g,g.target))g.target=null;
-                if(arrived&&g.mode==='patrol'&&Math.hypot(g.to.x-g.from.x,g.to.z-g.from.z)>2){
+                if(arrived&&g.target&&!see(g,g.target))g.target=null;
+                if(arrived&&g.mode==='patrol'&&WarMath.hypot(g.to.x-g.from.x,g.to.z-g.from.z)>2){
                     [g.to,g.from]=[g.from,g.to];this.reform(g,g.to);
                 }else for(const u of units){
                     const slot=g.slots.get(u);if(!slot)continue;
@@ -353,16 +413,16 @@ class StandingOrders {
                                 // a returning priest catch up without overtaking.
                                 Object.assign(u,u._healingFormation);u._healingFormation=null;
                                 u.targetX=slot.x;u.targetZ=slot.z;
-                                u.isMoving=Math.hypot(u.x-slot.x,u.z-slot.z)>.5;
+                                u.isMoving=WarMath.hypot(u.x-slot.x,u.z-slot.z)>.5;
                                 continue;
                             }
                             u.formationOffset=null;u.formationAxis=null;u.formationGroup=null;u.marchSpeed=null;
                             u.targetX=hold.x;u.targetZ=hold.z;
-                            u.isMoving=Math.hypot(u.x-hold.x,u.z-hold.z)>.3;
+                            u.isMoving=WarMath.hypot(u.x-hold.x,u.z-hold.z)>.3;
                             continue;
                         }
                     }
-                    if(!u.isMoving&&Math.hypot(u.x-slot.x,u.z-slot.z)>1.6){u.targetX=slot.x;u.targetZ=slot.z;u.isMoving=true;}
+                    if(!u.isMoving&&WarMath.hypot(u.x-slot.x,u.z-slot.z)>1.6){u.targetX=slot.x;u.targetZ=slot.z;u.isMoving=true;}
                 }
             }
         }
@@ -378,6 +438,10 @@ class StandingOrders {
         });
     }
 }
+// b1005's rule: a priest keeps its stand only while it reaches its patient. Switchable
+// only so the Platform's build-896 parity test can compare against the old keeping rule,
+// as it does with the old healing range; nothing in play turns it off.
+StandingOrders.STAND_MUST_REACH=true;
 Game.prototype.setStandingOrder=function(manager,owner,units,to,options){
     // start() rebuilds openAIAIManager on every match; an in-place restart
     // must not leave standing orders reporting through the stopped one.

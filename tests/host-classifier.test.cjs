@@ -16,10 +16,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const game = fs.readFileSync(path.join(__dirname, '..', 'js', 'game.js'), 'utf8');
+// The classifier moved out of js/game.js into js/boot.js with the rest of start-up (upstream's
+// boot split, review #6 step 8 — tests/boot-manifest.test.cjs now asserts game.js carries no
+// WAR_PRIVATE_HOST at all). Read it where it lives: splitting game.js on this marker now
+// yields undefined and the "tail" becomes one unparseable line.
+const boot = fs.readFileSync(path.join(__dirname, '..', 'js', 'boot.js'), 'utf8');
+if (!boot.includes('\nconst WAR_PRIVATE_HOST'))
+  throw new Error('js/boot.js no longer holds WAR_PRIVATE_HOST — find the classifier before testing it');
 // The tail is the classifier and the boot handlers after it; none of it runs at load beyond
 // registering a load listener, which a stubbed window swallows.
-const tail = 'const WAR_PRIVATE_HOST' + game.split('\nconst WAR_PRIVATE_HOST')[1];
+const tail = 'const WAR_PRIVATE_HOST' + boot.split('\nconst WAR_PRIVATE_HOST')[1];
 
 const verdict = (hostname, protocol = 'http:', search = '') => {
   const scope = {
@@ -29,7 +35,7 @@ const verdict = (hostname, protocol = 'http:', search = '') => {
     Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,
   };
   vm.createContext(scope);
-  vm.runInContext(tail, scope, { filename: 'game.js#tail' });
+  vm.runInContext(tail, scope, { filename: 'boot.js#tail' });
   return {
     private: vm.runInContext('WAR_PRIVATE_HOST', scope),
     local: vm.runInContext('WAR_LOCAL', scope),
