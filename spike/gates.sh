@@ -48,6 +48,18 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 2b — the map's node counts, from js/terrain.js's difficulty table and scatter rules. Cheap,
+# and not a warm-up: the counts match the golden only if no node was dropped, so this catches a
+# wrong table or a dropped node long before a 942-line byte-diff can be localized.
+if "$ODIN" build spike/counts -out:spike/bin/counts >/tmp/odin-counts.log 2>&1 \
+  && ./spike/bin/counts | grep -q 'COUNTS GREEN'; then
+	say "gate 2b node counts 98/784/40/20 (= 942)" "ok"
+else
+	say "gate 2b node counts 98/784/40/20" "FAIL"
+	tail -6 /tmp/odin-counts.log
+	fails=$((fails + 1))
+fi
+
 # Gate 3 — §14.3: no fused multiply-add. Counted, not assumed, and the count of multiplies is
 # checked first, so an empty or stale object file cannot pass by containing no FMA.
 fma_cfg="-o:aggressive -microarch:x86-64-v4 -target-features:fma"
