@@ -20,14 +20,10 @@
 // ---------------------------------------------------------------------------
 const fs = require('node:fs');
 
-const src = process.argv[2];
-if (!src) {
-  console.error('usage: canonicalize-states.cjs <states.jsonl>   (prints to stdout)');
-  process.exit(2);
-}
-
+const src = process.argv[2] || '-';
+const text = src === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(src, 'utf8');
 // The fixture's own lines carry the seat index, so the table needs no header.
-const lines = fs.readFileSync(src, 'utf8').split('\n').filter(l => l.trim());
+const lines = text.split('\n').filter(l => l.trim());
 const table = new Map();
 for (const l of lines) {
   const rec = JSON.parse(l);
@@ -35,8 +31,27 @@ for (const l of lines) {
 }
 if (!table.size) throw new Error(`${src}: no line has both playerId and seat, so nothing can be re-keyed`);
 
+// Entity ids are minted the same way seat ids are — Math.random, session-unique — so a fixture
+// that carries `u_a91xk2` cannot be diffed either. They get canonical names in first-appearance
+// order, which is deterministic because the state is: the same run twice produces the same names,
+// and two runs that disagree in the mirror disagree in the rules, which is the whole point.
+const minted = new Map();
+function mint(id) {
+  if (minted.has(id)) return minted.get(id);
+  const kind = id.slice(0, id.indexOf('_'));
+  const n = [...minted.values()].filter(v => v.startsWith(kind.toUpperCase())).length;
+  const name = `${kind.toUpperCase()}${n}`;
+  minted.set(id, name);
+  return name;
+}
+const SESSION_ID = /^(ai|u|m|e|b|s)_[a-z0-9]{5,}$/;
+
 function rekey(v) {
-  if (typeof v === 'string') return table.has(v) ? table.get(v) : v;
+  if (typeof v === 'string') {
+    if (table.has(v)) return table.get(v);
+    if (SESSION_ID.test(v)) return mint(v);
+    return v;
+  }
   if (Array.isArray(v)) return v.map(rekey);
   if (v && typeof v === 'object') {
     const out = {};

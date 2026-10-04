@@ -11,7 +11,8 @@
   },
   "golden/turn1-b1040.jsonl": {
    "sha256": "4e015ba9f314609d3f889bed812cb3fd196b3aa23c629f9c2cc8bd62c16872fd",
-   "bytes": 21147
+   "bytes": 21147,
+   "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step — clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
   },
   "golden/map-line-b1040.json": {
    "sha256": "93d89b16927650a4526c277db02f9664c43f77a2cfc23ed878f862e11aed9311",
@@ -41,6 +42,11 @@
    "sha256": "17afa18f8c08bf43ed4df47c61e5393832f91109ba13790f390d4bcc4dbeddd4",
    "bytes": 47091,
    "note": "medium, 4 seats, different seed — the same 942 from a different stream"
+  },
+  "golden/states-b1040-t0-t1.canonical.jsonl": {
+   "sha256": "4dcc74ee2f9d7e648cca9ffc0b70fae42002b27295972aa499a16697aeefbfad",
+   "bytes": 45840,
+   "note": "per-seat state view at t=0 and t=1000 ms, English, ids canonical; regenerate with tools/golden/dump-states.cjs -at 0,1000 piped through canonicalize-states.cjs"
   }
  },
  "keyedVectors": {

@@ -86,6 +86,10 @@ test('the turn-1 fixture has a canonical form, and it is the one a port is diffe
   const again = cp.execFileSync('node', [path.join(root, 'tools/golden/canonicalize-states.cjs'), G('turn1-b1040.jsonl')]).toString();
   assert.equal(again, canonical.join('\n') + '\n',
     'the checked-in canonical form has drifted from the raw capture it is derived from');
+  // This file is a capture, not a regeneration: the reference today does not reproduce it (clock
+  // reads 1 while the unit positions are the opening ones, and the vision fields differ). It stays
+  // pinned and structurally checked, and it is NOT what a port is diffed against — see
+  // states-b1040-t0-t1.canonical.jsonl above. Any port that matched it would be suspicious.
   for (const l of canonical) {
     const r = JSON.parse(l);
     assert.equal(r.playerId, `seat${r.seat}`, 'a canonical line still carries a session id');
@@ -98,7 +102,36 @@ test('the turn-1 fixture has a canonical form, and it is the one a port is diffe
   }
 });
 
-test('the shipping rules still produce the keyed vectors a new core must match', () => {
+test('the state fixture regenerates byte-identically from the reference', () => {
+  // This is the fixture a core is diffed against for the turn-1 gate, so the property that
+  // matters is not its contents but its origin: dump the reference twice and the bytes must agree.
+  // If this ever goes red, a rule changed under the fixture — which is a decision to re-record,
+  // with a line in MERGE-STATE.MD, not a hash to update quietly.
+  const pinned = fs.readFileSync(G('states-b1040-t0-t1.canonical.jsonl'), 'utf8');
+  const dump = cp.execFileSync('node', [
+    path.join(root, 'tools/golden/dump-states.cjs'),
+    '-seed', 'golden', '-difficulty', 'medium',
+    '-civs', 'egyptian,greek,persian,yamato', '-at', '0,1000',
+  ], { maxBuffer: 64 * 1024 * 1024 }).toString();
+  const again = cp.execFileSync('node', [path.join(root, 'tools/golden/canonicalize-states.cjs')],
+    { input: dump }).toString();
+  assert.equal(again, pinned, 'the reference no longer reproduces the pinned state fixture');
+  const lines = pinned.split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  assert.equal(lines.length, 8, 'four seats at two moments');
+  for (const r of lines) {
+    assert.equal(r.playerId, `seat${r.seat}`);
+    assert.equal(r.state.player.civilizationName.length > 0, true);
+    // The language is part of the fixture, not a display detail: civilizationName is a translated
+    // string inside the state view, and a dumper that inherits the host locale produces German.
+    assert.equal(r.state.player.civilizationName,
+      { egyptian: 'Egyptians', greek: 'Greeks', persian: 'Persians', yamato: 'Yamato' }[r.state.player.civilization]);
+    assert.deepEqual({ ...r.state.resources }, { food: 200, wood: 200, stone: 100, gold: 50 });
+    assert.equal(r.state.friendlyUnits.length, 3);
+    assert.equal(r.state.clock.matchSeconds, r.t / 1000, 'the clock must read the moment dumped');
+  }
+});
+
+test('the legacy turn-1 capture is kept as recorded, not as an oracle', () => {
   const WarRng = require('../js/simulation/rng.js');
   const st = WarRng.keyed(manifest.seed);
   const key = 's0:start-workers';
