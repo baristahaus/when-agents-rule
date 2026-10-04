@@ -51,3 +51,24 @@ and the add stay separate, which is what the reference's two roundings require. 
 | `strings.builder_free(&sb)` | gone; `strings.to_string(sb)` takes the builder **by value**. Simplest is to avoid the builder — the spike builds its key text in a stack array, so there is no allocation to free |
 | `mem.dump_allocations(mem.track)` | not present — grepped the installed tree at `<install>/core/mem/*.odin` (the tarball has `core/` and `vendor/` at the top level, **not** `base/core/`, so a doc path like `base/core/mem` sends you grepping nothing and concluding a feature is missing). The leak tracker therefore needs finding before the first long-running match test; until then the arena-per-match discipline is unverified. |
 | `x := 1 << 32` as a constant | overflows an untyped constant and the error points at the cast nearby — write `4294967296.0` |
+
+## Two things still unverified, stated as unverified
+
+- **The leak tracker.** Grepping `<install>/core/mem/*.odin` finds `Arena` and nothing
+  tracker-shaped, so either it moved or it is spelled unusually. Until the real symbol is found
+  and used, do not repeat "Odin's harness tracks memory" — the one-arena-per-match shape currently
+  rests on `Arena` plus discipline, not on a check. (The tarball puts `core/` at the top level, not
+  under `base/`, which is why an early grep found nothing and suggested a missing feature.)
+- **The browser suite cannot be run on this machine.** `~/.cache/ms-playwright` does not exist, so
+  Playwright is absent here: the visual suites are CI-only, and the honest sentence about the UI
+  after a change is "CI has not looked at it", not "it is probably fine".
+
+## The map gate, when it is attempted
+
+`golden/map-line-b1040.json` is the next byte-diff after the vectors. There is no dedicated
+generator to transcribe — no `js/simulation/mapgen.js`, no `generateMap`/`buildMap` symbol, no
+terrain table in a constants module — so start from the *record* instead: find what writes
+`type: "map"` with `seeds`, `spawns` and `resources`, and read backward from there. Expect tables
+plus one placement loop, and expect the loop's `Math.max(1, Math.round(...))` edges to be where
+the first mismatch appears. That is where the retired Rust port first diverged, and it is why the
+map gate is a real gate rather than a formality.
