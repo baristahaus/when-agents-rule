@@ -138,9 +138,12 @@ ends 0/50/100/50 after exactly `house` and `farm`.
   script, `tools/gate-selftest.cjs`, `tests/golden-manifest.test.cjs`,
   `tools/check-fork-sync.cjs`. Nothing in this repository ever held them. The tools that
   exist are `js/manifest.js`, `tools/golden/{record,compare}.cjs`,
-  `tests/{boot-manifest,usage-redaction,contract,version-consistency}.test.cjs`,
-  `tests/lib/schema-check.cjs` and `rust/core/src/bin/golden-diff`. If a file-list audit
-  gate is wanted, it has to be written.
+  `tests/{boot-manifest,usage-redaction,contract}.test.cjs`, `tests/lib/schema-check.cjs`
+  and `rust/core/src/bin/golden-diff`. The same bad list also named
+  `tests/version-consistency.test.cjs` and `tools/version.cjs`, which are absent too;
+  `tests/shipped-files.test.cjs` is the file that really gates the build stamps. If a
+  file-list audit gate is wanted, it has to be written — and note that `npm test`'s glob
+  (`tests/*.test.cjs tests/sim/*.test.cjs`) is where that gap bites.
 - The 622 number needs one caveat noted honestly: `npm test` runs
   `tests/*.test.cjs tests/sim/*.test.cjs`. Files under `js/` that carry their own
   `*.test.cjs` siblings are **not** in that glob.
