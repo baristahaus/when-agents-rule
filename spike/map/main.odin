@@ -70,12 +70,34 @@ rand_next :: proc(r: ^Rand) -> f64 {
 
 Vec2 :: struct { x, z: f64 }
 
-// The golden's spawns, pending the port of game.js's own placement. A variable rather than a
-// constant because Odin refuses to index a constant with a variable index — which is a fair rule
-// when you are trying to keep a transcription from smuggling in a computed constant.
-spawns := [SEATS]Vec2{
-	Vec2{0.0, -306.0}, Vec2{306.0, 0.0}, Vec2{0.0, 306.0}, Vec2{-306.0, 0.0},
+// Spawn placement, ported from game.js:369-381 rather than copied from the golden — this used to
+// be the map gate's one recorded input, and it is the reason the stone and gold rotations land
+// where they do.
+//
+//   mapSize 800; halfSize = 400 - 40 = 360; radius = halfSize * 0.85 = 306
+//   angle(i) = (i / numPlayers) * 2π - π/2
+//
+// Two coordinate spaces meet here, and neither is a mistake I get to "fix": the terrain places its
+// nodes in a 200-unit world (the golden's ±59,995 mm, and `size: 200` in the record), while spawns
+// sit on a 306-unit circle in the game's 800-unit world. The record carries both, so a port that
+// unifies them produces a map that agrees with nothing.
+//
+// A variable rather than a constant because Odin refuses to index a constant with a variable index
+// — a fair rule, since the thing being indexed here is exactly the kind of value a transcription
+// must not smuggle in as a constant.
+spawn_positions :: proc(n: int) -> [SEATS]Vec2 {
+	map_size := 800.0
+	half := map_size / 2.0 - 40.0
+	radius := half * 0.85
+	out: [SEATS]Vec2
+	for i in 0 ..< n {
+		angle := cast(f64)(i) / cast(f64)(n) * math.PI * 2.0 - math.PI / 2.0
+		out[i] = Vec2{math.cos(angle) * radius, math.sin(angle) * radius}
+	}
+	return out
 }
+
+spawns: [SEATS]Vec2
 
 js_round :: proc(x: f64) -> int { return int(math.floor(x + 0.5)) }
 hypot    :: proc(x, z: f64) -> f64 { return math.sqrt(x * x + z * z) }
@@ -182,6 +204,11 @@ put_int :: proc(self: ^Buf, v: int) {
 mm :: proc(v: f64) -> int { return js_round(v * MM_PER_UNIT) }
 
 main :: proc() {
+	// Filled here, not at global scope: Odin forbids context-requiring calls (which trig is) in a
+	// global initialiser, and that is the right rule — it keeps a value this port must get right out
+	// of the constant pool and into the code path that is under test.
+	spawns = spawn_positions(SEATS)
+
 	r := stream_new(SEED_STR)
 	out: Nodes
 
