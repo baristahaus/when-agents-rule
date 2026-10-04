@@ -316,3 +316,115 @@ working, in JS, exactly as it does now; our Odin core is the canonical engine fo
 headless and desktop line, and the golden is the treaty between the two engines. Saying
 that in one paragraph in §2 is the honest version of the change, instead of leaving a matrix
 row that says "WASM".
+
+## 12. Before writing any Odin: best practice, tooling, and the reference data agents need
+
+Everything below was checked today against the compiler repository, the language's own
+docs source, or the community index — and anything I could not verify is marked as such,
+because the last two weeks have taught me that an unverified claim in a document is a
+future retraction.
+
+### 12.1 The toolchain is the linter, and the linter is the compiler
+
+There is no separate lint step to adopt, and that matters for a project where agents write
+most of the code: the style and danger checks ship with the compiler.
+
+| job | command | where I checked |
+|---|---|---|
+| build | `odin build` | compiler repo, docs |
+| test suite | **`odin test`** — a suite is an ordinary program; a test is an ordinary procedure; `core:testing` provides expectations, logging, and **a memory tracker** (leak detection in the test harness itself) | official `content/docs/testing.md` |
+| lint / vet | **`odin check`**, with `-vet-*` and `-strict-style` flag families | community index (`awesome-odin`, Tooling section) — *confirm exact flag names at spike time* |
+| language server | `ols` (1,196★, MIT), plus JetBrains, Emacs, Vim and a **Tree-sitter grammar** | community index |
+| profiler | `odin-tracy` (159★) / `spall-web` | community index |
+| the standard library | `core:` ships `testing`, `mem`, `sync`, `thread`, `net`, `nbio`, `container`, `simd`, `strconv`, `hash`, `crypto`, `reflect`, `fmt`, `log`, `prof`, `dynlib`, `os`, `path`, `io`, `text`, `unicode`, `debug` | compiler repo, `core/` |
+| the third-party stack | the `vendor/` list in §11 (`sdl3`, `raylib`, `glfw`, `miniaudio`, `nanovg`, `microui`, `box2d`, `box3d`, `ggpo`, `ENet`, `cgltf`, `stb`, `lua`, `curl`, `zlib`, `wgpu`, `vulkan`, …) | compiler repo, `vendor/` |
+
+For a sim that must run for half an hour without drifting, the two lines that decided the
+choice are `core:testing`'s **memory tracker** and `core:mem`/the context allocator: the
+proposal's "a match is a process, a record is a folder" (§8) becomes testable in the
+language's own harness rather than through an external tool.
+
+### 12.2 Idioms worth naming before an agent fights them
+
+From the FAQ's own answers, in the language's own words — the guiding principles are
+*"simplicity and readability"*, *"minimal: there ought to be one way to write something"*,
+*"code is about expressing algorithms — not the type system"*, and *"the entire language
+specification should be possible to be memorized by a mere mortal"*. That last one is the
+project's argument in the language's own mouth: a core whose every rule must be checkable
+by a reader, human or agent, wants a language that fits in a head.
+
+Concretely, the four that an agent coming from Rust or TypeScript will trip on, and which
+therefore belong in the skill file rather than in a review comment:
+
+1. **No implicit numeric conversions.** Good for us — the cost/roster/age tables (§13.8's
+   "one source of truth") cannot silently widen, and every promotion between integer and
+   fixed-point is written down. It will also produce the first hundred agent errors.
+2. **No exceptions, no `?` sugar of the Rust kind** — results and `or_return`/`defect`, with
+   the error path explicit. Our contract already prefers named failures (the spec's
+   "visible, not absorbed" rule), so this is alignment, not friction.
+3. **The context system is the allocator.** Every allocation flows through a context; a
+   long-running sim gets one arena per match and the memory tracker proves it drained. That
+   is a *better* fit for §8's "a match is a process" than Rust's per-container `Vec`, and it
+   is where the Odin choice earns real money rather than stylistic money.
+4. **`distinct` types, no method syntax, no operator overloading.** The tables become
+   `Cost`, `Age`, `Seat` that will not mix by accident, and everything is a plain procedure
+   taking a value — which is exactly the shape a byte-exact port wants, because the
+   operation order is written where it happens.
+
+And one that goes our way by accident: the FAQ's answer on float width is *"the default
+floating point type is `f64` so if in doubt, prefer `f64`"* — the reference is JavaScript,
+so every number in the golden is already an IEEE-754 double. We would not be translating
+precision, only order, which is the thing §14.3's `llvm-dis` check is there to protect.
+Still unverified, and still the spike's job: whether the compiler may contract `a*b+c` into
+an FMA. The FAQ does not say, nothing I found says, so it gets measured, not assumed.
+
+### 12.3 There is no agent skill for this language, and several that pretend to be
+
+This is the finding worth having before anyone goes looking. Searching the skills ecosystem
+for "Odin" returns confident false positives, and every one of them is a name collision:
+
+| what a search returns | what it actually is |
+|---|---|
+| `OutlineDriven/odin-claude-plugin` (46 agents, 25+ skills), `/odin-codex-plugin`, a Gemini CLI extension, a PR bragging about *"616 skills, one ledger, four surfaces"* | **O**utline-**D**riven **IN**velopment — a development methodology, unrelated to the language |
+| `4Players/odin-agent-skills`, in a Nix package set too | agent skills for the **ODIN voice-chat SDK** and game-server hosting |
+| `Odin-Core/skills`, `Odin-Agent-`, "Skills OS" | a different product named Odin |
+| `edlokedev/odin-skills` (57 skills) | another bundle from the same unrelated pile |
+
+Install any of them and an agent gets worse, not better: it will be told things about a
+voice SDK or a diagram methodology while porting a simulation core. There is
+`jakubtomsu/awesome-odin` (1,066★) as the human index, `ols` for the loop, and Tree-sitter
+for tooling — but **no reference data written for agents, in either direction** (neither
+"how to write Odin" nor "how an agent's defaults mislead it here").
+
+So the plan includes authoring it, because that is the cheapest thing in this whole
+decision and the one thing that makes the language-choice risk survivable:
+
+    skills/odin-core-port/
+      SKILL.md            when to use it, the definition of done, what "byte-exact" means here
+      reference/build.md  pinned compiler version; the exact build and test commands; the
+                          vet/strict-style flag set; the llvm-dis | grep fma check and its
+                          expected zero
+      reference/golden.md the fixtures and the vectors: the map line (942 nodes, 47,097
+                          bytes), the four turn-1 states, the keyed draws
+                          0.6629751205909997 / 0.6242878348566592, and how to regenerate
+      reference/idioms.md the four traps in §12.2, with the compiler error each produces,
+                          plus allocator-context rules for a long-running match
+      reference/vendor.md the §11 map: which vendored library answers which proposal
+                          requirement, and what stays banned (nothing from the web)
+      gates.sh            one command: build, test, vet, byte-diff the map, grep the IR
+
+The skill is not documentation-by-fashion. It is the mechanism that converts "the agents
+know less Odin than Rust" from a reason not to choose Odin into a one-time cost — and unlike
+a style guide nobody reads, `gates.sh` fails in CI whether anybody read the skill or not.
+
+### 12.4 Two known-unknowns to settle in the spike, before any port
+
+1. **FP contraction** (§14.3): `llvm-dis` the object file, count `fma` instructions, and
+   find the flag or the build target that makes it zero. If nothing does, the determinism
+   requirement beats the language preference and the decision reopens, in writing.
+2. **The exact vet flag set** (`-vet-*`, `-strict-style`): the flag names above came from a
+   community index, not from the compiler. Read `odin help check` on day one and record the
+   set that passes on the spike's code, so the CI job and the skill file agree.
+
+Everything else in §11 and §12 is verified enough to plan on. These two are the ones an
+optimistic paragraph would have hidden.

@@ -1611,10 +1611,13 @@ A rebuild may choose any graphics technology; the *contract* it must meet is:
 
 - **No build step, no bundler, no dependencies**: the page loads plain scripts; the
   *module graph is the reference list in the entry document*, every shipped file is
-  referenced exactly once, and a shipped cache-busting tag must be a positive integer
+  referenced exactly once, and a shipped cache-busting tag must a positive integer
   that moves when the bytes move (the push job enforces it). *Flag: a product claim
   in the README ("runnable straight from a folder, zero dependencies") — a rebuild
   may build; it must then re-decide what the README claims.*
+  **Re-decided (§14):** the v1 browser build keeps the claim verbatim and stays the
+  README's subject; the v2 line ships a compiled native core, so its README says
+  "download one binary" instead, and the compiled thing is the engine, never the page.
 - **Credentials live in the browser's local storage, in plain text**, with an
   explicit warning at export. *Flag: a consequence of client-side-only. A server-side
   harness can store keys where only it can read them; the design-level requirements
@@ -1790,7 +1793,9 @@ a new stack must *decide*, with the stated context for each:
 6. **Tunables with stated rationale** (not laws of physics): the 600 s wonder hold,
    the 90 s round default (10 s floor, 900 s ceiling), the 180 s request timeout, the
    damage windows, the 12-minute day.
-7. **The stack boundary.** For each item in §11.3, a rebuild decides: no-build /
+7. **The stack boundary.** *(answered — §14, 4 October 2026: a compiled native core,
+   Odin, no browser face for it; the web stays the v1 surface and keeps every claim in
+   §11.3 intact.)* For each item in §11.3, a rebuild decides: no-build /
    zero-dependency / runnable-from-a-folder (a product claim in the README); plain-text
    browser credentials (a security posture); browser-shaped auth and no streaming (a
    provider-layer shape); single-origin storage (a persistence shape). A server-side
@@ -1828,3 +1833,111 @@ a new stack must *decide*, with the stated context for each:
 protocol, its records, its surfaces, and its invariants; §11.3 and §13 separate the
 design from the choices the current technology made for it.*
 
+---
+
+## 14. Decision record — "No Rust for the Wicked" (4 October 2026)
+
+*The title is a pun and a summary: the Rust port is retired, and nothing about it was
+ever wicked — it proved the method and then got in the way. A rebuild choice this large
+belongs in the document it changes, so it is written here rather than left in a plan
+file; `docs/CORE-REPLAN.md` keeps the arithmetic behind it and `docs/REBUILD_PROPOSAL.md`
+§2, §4, §8 and §9 are amended to match.*
+
+**This section records decisions. It does not make this document a statement about a
+language.** The header of this spec says it is technology-agnostic and that stack
+properties belong in the proposal; that rule stands. What follows is recorded here
+because the decisions *close* requirements this document owns — §11.3's build claim,
+§13.7's stack boundary, §3's determinism contract — and a closed question with no answer
+written down is how a project re-litigates the same choice every autumn.
+
+### 14.1 The decisions
+
+1. **The v2 core is written in Odin.** The Rust port is retired, not failed forward.
+2. **The new core has no browser face.** It runs headless and in the desktop shell, as one
+   native binary. The browser keeps the rules it already runs — the parent's JavaScript —
+   and keeps every §11.3 property it has today, including "open the folder and play".
+3. **The web UI survives its demotion.** The renderer and the analyzer are readers of a
+   *record* (§5, §6), not owners of the simulation, so they stay exactly as they are,
+   served by the new binary into a webview the project owns. "No web face" means the core
+   does not compile to WASM; it does not mean rewriting thousands of working lines.
+4. **Tauri is rejected**, replacing the proposal §2's choice, on one fact: its backend is
+   Rust. An Odin core under a Tauri shell is three languages in one product, which
+   contradicts the reason for choosing Odin at all.
+5. **The golden is the treaty between engines.** The parent's JS is authoritative for the
+   browser; the native core is authoritative for headless and desktop; the byte-exact
+   golden (§3.4) is what proves they are the same game. A divergence between them is a
+   defect in one of them, never a third definition of the rules.
+
+### 14.2 Why, with the numbers that decided it
+
+- **The one objection that mattered was the browser, and the browser is gone.** The
+  previous choice of Rust rested on §4 of the proposal: one source that reaches a browser's
+  WASM, a desktop process and a long-running server. Once the browser face is dropped, the
+  argument's premise is gone with it, and Odin's known weaknesses — the
+  `js_wasm32`/WASM-GC boundary, the emcc glue, the absence of a `wasm-bindgen` equivalent —
+  become someone else's problem.
+- **The ecosystem is small, and measured rather than imagined.** Eighteen repositories
+  above 150 stars; three above 1,000 (the compiler, `ols` the language server, an
+  awesome-list). Game-relevant, above 150: `karl2d` (696), an Odin+raylib hot-reload
+  template (627), `odin-http` (447), `tina` (390), `Skald` (172), `odin-godot` (165),
+  `odin-tracy` (159). Treat that as *"you will read the source of what you depend on"* —
+  which is already this project's posture, at zero npm dependencies.
+- **What matters is not the community but the compiler's own vendored set**, and for a
+  native RTS-ish product it is nearly the whole indie stack: `raylib`, `sdl2`, `sdl3`,
+  `glfw`, `OpenGL`, `vulkan`, `directx`, `egl`, `box2d`, `box3d`, `ggpo`, `ENet`,
+  `miniaudio`, `nanovg`, `fontstash`, `microui`, `cgltf`, `stb`, `OpenEXRCore`, `zlib`,
+  `compress`, `lua`, `curl`, `wgpu`, `windows`/`darwin`/`x11`, `libc`. Mapped against the
+  proposal's own wish list: `miniaudio` is §8's low-latency desktop audio; `sdl3`/`glfw`
+  are its three-OS window; `nanovg`+`fontstash`+`microui` are §7's "classic RTS look,
+  refined" if we ever want it outside a DOM; `cgltf`/`stb`/`zlib` are content; `lua` is
+  scenarios; `curl` is the provider layer's server-side twin.
+- **`ggpo`, vendored, is the one that turned the decision into an upside.** Rollback
+  netcode needs a deterministic, seeded, fixed-timestep simulation and a byte-exact command
+  log — the two things §3 and §5 already guarantee, and that most games have to build
+  before they can buy netcode. §8's hosted arena therefore stops being "a WebSocket relay
+  of snapshots" and becomes a rollback game for the price of a transport, which is also
+  vendored (`ENet`). Not a plan item; a door now unlocked by properties we already paid for.
+- **Simplicity is worth what it costs here and no more.** No GC, no runtime, a C ABI, one
+  build command, and a language in which a file is either in the binary or obviously not.
+  That last clause is not academic: 1,133 of our 3,847 lines of Rust were compiled by
+  nothing and lived there for a week.
+
+### 14.3 What this buys in risk, and what it takes on
+
+- **Float discipline becomes an explicit, checked contract.** A byte-exact sim must forbid
+  fused multiply-add, since `a*b+c` becoming one instruction changes the answer and the
+  port's whole claim is the answer. The compiler's stance on contraction is not documented,
+  so it is *verified, not assumed*: the build emits an object file, and the gate is
+  `llvm-dis | grep -c fma` returning zero. Balance-critical arithmetic stays integer or
+  fixed-point (§4 of the proposal), which narrows the exposure to positions, sight radii
+  and the spawn spread — exactly the numbers the turn-1 golden is byte-exact on.
+- **Agent familiarity is a real cost, and the mitigation is the gate, not confidence.**
+  Every fix in this repo was written by an LLM agent, and agents write more Rust than Odin.
+  The answer is to keep the standard outside the code: the byte-exact golden vectors, the
+  retired Rust port kept as a tagged reference implementation, and CI that builds a pinned
+  compiler version. A wrong Odin port fails the same gate a wrong Rust port would.
+- **Odin's release train is fast, so the compiler version is pinned** in the build (date
+  or tag, recorded in the fingerprint) — otherwise "same source, same match" silently
+  acquires a third dependency.
+- **Three webview shims instead of one shell.** Owning the webview means Windows
+  (`WebView2`), Linux (`WebKitGTK`) and macOS (`WKWebView`) each behind one thin C ABI.
+  Bounded, but it is real work Tauri would have hidden. Revisit trigger: if the first shim
+  costs more than a few days, the honest fallback is to reconsider the shell, not to
+  quietly ship three languages.
+- **The parent's browser build becomes authoritative in the browser.** We no longer offer a
+  faster core there. That is the true price of decision 2, and the reason §14.1 states it
+  as a boundary rather than a limitation.
+
+### 14.4 What this closes, and what it opens
+
+Closes: §13.7 (the stack boundary), and §11.3's build-step flag. Leaves untouched and still
+open: §13.1 (the second clock — five wall-clock reads in the reference's sim, still the one
+requirement a new core cannot quietly miss), §13.2 (last-known position), §13.3 (the late-
+answer rule), and §12's invariant list, which the native core is bound by in full.
+
+Opens, as a new §13 item:
+
+12. **Does human campaign play (§7) want a native surface?** The webview answers it for
+    free. A native HUD in `nanovg`/`microui` would answer it better for a player who wants
+    the game without a DOM in the process — and it is a renderer rewrite, so it waits until
+    someone is actually asking.
