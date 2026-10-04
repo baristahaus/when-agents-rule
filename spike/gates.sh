@@ -29,7 +29,7 @@ ver="$("$ODIN" version 2>&1 | head -1)"
 say "gate 1  compiler present" "ok — $ver"
 
 mkdir -p spike/bin
-rm -f spike/bin/prng-spike spike/bin/counts spike/bin/coast spike/bin/probe.o
+rm -f spike/bin/prng-spike spike/bin/counts spike/bin/coast spike/bin/map spike/bin/probe.o
 
 # Gate 2 — the keyed vectors: an Odin transcription of js/simulation/rng.js must print the two
 # integers the golden pins. This is the smallest possible byte-exact test and the one that earns
@@ -72,6 +72,22 @@ if "$ODIN" build spike/coast -out:spike/bin/coast >/tmp/odin-coast.log 2>&1 \
 else
 	say "gate 2d coast table" "FAIL"
 	tail -8 /tmp/odin-coast.log
+	fails=$((fails + 1))
+fi
+
+# Gate 2e — the map line, the whole record, byte for byte: 942 nodes, the seeded layout as the match
+# starts. The four scatters consume one stream in call order, so this single comparison also proves
+# the RNG's draw sequence, the difficulty table, the coastline clipping and the recorder's
+# round-to-millimetres. Nothing about the map is "approximately right" here; cmp either says nothing
+# or the gate is red.
+if "$ODIN" build spike/map -out:spike/bin/map >/tmp/odin-map.log 2>&1 \
+  && [ -x spike/bin/map ] && ./spike/bin/map > /tmp/map-odin.json \
+  && cmp -s /tmp/map-odin.json golden/map-line-b1040.json; then
+	say "gate 2e map line, 47098 bytes byte-identical" "ok"
+else
+	say "gate 2e map line byte-diff" "FAIL"
+	tail -6 /tmp/odin-map.log
+	[ -f /tmp/map-odin.json ] && { echo "  odin $(wc -c < /tmp/map-odin.json) bytes vs golden $(wc -c < golden/map-line-b1040.json)"; cmp /tmp/map-odin.json golden/map-line-b1040.json | head -3; }
 	fails=$((fails + 1))
 fi
 

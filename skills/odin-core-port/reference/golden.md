@@ -28,6 +28,25 @@ matching, because a decimal rendering invites a reader to trust a rounding.
     node -e 'const R=require("./js/simulation/rng.js"),s=R.keyed("golden"),k="s0:start-workers";
              for (let i=0;i<2;i++){const v=R.draw(s,k);console.log(v,"0x"+Math.round(v*4294967296).toString(16));}'
 
+## The map gate is DONE — `spike/map/main.odin`, byte-identical at 47,098 bytes (2026-10-04)
+
+What it took, in the order that was worth doing, because the next gate is turn 1 and the same
+ordering applies: the **counts** first (they prove nothing was dropped and need no geometry), then
+the **coastline** as `f32` bit patterns (`spike/coast/main.odin`, because `Float32Array` is a
+rounding decision, not an optimization), then the **placement** itself with one RNG stream consumed
+in call order — food, wood, stone, gold — and finally the recorder's serialisation
+(`Math.round(units*1000)`, half-up). The two scatters round differently and that is where a port
+dies: the grid one is `max(1, round(total/49))` per tile; the rotational one is
+`max(1, round(total/seats))` per seat, **round-to-nearest, not ceil** — the source's own comment
+says stone is 39 at three seats and ceil would have said 42, and my first version used ceil and
+looked correct at four seats.
+
+One dependency is still taken as input rather than derived: **the four spawns** come from the
+golden's values, because game.js places them and this port has not reached game.js. They are not
+cosmetic — stone and gold are rotations about their circle and are tested against every Town
+Center keep-out — so porting spawn placement is the first thing to do before the map gate can be
+called self-supporting rather than anchored on a recorded input.
+
 ## What the map record actually is, measured 2026-10-04
 
 Before copying anything, the shape, from `golden/map-line-b1040.json` itself:

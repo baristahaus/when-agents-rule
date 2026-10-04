@@ -23,6 +23,7 @@ package main
 // reason the golden holds 20 gold and not 18.
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 
 Mods :: struct { food, wood, stone: f64 }
@@ -33,18 +34,27 @@ diff_mods :: proc(name: string) -> Mods {
 	return Mods{0.5, 1.0, 1.0}   // medium, and the fallback the JS table uses
 }
 
-// The grid scatter: totalCount divided over 49 tiles, each tile getting the same whole number,
-// and the tiles' share rounded up so the base is never quietly eaten (the source's 40/9 -> 4 -> 36
-// story is why stone moved to the rotational scatter instead).
-grid_total :: proc(total: int, per_tile_exact: bool) -> int {
-	if per_tile_exact { return total }
-	return total
+// JS `Math.max(1, Math.round(total/N)) * N`. Round-to-nearest, NOT ceil: the difference is visible
+// in the source's own comment — stone is 40 at two or four seats but **39 at three**, which ceil
+// would have made 42. My first version of this proc used ceil and its printed output happened to
+// agree at four seats, which is exactly how a wrong rounding rule survives.
+js_round :: proc(x: f64) -> int {
+	return int(math.floor(x + 0.5))
 }
 
 rotational_total :: proc(total: int, seats: int) -> int {
 	if seats <= 0 { return total }
-	per := (total + seats - 1) / seats           // ceil, so no seat is shortchanged
+	per := js_round(cast(f64)(total) / cast(f64)(seats))
+	if per < 1 { per = 1 }
 	return per * seats
+}
+
+// The grid scatter's rule, spelled out: per-tile count is max(1, round(total/49)) and the world
+// total is that times 49, so the golden's food 98 and wood 784 are 2 and 16 per tile exactly.
+grid_total_from_base :: proc(total: int) -> int {
+	per := js_round(cast(f64)(total) / 49.0)
+	if per < 1 { per = 1 }
+	return per * 49
 }
 
 Counts :: struct { food, wood, stone, gold: int }
@@ -57,8 +67,8 @@ layout :: proc(difficulty: string, seats: int) -> Counts {
 	wood := int(784.0 * m.wood + 0.5)
 	stone := int(40.0 * m.stone + 0.5)
 	return Counts{
-		food  = grid_total(food, true),
-		wood  = grid_total(wood, true),
+		food  = grid_total_from_base(food),
+		wood  = grid_total_from_base(wood),
 		stone = rotational_total(stone, seats),
 		gold  = rotational_total(18, seats),
 	}
@@ -84,7 +94,13 @@ main :: proc() {
 		got.food + got.wood + got.stone + got.gold)
 
 	if difficulty != "medium" || seats != 4 {
-		fmt.println("not the golden configuration; nothing to assert")
+		// The 3-seat stone figure is a test of the rounding rule, not of the golden: the source
+		// says 39, ceil would say 42. Checked here so the rule cannot quietly regress.
+		if difficulty == "medium" && seats == 3 && got.stone != 39 {
+			fmt.printfln("3-seat stone is {} and the source says 39 — the rounding rule regressed", got.stone)
+			panic("rotational rounding is not JS round-to-nearest")
+		}
+		fmt.println("not the golden configuration; nothing asserted against it")
 		return
 	}
 	if got.food != want.food || got.wood != want.wood || got.stone != want.stone || got.gold != want.gold {
