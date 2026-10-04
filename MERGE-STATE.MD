@@ -180,10 +180,25 @@ The branch is `share/upstream-contract`, two commits off `upstream/main`, in a w
 2. `f9be2e6` — the five tests above, 590 lines, unmodified.
 
 Measured on their tree: baseline `node --test tests/*.test.cjs tests/sim/*.test.cjs`
-**549 tests, 0 failures**; with both commits **573, 0 failures** — exactly the 24 cases the
-five files add, so nothing existing moved. `contract.test.cjs` 7/7, and a two-long
+**592 tests, 0 failures** at b1054; with both commits **616, 0 failures** — exactly the 24
+cases the five files add, so nothing existing moved. `contract.test.cjs` 7/7, and a two-long
 `{to,from}` validates clean while `[10]` reports `1 items < minItems 2` and `[1,2,3]`
 reports `3 items > maxItems 2`.
+
+**The first version of this branch was wrong, and the fix is now a command.** It was prepped
+against `43ac04a` (b1039) because that was the parent as of the merge — but the parent had
+shipped 15 more builds in the six hours since, and our entry claimed **Build 1040**, which
+they had used three days earlier for a fight-card fix. A green local suite cannot see either
+problem: the diff looked fine, only the base and the number were stale. The branch is now
+rebased onto `c7fafd7` (b1054), re-stamped `js/game.js?v=1055`, renumbered in
+`docs/RULES-CHANGES.md`, and re-verified at 616/616 above.
+
+The rule that came out of it — **before prepping or pushing a PR, ask the parent where it
+actually is** — is a gate rather than an intention: `tools/upstream-check.cjs` fetches the
+parent, prints its tip and build, how far behind our base is, which of the files we propose
+to touch moved upstream, and whether the build number we mean to claim is already in their
+ledger; exit 1 means do not open the PR, exit 2 means the fetch failed so it refuses to call
+a stale answer current. Self-tested by running it on the actual mistake:
 
 **Published.** The first attempt failed on DNS alone — `ssh: Could not resolve hostname
 github.com`, four retries, while other names still resolved, and no more a mystery an hour
@@ -209,3 +224,26 @@ shows two commits and nothing fork-shaped.
    explain.
 5. Consider a real file-list audit gate (recorder ↔ `js/manifest.js` ↔ `index.html`), since
    the ledger keeps finding drift in exactly that seam.
+
+```
+$ node tools/upstream-check.cjs --branch=share/upstream-contract --claim-build=1040
+TAKEN    build 1040 is already used upstream: "A fight's card no longer says \"lost 3 of 0\" (3 October 2026)"
+Do not open this PR yet:
+ - build 1040 is taken; use 1055
+```
+
+## Rules of engagement for anything upstream
+
+1. `git fetch upstream`, then `node tools/upstream-check.cjs --branch=<the branch>
+   --files=<every file the PR touches> --claim-build=<the number you mean to write>`. Exit
+   0 or no PR. Re-run it immediately before pushing, not only before branching: the parent
+   ships several builds a day, and "we checked" means nothing at PR time if it meant
+   morning.
+2. Base the branch on `upstream/main`, never on our `main`, so their diff shows the change
+   and nothing fork-shaped.
+3. A schema or contract change carries its checker in the same commit: their
+   `tests/lib/schema-check.cjs` throws on keywords it has not met, so half the change fails
+   loudly on every recorded state.
+4. Never renumber their builds locally. Ask them what number to use if it matters; the
+   `RULES-CHANGES.md` heading and the `js/game.js?v=` stamp are the same number, in their
+   convention.
