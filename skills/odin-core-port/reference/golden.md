@@ -28,6 +28,20 @@ matching, because a decimal rendering invites a reader to trust a rounding.
     node -e 'const R=require("./js/simulation/rng.js"),s=R.keyed("golden"),k="s0:start-workers";
              for (let i=0;i<2;i++){const v=R.draw(s,k);console.log(v,"0x"+Math.round(v*4294967296).toString(16));}'
 
+## One fixture is one condition, and one condition tests almost nothing
+
+The map port passed its own fixture and was **wrong at two and three seats**. The bug: the spawn
+array is a fixed `[4]Vec2`, filled only as far as the seats in play, and the keep-out loop iterated
+the whole array — so the unfilled tail sat at the origin, the origin is 60 units from every stone and
+gold candidate, and 60 < the 95 keep-out meant *every* candidate was rejected, the retry loop burned
+draws, and every angle came from the wrong place in the stream. The **node counts stayed perfect**,
+the 4-seat fixture stayed green, and the failure was invisible until the map line for another seat
+count existed. Fixed by iterating `0 ..< n_seats`, and pinned by four conditions instead of one.
+
+The general rule, which is the reason this file keeps saying "attempt the counts first": a gate that
+checks one input tests one branch of every table behind it. Recording `alpha/easy/2`, `alpha/hard/3`
+and `beta/medium/4` cost about a minute each and found the only bug in the port so far.
+
 ## The map gate is DONE — `spike/map/main.odin`, byte-identical at 47,098 bytes (2026-10-04)
 
 What it took, in the order that was worth doing, because the next gate is turn 1 and the same

@@ -29,6 +29,7 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:os"
 
 SIZE        :: 200.0
 GRID        :: 7
@@ -39,9 +40,17 @@ KEEP_OUT    :: 95.0
 TRIES       :: 60
 MM_PER_UNIT :: 1000.0
 
-SEED_STR   :: "golden"
-DIFFICULTY :: "medium"
-SEATS      :: 4
+MAX_SEATS :: 4
+
+// Conditions come from the command line, defaulting to the golden's own. A port that only ever
+// reproduces one configuration is a port that only ever tests one branch of every table it
+// transcribes, and the four fixtures in golden/ disagree in exactly the places that matter: the
+// difficulty multipliers, and the rotational rounding at two and three seats (alpha/hard/3 has 21
+// stone, which is round(20/3)=7 per seat, and beta/medium/4 has the same 942 as golden with a
+// different stream in it).
+seed_str   := "golden"
+difficulty := "medium"
+seats      := 4
 
 Rand :: struct { a: u32 }
 
@@ -70,6 +79,17 @@ rand_next :: proc(r: ^Rand) -> f64 {
 
 Vec2 :: struct { x, z: f64 }
 
+// The difficulty table as terrain.js writes it: multipliers against the call-site base, plus the
+// food/wood/stone bases and the two amounts the scatters carry. Gold has no entry — deliberately
+// identical at every preset, because the scarcest resource should not be what separates them.
+Mods :: struct { food, wood, stone: f64 }
+
+mods_for :: proc(name: string) -> Mods {
+	if name == "easy" { return Mods{2.0, 1.0, 1.0} }
+	if name == "hard" { return Mods{0.25, 0.25, 0.5} }
+	return Mods{0.5, 1.0, 1.0}
+}
+
 // Spawn placement, ported from game.js:369-381 rather than copied from the golden — this used to
 // be the map gate's one recorded input, and it is the reason the stone and gold rotations land
 // where they do.
@@ -85,11 +105,11 @@ Vec2 :: struct { x, z: f64 }
 // A variable rather than a constant because Odin refuses to index a constant with a variable index
 // — a fair rule, since the thing being indexed here is exactly the kind of value a transcription
 // must not smuggle in as a constant.
-spawn_positions :: proc(n: int) -> [SEATS]Vec2 {
+spawn_positions :: proc(n: int) -> [MAX_SEATS]Vec2 {
 	map_size := 800.0
 	half := map_size / 2.0 - 40.0
 	radius := half * 0.85
-	out: [SEATS]Vec2
+	out: [MAX_SEATS]Vec2
 	for i in 0 ..< n {
 		angle := cast(f64)(i) / cast(f64)(n) * math.PI * 2.0 - math.PI / 2.0
 		out[i] = Vec2{math.cos(angle) * radius, math.sin(angle) * radius}
@@ -97,7 +117,8 @@ spawn_positions :: proc(n: int) -> [SEATS]Vec2 {
 	return out
 }
 
-spawns: [SEATS]Vec2
+spawns:  [MAX_SEATS]Vec2
+n_seats := MAX_SEATS
 
 js_round :: proc(x: f64) -> int { return int(math.floor(x + 0.5)) }
 hypot    :: proc(x, z: f64) -> f64 { return math.sqrt(x * x + z * z) }
@@ -140,11 +161,10 @@ scatter_equal :: proc(out: ^Nodes, r: ^Rand, t: string, total: int, amount: int)
 // map's size R and rMin are both 60, so the draw cancels and every stone and gold sits on the
 // 60-unit circle — which the golden confirms (its stone radii read 59.9998 after rounding to mm).
 scatter_rotational :: proc(out: ^Nodes, r: ^Rand, t: string, total: int, amount: int) {
-	n := SEATS
-	per := js_round(cast(f64)(total) / cast(f64)(n))
+	per := js_round(cast(f64)(total) / cast(f64)(n_seats))
 	if per < 1 { per = 1 }
 	radius_max := SIZE / 2.0 - 40.0
-	sector := math.PI * 2.0 / cast(f64)(n)
+	sector := math.PI * 2.0 / cast(f64)(n_seats)
 	a0 := math.atan2(spawns[0].z, spawns[0].x)
 	for _ in 0 ..< per {
 		rr := R_MIN
@@ -153,13 +173,18 @@ scatter_rotational :: proc(out: ^Nodes, r: ^Rand, t: string, total: int, amount:
 			u := rand_next(r)
 			rr = math.sqrt(R_MIN * R_MIN + u * (radius_max * radius_max - R_MIN * R_MIN))
 			tt = a0 + (rand_next(r) - 0.5) * sector
+			// Only the seats actually in play. Iterating the whole fixed array left the unfilled
+			// tail at the origin, and the origin is 60 units from every candidate — inside the 95
+			// keep-out — so at two and three seats every candidate looked too close, the retry loop
+			// burned draws, and the angles came from the wrong place in the stream. The node COUNT
+			// stayed perfect, which is why the counts gate stayed green the whole time.
 			close := false
-			for s in spawns {
-				if hypot(math.cos(tt) * rr - s.x, math.sin(tt) * rr - s.z) < KEEP_OUT { close = true }
+			for p in 0 ..< n_seats {
+				if hypot(math.cos(tt) * rr - spawns[p].x, math.sin(tt) * rr - spawns[p].z) < KEEP_OUT { close = true }
 			}
 			if !close { break }
 		}
-		for p in 0 ..< n {
+		for p in 0 ..< n_seats {
 			ang := tt + cast(f64)(p) * sector
 			push(out, t, math.cos(ang) * rr, math.sin(ang) * rr, amount)
 		}
@@ -207,14 +232,25 @@ main :: proc() {
 	// Filled here, not at global scope: Odin forbids context-requiring calls (which trig is) in a
 	// global initialiser, and that is the right rule — it keeps a value this port must get right out
 	// of the constant pool and into the code path that is under test.
-	spawns = spawn_positions(SEATS)
+	if len(os.args) >= 2 { seed_str = os.args[1] }
+	if len(os.args) >= 3 { difficulty = os.args[2] }
+	if len(os.args) >= 4 {
+		v := 0
+		for c in os.args[3] { v = v * 10 + int(c) - int('0') }
+		seats = v
+	}
+	if seats < 2 || seats > MAX_SEATS { panic("seats must be 2, 3 or 4") }
+	n_seats = seats
 
-	r := stream_new(SEED_STR)
+	spawns = spawn_positions(seats)
+	m := mods_for(difficulty)
+
+	r := stream_new(seed_str)
 	out: Nodes
 
-	diff_food := 196 * 0.5    // the medium row of terrain.js's DIFFICULTY_MODS
-	diff_wood := 784 * 1.0
-	diff_stone := 40 * 1.0
+	diff_food := 196.0 * m.food
+	diff_wood := 784.0 * m.wood
+	diff_stone := 40.0 * m.stone
 
 	scatter_equal(&out, &r, "food", js_round(diff_food), 500)
 	scatter_equal(&out, &r, "wood", js_round(diff_wood), 300)
@@ -223,15 +259,15 @@ main :: proc() {
 
 	buf: Buf
 	put(&buf, "{\"playerId\":\"__map__\",\"type\":\"map\",\"seed\":\"")
-	put(&buf, SEED_STR)
+	put(&buf, seed_str)
 	put(&buf, "\",\"difficulty\":\"")
-	put(&buf, DIFFICULTY)
+	put(&buf, difficulty)
 	put(&buf, "\",\"seats\":")
-	put_int(&buf, SEATS)
+	put_int(&buf, seats)
 	put(&buf, ",\"size\":")
 	put_int(&buf, 200)
 	put(&buf, ",\"spawns\":[")
-	for p in 0 ..< SEATS {
+	for p in 0 ..< seats {
 		if p > 0 { put(&buf, ",") }
 		put(&buf, "{\"x\":")
 		put_int(&buf, mm(spawns[p].x))

@@ -1,5 +1,5 @@
 {
- "note": "Byte-exact reference corpus of the rules at parent build 1040. The contract of the RULES, not of any port. Regenerate only by an explicit decision to move the baseline (docs/CORE-REPLAN.md, MERGE-STATE.MD).",
+ "note": "Byte-exact reference corpus of the rules at parent build 1040 (map lines re-recorded 2026-10-04 for four conditions). The contract of the RULES, not of any port.",
  "seed": "golden",
  "difficulty": "medium",
  "seats": 4,
@@ -26,6 +26,21 @@
    "sha256": "2f67e48cdfc654fa82663e6aa95d714f9c2e75757e0d215e17e05f0a323c3f0d",
    "bytes": 21075,
    "note": "turn1-b1040.jsonl with seat ids re-keyed to seat<N>; the form a port compares against, because v1 mints seat ids from Math.random by design"
+  },
+  "golden/map-alpha-easy-2.json": {
+   "sha256": "cd6e78c1af22c8471199fea8fcaf4fe87c90bba2331a2b4caaa736b16a15bcfa",
+   "bytes": 61503,
+   "note": "easy, 2 seats — tests the multiplier table and rotational rounding at two seats"
+  },
+  "golden/map-alpha-hard-3.json": {
+   "sha256": "001a9082ebd2a89a15f99d34c8d352dee26b87e71a06009904b7208de50609f0",
+   "bytes": 14368,
+   "note": "hard, 3 seats — stone is 21 here: round(20/3)=7 per seat, where ceil would say 42"
+  },
+  "golden/map-beta-medium-4.json": {
+   "sha256": "17afa18f8c08bf43ed4df47c61e5393832f91109ba13790f390d4bcc4dbeddd4",
+   "bytes": 47091,
+   "note": "medium, 4 seats, different seed — the same 942 from a different stream"
   }
  },
  "keyedVectors": {

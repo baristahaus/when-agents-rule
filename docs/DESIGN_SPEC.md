@@ -1858,6 +1858,15 @@ A pointer that does not resolve is worse than no pointer, and those commits are 
 correction lives here where a following-the-bad-citation reader will land: the spec is
 `docs/DESIGN_SPEC.md`, §13 is its open-questions list, §14 is this section.
 
+**There is no `sim/run.js`, no `sim/snapshot.js`, and no `js/war-harness.js`.** I said there was,
+today, in a commit message, from compacted history rather than from the tree. What exists is
+`tools/golden/record.cjs`: a node script that loads the script list in `js/manifest.js`'s `vm` field
+into a `node:vm` context and calls `game.tick()` in a loop, writing the transcript. That is the whole
+headless story today — which means the state accessor an external core would call, and the queue an
+external command would enter through, are *not* sitting there waiting to be extracted, and the
+proposal's B2 daemon is construction, not extraction. Recorded here because the false version was
+argued from, not just typed.
+
 **How to cite §13.** Section 13 is a *numbered list*, not decimal subsections, so "§13.7" means
 **item 7 of §13** (the stack boundary) and "§13.12" means item 12 (native UI without a rewrite,
 added with this decision). Anyone tempted to introduce real decimal subsections should not start

@@ -80,14 +80,28 @@ fi
 # the RNG's draw sequence, the difficulty table, the coastline clipping and the recorder's
 # round-to-millimetres. Nothing about the map is "approximately right" here; cmp either says nothing
 # or the gate is red.
-if "$ODIN" build spike/map -out:spike/bin/map >/tmp/odin-map.log 2>&1 \
-  && [ -x spike/bin/map ] && ./spike/bin/map > /tmp/map-odin.json \
-  && cmp -s /tmp/map-odin.json golden/map-line-b1040.json; then
-	say "gate 2e map line, 47098 bytes byte-identical" "ok"
+if "$ODIN" build spike/map -out:spike/bin/map >/tmp/odin-map.log 2>&1 && [ -x spike/bin/map ]; then
+	map_fails=0
+	for cond in "golden medium 4:map-line-b1040" "alpha easy 2:map-alpha-easy-2" \
+	            "alpha hard 3:map-alpha-hard-3" "beta medium 4:map-beta-medium-4"; do
+		args=${cond%%:*}; file=${cond##*:}
+		if ./spike/bin/map $args > /tmp/map-odin.json && cmp -s /tmp/map-odin.json golden/$file.json; then
+			printf '       map %-18s %6s bytes, byte-identical\n' "$args" "$(wc -c < /tmp/map-odin.json)"
+		else
+			printf '       map %-18s FAIL\n' "$args"
+			cmp /tmp/map-odin.json golden/$file.json 2>&1 | head -1
+			map_fails=$((map_fails + 1))
+		fi
+	done
+	if [ "$map_fails" -eq 0 ]; then
+		say "gate 2e map lines, 4 conditions byte-identical" "ok"
+	else
+		say "gate 2e map lines" "FAIL — $map_fails condition(s)"
+		fails=$((fails + 1))
+	fi
 else
-	say "gate 2e map line byte-diff" "FAIL"
+	say "gate 2e map lines" "FAIL — build failed"
 	tail -6 /tmp/odin-map.log
-	[ -f /tmp/map-odin.json ] && { echo "  odin $(wc -c < /tmp/map-odin.json) bytes vs golden $(wc -c < golden/map-line-b1040.json)"; cmp /tmp/map-odin.json golden/map-line-b1040.json | head -3; }
 	fails=$((fails + 1))
 fi
 
