@@ -1850,6 +1850,19 @@ because the decisions *close* requirements this document owns — §11.3's build
 §13.7's stack boundary, §3's determinism contract — and a closed question with no answer
 written down is how a project re-litigates the same choice every autumn.
 
+### 14.0 Two reading notes, because I got one of them wrong myself
+
+**Where this file is.** It is `docs/DESIGN_SPEC.md`. Two commit messages and one workflow
+comment cited `docs/specs/REBUILD_SPEC.md`, a path that has never existed in this repository.
+A pointer that does not resolve is worse than no pointer, and those commits are pushed, so the
+correction lives here where a following-the-bad-citation reader will land: the spec is
+`docs/DESIGN_SPEC.md`, §13 is its open-questions list, §14 is this section.
+
+**How to cite §13.** Section 13 is a *numbered list*, not decimal subsections, so "§13.7" means
+**item 7 of §13** (the stack boundary) and "§13.12" means item 12 (native UI without a rewrite,
+added with this decision). Anyone tempted to introduce real decimal subsections should not start
+in this document.
+
 ### 14.1 The decisions
 
 1. **The v2 core is written in Odin.** The Rust port is retired, not failed forward.
