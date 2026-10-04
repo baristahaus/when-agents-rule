@@ -148,6 +148,49 @@ ends 0/50/100/50 after exactly `house` and `farm`.
   `tests/*.test.cjs tests/sim/*.test.cjs`. Files under `js/` that carry their own
   `*.test.cjs` siblings are **not** in that glob.
 
+## Back toward the parent: what we could share
+
+Asked whether anything here fits the parent's own design well enough to give back, the
+answer was measured rather than judged: every test our line has that they lack was copied
+**unmodified into a worktree of `upstream/main`** and run there. That distinguishes "aligns
+with their rules" from "only works on our fork".
+
+Clean on their tree, and shipped as a shareable branch: `host-classifier` 4/4,
+`shipped-files` 5/5, `roster-advancement` 6/6, `state-contract` 5/5, `match-determinism`
+4/4. Failing there for structural reasons, so not offered: `gl-identity` 0/4 (needs our
+`glcore` change), `late-answer` 0/5, `usage-redaction` 0/3 (scans our paths). Partly:
+`soundness-scoring` 2/6 — their `seatMetrics` answers `0` where there is no sample
+(`latEarly`, `latLate`, `minLatency`, `maxLatency`, `avg`, `med`), which reads as a seat
+that answered instantly and never failed rather than a seat that never answered; worth a
+joint look, not a drive-by patch. `tests/sim/rng-seats.test.cjs` already pins the per-seat
+draw invariance we ported, so nothing was offered there.
+
+The branch is `share/upstream-contract`, two commits off `upstream/main`, in a worktree at
+`/tmp/share-branch` while the DNS is out:
+
+1. `838845f` — declare `ordersInProgress.from`, which `js/standing-orders.js` emits in
+   patrol mode and their schema never named, and give `tests/lib/schema-check.cjs` the
+   `minItems`/`maxItems` the constraint needs. Their checker implements exactly the keywords
+   the schema uses and throws on the rest, so the schema edit and the checker edit have to
+   be one commit: the schema change alone fails loudly on every recorded state, which is
+   the design working. Plus a `contract.test.cjs` case proving the arity bites, a
+   RULES-CHANGES entry in their voice under build 1040, and `js/game.js?v=1040` (their
+   convention: the build is that one number; `audio.js` stays at 1039 because this does not
+   touch it).
+2. `f9be2e6` — the five tests above, 590 lines, unmodified.
+
+Measured on their tree: baseline `node --test tests/*.test.cjs tests/sim/*.test.cjs`
+**549 tests, 0 failures**; with both commits **573, 0 failures** — exactly the 24 cases the
+five files add, so nothing existing moved. `contract.test.cjs` 7/7, and a two-long
+`{to,from}` validates clean while `[10]` reports `1 items < minItems 2` and `[1,2,3]`
+reports `3 items > maxItems 2`.
+
+**Push blocked, not failed:** `git push origin share/upstream-contract` fails with
+`ssh: Could not resolve hostname github.com`, four retries over a minute, while other hosts
+still resolve — the same push succeeded an hour earlier on `rebuild/v2`. When DNS returns:
+`git push origin share/upstream-contract`, then open a PR against `asp67/when-agents-rule`
+`main` from that branch. `rebuild/v2` and `main` were already published and need nothing.
+
 ## Next, in order
 
 1. D5 — the replay fog that reveals dead owned units. `anApplyFog` should key off the
