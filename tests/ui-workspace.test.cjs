@@ -172,15 +172,42 @@ test('live render frames move no entity: separation is a simulation rule', () =>
     assert.deepEqual(after, before);
 });
 
-test('the positional rules push friends apart and clear buildings', () => {
+// The positional rules are rule code: they load the way the game loads them, with
+// js/simulation/math.js first, because their trig goes through WarMath and a sandbox without
+// it is a sandbox that cannot run them.
+function positionRules() {
     const context = vm.createContext({ Math });
+    vm.runInContext(source('js/simulation/math.js'), context);
     vm.runInContext(source('js/simulation/position-rules.js'), context);
+    return vm.runInContext('WarPositionRules', context);
+}
+
+test('the positional rules push friends apart and clear buildings', () => {
+    const rules = positionRules();
     const units = [{ x: 10, z: 10, owner: 1 }, { x: 10.5, z: 10, owner: 1 }, { x: 50, z: 50, owner: 2 }];
     const before = structuredClone(units);
-    vm.runInContext('WarPositionRules', context).apply(units, [{ x: 50, z: 50, type: 'house' }], 1 / 60);
+    rules.apply(units, [{ x: 50, z: 50, type: 'house' }], 1 / 60);
     assert.ok(units[0].x < before[0].x);
     assert.ok(units[1].x > before[1].x);
-    assert.equal(units[2].x, 54.5);
+    // Dead centre escapes along a spoke derived from the unit's index, not along +x: the
+    // fixed point put every escaped unit on one spot of the ring -- a stack separation
+    // cannot reach (docs/FORK-DIVERGENCES.md D2). Unit 2 of 3 takes the second spoke.
+    const r = Math.hypot(units[2].x - 50, units[2].z - 50);
+    assert.ok(Math.abs(r - 4.5) < 1e-9, 'the escape must land on the clearance ring, got ' + r);
+    assert.ok(units[2].z > 54.49, 'unit 2 of 3 fans out along its own spoke');
+});
+
+test('units standing on the identical point still come apart', () => {
+    // `dist > 0.01` used to skip a pair forever, and that is the COMMON case, not a corner: a
+    // move command snaps every unit aimed at the same destination onto one coordinate.
+    // Measured in a live match before the fix -- eight units at one point, seven seconds
+    // later, minimum separation still 0.000. With no direction between them the pass has to
+    // take one, and take a DIFFERENT one per pair (docs/FORK-DIVERGENCES.md D1).
+    const rules = positionRules();
+    const stack = [{ x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }, { x: 3, z: 3, owner: 1 }];
+    rules.apply(stack, [], 1 / 60);
+    const gaps = [[0, 1], [1, 2], [0, 2]].map(([i, j]) => Math.hypot(stack[j].x - stack[i].x, stack[j].z - stack[i].z));
+    assert.ok(gaps.every(g => g > 0.05), 'coincident units stayed welded: ' + gaps.map(g => g.toFixed(3)).join(', '));
 });
 
 test('all workspace controls have translations in every supported UI language', () => {

@@ -2192,6 +2192,11 @@ class Game {
     // raw, so the rule now lives here once.
     static storedDifficulty() {
         const d = (typeof localStorage !== 'undefined' && localStorage.getItem('difficulty')) || '';
+        // terrain.js owns that table and loads before game.js in every browser and in every
+        // bare VM built from js/manifest.js. A harness that loads game.js alone (and several
+        // of ours once did) would take a ReferenceError on the first difficulty read, so the
+        // table is asked about the way the neighbouring tables are: only if it is there.
+        if (typeof DIFFICULTY_MODS === 'undefined') return d || 'easy';
         return Object.prototype.hasOwnProperty.call(DIFFICULTY_MODS, d) ? d : 'easy';
     }
 
@@ -6089,6 +6094,10 @@ class Game {
         if (townCenter && can(workerCost)) return false;   // 3, Town Center
         if (!units.some(u => u.type === 'worker')) return true;   // nobody left to build: out
         const producer = b => b.type === 'town_center' || this.militaryOptions(ai, b.type).length > 0;
+        // Any living worker counts as this site's builder: an idle one can walk onto it, and
+        // the rule-based brain does exactly that. Our side used to demand a worker ASSIGNED to
+        // the site, which over-eliminated -- see docs/FORK-DIVERGENCES.md S4. A seat with no
+        // living worker at all is already out several lines above this one.
         if (buildings.some(b => b.underConstruction && producer(b))) return false;   // 4, a site to finish
         if (townCenter) return false;   // 4, gathers into it
         const bdef = t => (typeof getBuildingDef === 'function' ? getBuildingDef(t) : null);
@@ -6101,18 +6110,44 @@ class Game {
     // The military units a building trains for this owner at its age (civ uniques in,
     // excluded units out). Falls back to the standard table where the rules files that
     // know it are not loaded.
-    // DIVERGENCE(merge): BUILDING_TRAIN_TIERS names only the three military hosts, so a
-    // temple answers "nothing trains here" and a seat whose last trainer is a temple is
-    // condemned by this rule (here and in the `producer` above) while its own controller
-    // is still told priests are available. Upstream's read of the tier table is kept; the
-    // fall-through our side had to the building def's own trainOptions is unresolved here
-    // (ours at 33a1f11, trainOptionsFor), and tests/elimination-predicate.test.cjs pins it.
+    //
+    // The tier table is not the whole answer, and the game already knows it: BUILDING_TRAIN_TIERS
+    // names only barracks, archery_range and stable, so a temple answers "nothing trains here" --
+    // while OpenAIAIManager.trainableUnitsFor lists `temple` among its hosts and falls back to the
+    // building def's own trainOptions, which is where the priest lives. Read this method without
+    // that fallback and the two disagree: the survival rule condemns a seat whose last trainer is
+    // a temple (here, and through the `producer` above) at the same moment its own controller is
+    // told priests are available. So the fallback is not our rule against theirs, it is their
+    // vocabulary against their predicate; docs/FORK-DIVERGENCES.md D3, pinned by
+    // tests/elimination-predicate.test.cjs. The requiresTech filter is trainableUnitsFor's, copied
+    // deliberately: a civ that can never build the host must not be counted on training in it.
     militaryOptions(ai, type) {
         let ids = null;
         if (typeof getTrainOptionsForBuilding === 'function') ids = getTrainOptionsForBuilding(type, ai.age || 'stone', ai.civilization);
         else ids = ({ barracks: ['militia', 'warrior', 'champion'], archery_range: ['archer', 'crossbowman', 'elite_archer'],
             stable: ['scout_cavalry', 'cavalry', 'heavy_cavalry'] })[type] || [];
-        return (ids || []).filter(id => id !== 'worker');
+        return this.trainOptionsFor(ai, { type }, ids);
+    }
+
+    // The single answer to "what could this building train for this owner", asked by the
+    // survival predicate above and by the model-facing vocabulary in openai-ai.js. Takes the
+    // tier list the caller already read, or reads it here. Resolution order is the training
+    // panel's: the age- and civ-resolved tier table where one exists, otherwise the building's
+    // own options -- and never a host this civilization can never build, which is
+    // trainableUnitsFor's filter, kept identical here so the two cannot drift again.
+    trainOptionsFor(owner, building, tierIds) {
+        let ids = tierIds;
+        if (ids === undefined)
+            ids = (typeof getTrainOptionsForBuilding === 'function')
+                ? getTrainOptionsForBuilding(building.type, owner.age || 'stone', owner.civilization) : null;
+        if (!ids || !ids.length) {
+            const def = (typeof getBuildingDef === 'function') ? getBuildingDef(building.type) : null;
+            const civTree = ((typeof getCivilization === 'function'
+                ? getCivilization(owner.civilization) : null) || {}).techTree || {};
+            ids = (def && def.canTrain && !(def.requiresTech && !civTree[def.requiresTech])
+                && def.trainOptions) || [];
+        }
+        return (ids || []).filter(id => id !== 'worker');   // a villager is not a reason to spare a seat
     }
 
     // 3 for trainers: a FINISHED building that can train one of its units of this age
@@ -6134,7 +6169,7 @@ class Game {
         const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
         const aIdx = ageOrder.indexOf(ai.age);
         for (const b of ai.buildings) {
-            if (!(b.health > 0) || b.underConstruction) continue;
+            if (!(b.health > 0) || b.underConstruction) continue;   // clause 4 above owns unfinished sites
             for (const uid of this.militaryOptions(ai, b.type)) {
                 const def = (typeof getUnitDefFor === 'function') ? getUnitDefFor(ai.civilization, uid) : null;
                 if (!def) continue;

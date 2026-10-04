@@ -73,7 +73,7 @@ test('the military hosts still decide it the same way they always did', () => {
     'no trainer, no army, no TC, no way to rebuild one');
 });
 
-test('an unfinished host counts only while a living worker is building it', () => {
+test('an unfinished host counts while a living worker is alive to finish it', () => {
   const site = building('barracks', { underConstruction: true, buildProgress: 4 });
   const worker = (task, target) => ({ type: 'worker', health: 40, task, buildTarget: target });
   // Food and wood for one militia, and NOT enough for a town center — otherwise the seat is
@@ -81,8 +81,15 @@ test('an unfinished host counts only while a living worker is building it', () =
   const pay = RES({ food: 60, wood: 30, stone: 0, gold: 0 });
   assert.equal(eliminated(seat({ buildings: [site], units: [worker('building', site)], resources: pay })), false,
     'a staffed site plus the cost of a militia is an army on the way');
-  assert.equal(eliminated(seat({ buildings: [site], units: [worker('harvest', null)], resources: pay })), true,
-    'the same site with nobody building it is not a promise of an army');
+  // The parent's reading, and it beats ours: an IDLE worker can walk onto the site, and the
+  // rule-based brain does exactly that, so the seat is still in the match. Our side demanded a
+  // worker already ASSIGNED to the foundation, which over-eliminated (docs/FORK-DIVERGENCES.md
+  // S4). What must never happen is a seat kept alive with no worker at all to build it, and the
+  // next assertion is that one.
+  assert.equal(eliminated(seat({ buildings: [site], units: [worker('harvest', null)], resources: pay })), false,
+    'a site plus a living worker who could finish it is still an army on the way');
+  assert.equal(eliminated(seat({ buildings: [site], units: [], resources: pay })), true,
+    'the same site with nobody left to build it is not a promise of an army');
 });
 
 test('what the predicate considers trainable is what the model is told is trainable', () => {

@@ -27,15 +27,16 @@ point of keeping a parallel line, and `D5` is its one finding against us.
 
 | # | Subject | Status | Rule impact | Where |
 |---|---|---|---|---|
-| D1 | Coincident units never separate | open | yes | `js/simulation/position-rules.js` |
-| D2 | A unit standing on a building's origin escapes to one fixed point | open | yes | `js/simulation/position-rules.js` |
-| D3 | A temple trains nothing, so a temple-only seat is eliminated while being offered priests | open | yes | `js/game.js` `militaryOptions` |
-| D4 | `storedDifficulty` reads `DIFFICULTY_MODS` bare in a VM without `terrain.js` | open | no | `js/game.js` `storedDifficulty` |
+| D1 | Coincident units never separate | **applied** | yes | `js/simulation/position-rules.js` |
+| D2 | A unit standing on a building's origin escapes to one fixed point | **applied** | yes | `js/simulation/position-rules.js` |
+| D3 | A temple trains nothing, so a temple-only seat is eliminated while being offered priests | **applied** | yes | `js/game.js` `trainOptionsFor` |
+| D4 | `storedDifficulty` reads `DIFFICULTY_MODS` bare in a VM without `terrain.js` | **applied** | no | `js/game.js` `storedDifficulty` |
 | D5 | Replay fog reveals dead owned units | open | no | `js/ui.js` `anApplyFog` |
 | D6 | `ordersInProgress.to/.from` lost their `minItems`/`maxItems: 2` | open | no | `game-state-schema.json` |
 | S1 | Seeded randomness: our one stream replaced by keyed draws | superseded | yes | `js/simulation/rng.js` |
 | S2 | Unit refereeing off the render loop | superseded | yes | `js/simulation/position-rules.js` |
 | S3 | Boot split: `WAR_PRIVATE_HOST` and the `load` handler left `game.js` | superseded | no | `js/boot.js` |
+| S4 | An unfinished site counts only while a worker is ASSIGNED to it | superseded | yes | `js/game.js` `isPlayerEliminated` |
 
 ---
 
@@ -65,6 +66,9 @@ the parent's extraction kept its own guard, so the fix is absent from the merged
 angle keyed on the pair's indices, and keep the push itself unchanged.
 
 **Rule impact.** Yes — unit positions feed reach, so fights and `coreHash` move.
+**Applied.** In this tree, as `FAN(k)` in `js/simulation/position-rules.js`, with the trig
+through `WarMath` (rule code may not depend on how an engine rounds) and the quarter turn
+written as a literal since `WarMath` has no `PI`.
 **Coverage.** `tests/ui-workspace.test.cjs`, "units standing on the identical point still come
 apart" (three units on one coordinate, all three gaps must exceed 0.05).
 
@@ -90,8 +94,12 @@ both the ring distance and the fan-out (the parent's test asserts `units[2].x ==
 asserts the fixed point; ours asserts the radius and that the escape direction differs per
 unit).
 
-**Rule impact.** Yes. **Coverage.** `tests/ui-workspace.test.cjs`, "separation and building
-clearance run on the simulation clock" (radius exceeded *and* `after[2].z > 54.49`).
+**Rule impact.** Yes.
+**Applied.** In this tree, `FAN(unitIndex)` on the dead-centre branch. The parent's assertion
+that pinned the fixed point (`units[2].x === 54.5`) is now an assertion about the ring radius
+and the spoke, in `tests/ui-workspace.test.cjs`.
+**Coverage.** `tests/ui-workspace.test.cjs`, "the positional rules push friends apart and clear
+buildings" (on the ring *and* fanned along its own spoke).
 
 ## D3 — A temple trains nothing, so a temple-only seat is eliminated while being offered priests
 
@@ -113,8 +121,10 @@ fall back to `getBuildingDef(type).trainOptions` when the tier table answers emp
 `trainableUnitsFor`'s `requiresTech`/`requiredAge` filters so the predicate cannot advertise a
 unit the civ can never field.
 
-**Rule impact.** Yes — who is eliminated, and when. **Coverage.**
-`tests/elimination-predicate.test.cjs` (4 cases, red until this is applied).
+**Rule impact.** Yes — who is eliminated, and when.
+**Applied.** In this tree as `Game.trainOptionsFor`, which `militaryOptions` now delegates to,
+so the predicate and the vocabulary resolve a building's units in one place.
+**Coverage.** `tests/elimination-predicate.test.cjs` (all four cases).
 
 ## D4 — `storedDifficulty` reads `DIFFICULTY_MODS` bare
 
@@ -127,7 +137,8 @@ is a `ReferenceError` the moment a difficulty is read.
 **Fix on re-apply:** `typeof DIFFICULTY_MODS !== 'undefined' &&` on the validation, or read it
 through the same `typeof` guard the neighbouring table reads use.
 
-**Rule impact.** No (it guards a read).
+**Rule impact.** No (it guards a read). **Applied.** In this tree, as a `typeof` guard that
+says why in the comment above it.
 
 ## D5 — Replay fog reveals dead owned units
 
@@ -170,6 +181,21 @@ a backgrounded tab kept refereeing. The parent moved them further: out of the re
 into `js/simulation/position-rules.js`, run from `Game.tick` in sub-steps of at most 50 ms, with
 interpolation so a frame is drawn between two steps. Our renderer-side copies are gone; the two
 fixes the extraction lost are D1 and D2.
+
+### S4 — An unfinished building site counts while ANY living worker is alive
+
+Our `d6ee953` required a living worker **assigned** to the foundation
+(`u.task === 'building' && u.buildTarget === b`) before an unfinished barracks counted as a
+producer in `isPlayerEliminated` and `canAffordAnyMilitary`. The intent was sound — a seat
+behind an abandoned foundation was staying in the match indefinitely — but the parent reached
+the same goal with a looser and better-read rule: any living worker may walk onto the site, and
+the rule-based brain does exactly that. Their `tests/elimination.test.cjs` pins it ("its builder
+idle: it can still finish it"); the pathology we were guarding against is already covered by the
+clause several lines earlier, which ends any seat with no living worker.
+
+Applied for a while in this tree, and withdrawn when their test said so. Our
+`tests/elimination-predicate.test.cjs` now asserts the parent's reading **and** the case that
+matters to both of us: no worker alive, foundation standing, seat out.
 
 ### S3 — The boot split
 
