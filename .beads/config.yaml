@@ -1,4 +1,6 @@
 repos:
-  primary: "."
-  additional:
-    - "/home/barista/.beads-planning"
+    primary: "."
+    additional:
+        - "/home/barista/.beads-planning"
+sync:
+    remote: "git+ssh://git@github.com-war/baristahaus/when-agents-rule"
