@@ -17,8 +17,8 @@ rebuilt in **Odin** against the same corpus — its record is `docs/REBUILD-EFFO
 merged the parent through **build 1039** (`43ac04a`), re-applied our fixes on top, and
 **re-derived the golden** so any port is measured against the current rules instead of a
 year-old recording; the parent has since shipped 15 more builds (tip b1054), unmerged.
-`main` stays shippable v1 (the parent's JS); v2 work lives on `sync/upstream-b1039` at
-HEAD (see *Branch and remote state* — `rebuild/v2` is stale).
+`main` stays shippable v1 (the parent's JS); v2 work lives on `rebuild/v2` (reconciled
+and pushed 5 October — see *Branch and remote state*).
 
 ## Commands that answer every question here
 
@@ -38,19 +38,17 @@ HEAD (see *Branch and remote state* — `rebuild/v2` is stale).
     origin   git@github.com-war:baristahaus/when-agents-rule   (our fork)
     upstream https://github.com/asp67/when-agents-rule         (the parent, read-only for us)
 
-- `main` = `33a1f11` — our **v1** line: 33 fork commits including the pre-sync WIP snapshot.
-  **Measured 5 October: `origin/main` = `c7fafd7`, the parent's b1054 tip** (identical to
-  `upstream/main`). The claim further down that "main = `33a1f11`" was pushed no longer
-  matches the remote; whether the fork's GitHub main is meant to mirror the parent or to
-  carry our v1 is a question for whoever owns that remote — recorded here as a mismatch,
-  not resolved by assumption.
-- `rebuild/v2` = `c4a32da` (pushed; "Retire the Rust port") — **stale by 17 commits**.
-  This ledger used to call it "the branch v2 work continues on"; the work continued
-  elsewhere (below), and the pointer was never moved.
-- `sync/upstream-b1039` = `f9dc0c3` = **HEAD** — the branch the post-merge work actually
-  ran on: the Rust retirement, the Odin spike and its gates, the state dumper, the CI
-  workflows. No longer identical to `rebuild/v2`; the live v2 line until the two are
-  reconciled. `origin/sync/upstream-b1039` = `b5bc685`, one commit behind HEAD.
+- `origin/main` = `c7fafd7`, the parent's b1054 tip (identical to `upstream/main`) —
+  **decided 5 October: it stays the parent's mirror.** The upstream path owns that
+  branch; we do not push our line to it. All our work lives on our branches below, and
+  `main` locally (`33a1f11`) remains our v1 snapshot.
+- `rebuild/v2` = **HEAD** (pushed; `origin/rebuild/v2` = `1dae26a`) — the v2 line,
+  reconciled 5 October: fast-forwarded from `c4a32da` over the seventeen commits that had
+  drifted onto the sync branch (the Rust retirement, the Odin spike and its gates, the
+  state dumper, the CI workflows, the frozen JS port, the turn-1 WIP, the effort record).
+- `sync/upstream-b1039` — **retired 5 October**, deleted locally and on origin; its tip
+  was an ancestor of the reconciled `rebuild/v2`. `work/v2-core` (a stale duplicate of
+  the pre-merge snapshot) went with it.
 - `save/pre-upstream-sync` = `33a1f11` — the exact pre-merge tree, kept as the undo button.
   `git reset --hard save/pre-upstream-sync` is the documented abort path.
 - The parent also has a branch `upstream/next-level`; we do not track it. Ask before

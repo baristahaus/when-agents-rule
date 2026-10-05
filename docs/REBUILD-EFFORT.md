@@ -120,21 +120,27 @@ its agent config) — the beads embedded backend is append-only, which is record
 `docs/MERGE-STATE.MD` (the 2026-10-04 note), and the project skill was a duplicate of the
 global one.
 
-### 1.6 The branches, measured rather than remembered
+### 1.6 The branches — measured, then decided (5 October 2026)
 
-- HEAD = `sync/upstream-b1039` = `f9dc0c3`, **one commit ahead** of
-  `origin/sync/upstream-b1039` (`b5bc685`) — the branch the post-merge work actually ran
-  on, and the live v2 line.
-- `origin/rebuild/v2` = `c4a32da` ("Retire the Rust port") — **17 commits stale**. The
-  fork ledger still calls `rebuild/v2` "the branch v2 work continues on"; it did, until it
-  didn't, and nobody moved the pointer. Reconciling the two is §5's third item.
-- `origin/main` = `c7fafd7` — **the parent's b1054 tip, identical to `upstream/main`**.
-  The ledger claims "main = `33a1f11`, pushed"; the remote no longer agrees. Whether the
-  fork's GitHub main is meant to mirror the parent or to carry our v1 line is a question
-  for whoever owns that remote; this record states the mismatch instead of picking a story.
+Measured in the morning: HEAD lived on `sync/upstream-b1039`, one commit past its remote
+and seventeen past `origin/rebuild/v2`; `origin/main` measured as the parent's b1054 tip,
+identical to `upstream/main`, which contradicted the ledger's "main = `33a1f11`, pushed".
+
+Decided by the owner the same day, and enacted:
+
+- **`origin/main` stays the parent's mirror.** The upstream path owns that branch; we do
+  not push our line to it and we do not "fix" the mismatch — it is the design. All our
+  work lives on our branches.
+- **`rebuild/v2` is the v2 line again**, fast-forwarded from `c4a32da` to the effort's
+  HEAD and pushed (`origin/rebuild/v2` = `1dae26a`). The proposal's §9 branch-hygiene
+  sentence — "the work lands on `rebuild/v2`" — is true again, which is the point of
+  reconciling rather than renaming.
+- **`sync/upstream-b1039` is retired** (deleted locally and on origin; its tip was an
+  ancestor of the new `rebuild/v2`). `work/v2-core`, a stale duplicate of the pre-merge
+  snapshot, went with it. `save/pre-upstream-sync` = `33a1f11` stays as the abort path.
 - The parent is **15 builds ahead** of our merge point (tip b1054; we merged through
-  b1039). Our line carries **65 commits** since the fork point. `main` locally is still
-  `33a1f11`, the pre-sync snapshot and documented abort path.
+  b1039). Our line carries **65 commits** since the fork point. Absorbing the parent's
+  new rules is §5's seventh item.
 
 ## 2. The method — five layers, and why each exists
 
@@ -347,18 +353,14 @@ turn-1 gate lands (§5, item 6).
    clock → `WarPositionRules` → the harness observation) and the driver; `cmp` all 8 lines.
    When it is green, wire it into `spike/gates.sh` as a new gate (build, run, `cmp`) so
    CI owns it — a gate that exists only in a handover is a wish with a deadline.
-2. **Commit the working tree.** Suggested shape, not run (the session profile is
-   conservative): one commit for `tools/trace-states-port.cjs` (the why belongs in the
-   message: it is the transcription spec, byte-verified); one for `spike/turn1/` marked
-   mid-flight with the handover; one for the `.agents/skills/beads/` deletions, pointing
-   at the blocker note. Uncommitted work is unverifiable work — nobody can check out a
-   claim that lives only in a working tree.
-3. **Reconcile the branches.** HEAD is one commit past `origin/sync/upstream-b1039` and
-   seventeen past `origin/rebuild/v2`. Either fast-forward `rebuild/v2` to HEAD and push,
-   or make `sync/upstream-b1039` the acknowledged v2 line in the fork ledger — but pick
-   one, because "the branch v2 work continues on" is currently true of neither remote
-   pointer. And the `origin/main` question (§1.6) needs an owner's answer: the fork's
-   GitHub main mirrors the parent's b1054 today.
+2. **Commit the working tree — done, 5 October 2026.** Four commits, in the shape the
+   first draft of this record proposed: the JS port ("the turn-1 spec, frozen"), the
+   turn-1 WIP with its handover, the beads-skill retirement, and the docs pass itself.
+3. **Reconcile the branches — done, 5 October 2026.** The owner decided: `origin/main`
+   stays the parent's mirror (the upstream path owns it; our work lives on our branches),
+   `rebuild/v2` was fast-forwarded to HEAD and pushed, and the `sync/upstream-b1039` line
+   was retired. What remains of the branch question is the parent's 15 unmerged builds —
+   item 7 below.
 4. **The two owed items** (unchanged from CORE-REPLAN §13, still owed): transcribe the
    Town Center clearance step — four recorded conditions prove it removed nothing, which
    is not the same as transcribing it; and find the leak tracker's real name in this
@@ -374,6 +376,14 @@ turn-1 gate lands (§5, item 6).
    it as a standing second JS opinion — noting the parent already ships `js/resim.js` as
    *their* second implementation, so a third JS implementation needs a stated role, not a
    habit. The decision should be written down when the gate lands, not drifted into.
+7. **Absorb the parent's rules (b1040 → b1054), unmolested, with our take on top.** The
+   parent shipped 15 builds of rule changes since our merge, and the fork's standing
+   posture is that the JS layer is theirs to own. Merge their line in as-is, re-apply our
+   divergences (D1–D6 where they still apply, per `docs/FORK-DIVERGENCES.md` — the file
+   written for exactly this moment), measure what the merge does to the golden corpus (a
+   corpus re-derivation is an explicit decision with a section in CORE-REPLAN, never a
+   side effect), and record our own reading of their changes and our direction in the
+   rules ledgers.
 
 ## 6. What the study still wants to learn
 
