@@ -24,6 +24,7 @@ work lives on `rebuild/v2` (reconciled and pushed 5 October — see *Branch and 
 
 | Question | Command | Last measured |
 |---|---|---|
+| How do I run what exists, and what is left before the Odin engine is usable as is? | `docs/RUN.md` | written 5 Oct 2026 — every command in it verified that day, the milestone ladder current |
 | Do the Odin gates still pass (vectors, counts, coast, four map lines, no FMA, vet, corpus, turn-1 state view, leak tracker)? | `./spike/gates.sh` | 10/10 green, 5 Oct 2026 — gate 6 the turn-1 state view (8 lines byte-identical), gate 7 the leak tracker (mem.Tracking_Allocator, named and proven) |
 | Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026. Its role is decided (5 Oct): the line-map spec for the remaining transcription, retiring to provenance when the Odin port covers a whole match |
 | Does the Odin core reproduce turn 1? | `./spike/gates.sh` (gate 6) | green — 8 lines, 45,840 bytes, byte-identical, 5 Oct 2026 |
