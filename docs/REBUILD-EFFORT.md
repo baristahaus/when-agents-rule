@@ -43,8 +43,9 @@ retracted a test count, a tool list, a file path and a whole harness that never 
 
 ### 1.1 The gates, all green (run today)
 
-`./spike/gates.sh`, eight gates, zero red — the same run CI repeats (`.github/workflows/odin-gates.yml`,
-compiler pinned to `dev-2026-09`):
+`./spike/gates.sh`, eight gates, zero red — run locally, with the compiler at
+`dev-2026-09` (CI is off this repo since the owner's decision the same day;
+`docs/ci-disabled/` records the decision and keeps both workflow files):
 
 | gate | what it proves | today's answer |
 |---|---|---|
@@ -66,7 +67,9 @@ compiler pinned to `dev-2026-09`):
 - **The oracle regenerates.** Gate 5 re-runs `tools/golden/dump-states.cjs -at 0,1000`
   (civs `egyptian,greek,persian,yamato`) through `tools/golden/canonicalize-states.cjs`
   and byte-compares against `golden/states-b1040-t0-t1.canonical.jsonl` — 45,840 bytes,
-  8 lines. `ci.yml` does the same for the one-minute stream. A fixture that cannot be
+  8 lines. The one-minute stream is checked the same way, by command
+  (`tools/golden/record.cjs` and a `cmp`) — run locally; CI, which used to repeat it,
+  is off the repo (`docs/ci-disabled/`). A fixture that cannot be
   regenerated is a rumour; none of the gates depend on a rumour.
 - **One capture is provenance, not an oracle.** `golden/turn1-b1040.jsonl` (21,147 bytes)
   cannot be reproduced by today's reference at any whole step — its unit positions are the
@@ -167,7 +170,8 @@ recording, re-derived once at the merge. What it bought: a language-independent 
 the Rust port's byte-exactness survived the language swap precisely because the oracle
 never knew what a port was.
 
-**Layer 2 — the gates.** `spike/gates.sh` locally, `odin-gates.yml` in CI, ordered so each
+**Layer 2 — the gates.** `spike/gates.sh`, run by hand (CI existed on this repo for
+its first two days and is off it since 5 October 2026 — `docs/ci-disabled/`), ordered so each
 gate is cheap where cheap is possible: vectors (≈120 lines) → counts (≈90) → coast (≈150,
 as `f32` bit patterns) → map (≈230 plus a day of diagnosis) → FMA → vet → corpus. Three
 design rules in the gates are load-bearing: a gate that cannot run **says SKIP and why**
@@ -251,7 +255,9 @@ never existed (`docs/specs/REBUILD_SPEC.md`), a harness that never existed
 while writing this record: the turn-1 handover quotes its target fixture at 49,555 bytes;
 the file is 45,840 (corrected in place, with the date). In an agent-driven project prose
 compounds errors unless something re-measures; here that something is the gates — which
-fail in CI whether or not anybody read the document.
+fail on the next run whether or not anybody read the document. (They ran in CI for the
+two days this repo had CI; it is off since 5 October 2026 — `docs/ci-disabled/` — and
+the gates are unchanged, because a gate's teeth are the `cmp`, not the runner.)
 
 **L7 — Agents write confident wrong Odin; the compiler is the cheapest reviewer.** The
 first ~120-line spike needed four syntax corrections *found by the compiler, not by

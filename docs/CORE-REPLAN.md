@@ -415,7 +415,10 @@ decision and the one thing that makes the language-choice risk survivable:
 
 The skill is not documentation-by-fashion. It is the mechanism that converts "the agents
 know less Odin than Rust" from a reason not to choose Odin into a one-time cost — and unlike
-a style guide nobody reads, `gates.sh` fails in CI whether anybody read the skill or not.
+a style guide nobody reads, `gates.sh` fails on the next run whether anybody read the skill or
+not. *(CI, which repeated that failure automatically for the two days this repo had any, was
+removed by owner decision on 5 October 2026 — `docs/ci-disabled/`; the argument stands on the
+gate, not on the runner.)*
 
 ### 12.4 Two known-unknowns to settle in the spike, before any port
 

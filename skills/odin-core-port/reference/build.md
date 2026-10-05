@@ -64,8 +64,9 @@ and the add stay separate, which is what the reference's two roundings require. 
   rests on `Arena` plus discipline, not on a check. (The tarball puts `core/` at the top level, not
   under `base/`, which is why an early grep found nothing and suggested a missing feature.)
 - **The browser suite cannot be run on this machine.** `~/.cache/ms-playwright` does not exist, so
-  Playwright is absent here: the visual suites are CI-only, and the honest sentence about the UI
-  after a change is "CI has not looked at it", not "it is probably fine".
+  Playwright is absent here, and CI is off the repo (removed 5 October 2026, `docs/ci-disabled/`):
+  nothing automated runs the visual suites anywhere. The honest sentence about the UI
+  after a change is "nothing automated has looked at it", not "it is probably fine".
 
 ## The map gate, when it is attempted
 
