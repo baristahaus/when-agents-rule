@@ -41,10 +41,11 @@ recorded there and re-verified against the committed tree rather than trusted.
 | D4 | `storedDifficulty` reads `DIFFICULTY_MODS` bare in a VM without `terrain.js` | **applied** | no | `js/game.js` `storedDifficulty` |
 | D5 | Replay fog reveals dead owned units | open | no | `js/ui.js` `anApplyFog` |
 | D6 | `ordersInProgress.to/.from` lost their `minItems`/`maxItems: 2` | **applied** | no | `game-state-schema.json`, `tests/lib/schema-check.cjs` |
-| S1 | Seeded randomness: our one stream replaced by keyed draws | superseded, and now ported | yes | `js/simulation/rng.js`, `rust/core/src/prng.rs` |
+| S1 | Seeded randomness: our one stream replaced by keyed draws | superseded, and now ported | yes | `js/simulation/rng.js`, `spike/odin/main.odin` (the retired Rust port's `prng.rs` survives in tag `rust-core-final-b1040`) |
 | S2 | Unit refereeing off the render loop | superseded | yes | `js/simulation/position-rules.js` |
 | S3 | Boot split: `WAR_PRIVATE_HOST` and the `load` handler left `game.js` | superseded | no | `js/boot.js` |
 | S4 | An unfinished site counts only while a worker is ASSIGNED to it | superseded | yes | `js/game.js` `isPlayerEliminated` |
+| S5 | A population slot inside "can it afford an army" | superseded (b1054) | yes | `js/game.js` `canAffordAnyMilitary` |
 
 ---
 
@@ -198,10 +199,13 @@ typo our side carried (`b.z - b.z` in a distance expression).
 **Ported into the core, and where that landed matters.** The re-derived golden placed each
 seat's starting workers a few units from where our core put them, and the reason was exactly
 this entry: the reference draws the spread with `rand(who, 'start-workers')` while the core
-drew it off the terrain stream. So `rust/core/src/prng.rs` now has `KeyedRng` — same hash,
-same `mulberry32(hash(seed|key|n))`, same per-key counter — with vectors taken from
-`js/simulation/rng.js`, including the property the single stream cannot pass. Two files draw
-from it: `state.rs`, which builds the turn-1 state the gate compares, and the gate's own test.
+drew it off the terrain stream. So the port's RNG is a `KeyedRng` — same hash, same
+`mulberry32(hash(seed|key|n))`, same per-key counter — with vectors taken from
+`js/simulation/rng.js`, including the property the single stream cannot pass. (The Rust port
+that first carried it is retired; its `prng.rs` survives in tag `rust-core-final-b1040`, and
+the live descendant is `spike/odin/main.odin`, whose keyed vectors are gate 2 of
+`spike/gates.sh`. The "delete-or-wire" call on its unwired drafts below was settled the same
+way: the retirement deleted them, the tag preserves them.)
 
 One file does not, and saying so is the point: `rust/core/src/model.rs` carries the same
 change for a while and **is compiled by nothing** — `lib.rs` declares `data`, `mapgen`,
@@ -245,6 +249,27 @@ the constant rather than the file: `tests/host-classifier.test.cjs` now reads `j
 stayed behind in `game.js` — `warContextLost`, ours, called by the GPU-context listener the
 parent does not have — and `js/i18n.js` carries its two keys in all four languages.
 
+### S5 — A population slot inside "can it afford an army" (superseded by b1054, 5 October 2026)
+
+Our pre-sync fix added a room gate inside `canAffordAnyMilitary`: `population >= maxPopulation`
+returned false before any cost was read, because a rich seat with no Town Center and no house
+had a cap of zero — the executor refused at that line while the survival rule kept the match
+alive, and one seat spent 227 of 474 turns being offered units it could never field. The
+parent reached the same goal in b1054 with the gate in the right place: `isPlayerEliminated`
+reads `room` itself, spares a seat through a trainer or a Town Center only when it has one, and
+adds the climb-back clauses (a worker who can found a Town Center; a worker who can build a
+house the seat may build; a Town Center site to finish). `canAffordAnyMilitary` answers cost
+alone again, and their own test pins that ("it can pay for archers", with no slot).
+
+Applied since before the b1039 merge, and withdrawn at the b1054 merge when their test said so
+— found not by review but by `tests/elimination.test.cjs` failing red on the merged tree, which
+is the merge doing its job. `tests/elimination-predicate.test.cjs` still pins the outcome this
+entry existed for — a roomless rich seat is out, temple and all — now reached through the
+parent's layering; the one assertion that contradicted b1054 is inverted, with the supersession
+dated in the test. Rule impact: the source hash moves with any `game.js` change, but the golden
+traces did not — the recorded match exercises none of the changed paths (measured: stream and
+states oracle both regenerate byte-identically from the merged rules).
+
 ---
 
 ## Following the golden down
@@ -254,13 +279,16 @@ the fixtures must be re-derived. We did that once, at build 1040, and it is wort
 down what it took, because nothing in the tree says so.
 
 **The recorder had drifted out of existence.** `tools/golden/record.cjs` loaded its rules
-from a hand-written list of 33 path prefixes. `test/manifest.cjs` — the list `npm run
-audit` uses to prove every source file is covered — had grown three of those directories,
-so the recorder was simulating a world missing `js/simulation/rng.js`, its economy tables,
-its vision, and its commands. It still ran, still produced 604 well-formed lines per
-minute, and was describing a game that had not existed since the split it inherited. The
-recorder now builds its list from the manifest, so the two cannot disagree, and
-`tests/golden-manifest.test.cjs` fails if they ever do again.
+from a hand-written list of 33 path prefixes, and the list itself was the drift: it predated
+`js/simulation/*`, so the recorder was simulating a world missing `js/simulation/rng.js`,
+its economy tables, its vision, and its commands. It still ran, still produced 604
+well-formed lines per minute, and was describing a game that had not existed since the
+split it inherited. The recorder now builds its list from `js/manifest.js`'s `vm` field —
+the same files `index.html` loads, gated by `tests/boot-manifest.test.cjs` — so the two
+cannot disagree. (An earlier telling of this paragraph named `test/manifest.cjs`, `npm run
+audit` and `tests/golden-manifest.test.cjs` as the machinery; none of those ever existed —
+the retraction is recorded in `MERGE-STATE.MD`, and the correction is made here because a
+reader following the old names finds nothing.)
 
 **Three gates, and they disagree informatively.** After re-deriving, `cargo test` said the
 turn-1 state for all four seats differed from the recording in exactly six paths, and it
@@ -279,16 +307,26 @@ changing the game.
 **The worker jitter was our own divergence, surfacing as a fixture mismatch.** The
 reference spreads starting workers with `rand(who, 'start-workers')` — a keyed draw — while
 the core port drew from the terrain stream, the one-stream design S1 records as superseded.
-`KeyedRng` in `rust/core/src/prng.rs` closes it, with vectors taken from the reference
-implementation including the property the single stream could not offer: an unrelated key
-drawing in between cannot move the value. The map generator keeps its own stream and
-nothing else may read it.
+The port's `KeyedRng` closes it — same hash, same `mulberry32`, same per-key counter — with
+vectors taken from the reference implementation including the property the single stream
+could not offer: an unrelated key drawing in between cannot move the value. (It first lived
+in the Rust port's `prng.rs`, which survives in tag `rust-core-final-b1040`; the live
+descendant is `spike/odin/main.odin`, gate 2 of `spike/gates.sh`.) The map generator keeps
+its own stream and nothing else may read it.
 
 **What did not move.** All four seats still end in the stone age with nothing discovered and
 no winner, opening 200/200/100/50 and ending 0/50/100/50 after exactly two researches
 (`house`, `farm`). That the same degenerate invariants come out of a recorder 131 builds
 later is the best evidence in this merge that the rules we port are still the rules that
 ship.
+
+**The b1054 merge moved nothing either (5 October 2026, measured).** Fifteen more builds of
+rules — sight and memory, a hold mode, refusal codes, workers under orders, defeated seats
+leaving the board, population-room elimination — and both the one-minute stream and the
+states oracle regenerate byte-identically from the merged tree. The recorded match exercises
+none of the changed paths, so the b1040 corpus stays the contract, now proven against two
+rule versions: the fixtures describe a match the b1040 rules and the b1054+fork rules agree
+on, byte for byte. No re-derivation was needed, and none was done.
 
 ## Re-applying at the next sync
 

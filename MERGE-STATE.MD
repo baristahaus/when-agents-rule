@@ -4,8 +4,8 @@ One page that is always true about where this fork stands against the parent, wr
 that whoever picks it up next (including a future me with no memory) can rebuild the whole
 picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Last updated: 5 October 2026, at HEAD `f9dc0c3` on `sync/upstream-b1039` — the v2 line
-has moved past `rebuild/v2`; see *Branch and remote state* below.
+Last updated: 5 October 2026, at HEAD on `rebuild/v2`, after the b1054 merge — the
+parent's fifteen builds, absorbed with our divergences on top.
 
 ## The one-paragraph version
 
@@ -14,11 +14,11 @@ game). Our line keeps a handful of simulation fixes and a **byte-exact golden co
 (`golden/`) that holds any core to the shipped JS; the parallel Rust core that proved the
 porting method is **retired** (tag `rust-core-final-b1040`), and the v2 core is being
 rebuilt in **Odin** against the same corpus — its record is `docs/REBUILD-EFFORT.md`. We
-merged the parent through **build 1039** (`43ac04a`), re-applied our fixes on top, and
-**re-derived the golden** so any port is measured against the current rules instead of a
-year-old recording; the parent has since shipped 15 more builds (tip b1054), unmerged.
-`main` stays shippable v1 (the parent's JS); v2 work lives on `rebuild/v2` (reconciled
-and pushed 5 October — see *Branch and remote state*).
+merged the parent through **build 1054** (`c7fafd7`) on 5 October — fifteen builds absorbed
+with three conflicts and one supersession, our divergences re-applied, and the golden
+corpus measured unchanged by the merge (both the stream and the states oracle regenerate
+byte-identically from the merged rules). `main` stays shippable v1 (the parent's JS); v2
+work lives on `rebuild/v2` (reconciled and pushed 5 October — see *Branch and remote state*).
 
 ## Commands that answer every question here
 
@@ -28,9 +28,9 @@ and pushed 5 October — see *Branch and remote state*).
 | Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026 |
 | Does the Odin core reproduce turn 1? | *(in flight — `spike/turn1/main.odin` ~70%, does not compile yet; the map is `spike/turn1/HANDOVER.md`)* | not green yet |
 | Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl golden/stream-b1040-1m.jsonl` | byte-identical, 2,722,912 bytes (CI runs it) |
-| Is the game green? | `npm test` | 628/628, 5 Oct 2026 |
-| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 15 (parent tip b1054; last merged b1039) |
-| What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | 65 commits, 5 Oct 2026 |
+| Is the game green? | `npm test` | 671/671, 5 Oct 2026 (the parent's 43 new tests included) |
+| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1054, 5 Oct 2026) |
+| What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | 71 commits, at the b1054 merge |
 | Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7, 5 Oct 2026 |
 
 ## Branch and remote state
@@ -114,6 +114,40 @@ version. Restoring the constraint **broke `tests/contract.test.cjs`** first, bec
 `tests/lib/schema-check.cjs` throws on any keyword it has to guess at — and it did not know
 those two. So the keyword is now implemented (length, then elements) and a 1- or 3-element
 `to` is reported, which is what makes a contract that says `[x, z]` mean it.
+
+## The b1054 sync (5 October 2026) — fifteen builds, three conflicts, one supersession
+
+`git merge upstream/main` at parent `c7fafd7` (b1054), fork side at `a16bcba`. Thirty files
+changed on their side since b1039; **three conflicted**:
+
+- `index.html` — their stamps taken (`ui.js?v=1046`, `game.js?v=1054`); our
+  `position-rules.js?v=1040` stays, because that file carries D1/D2 and a fork-modified
+  file must not share a cache key with the parent's.
+- `tools/bench/taxonomy.cjs` — the union: their `moveBadMode` and `targetOutOfSight`, plus
+  our `badCount`, which our harness emits (`js/openai-ai.js` `log.out.badCount`) and their
+  tree never had.
+- `js/game.js` — one region, `isPlayerEliminated`'s site clause: took their b1054 line; our
+  comment block still argued the superseded S4.
+
+**One supersession the conflicts did not show.** Their new test
+`tests/elimination.test.cjs` ("a trainer and a full bank do not keep a seat in without a
+population slot") failed red on the merged tree — our pre-sync room gate inside
+`canAffordAnyMilitary` answered "it can pay for archers" with false. b1054 gates the room in
+the predicate itself, so our gate is withdrawn (FORK-DIVERGENCES S5); outcomes unchanged, our
+pin test now asserts them through the parent's layering. That is the merge doing its job: the
+failure was found by a test, not by a review.
+
+**Measured after, not before:** `npm test` **671/671** (was 628; the parent's 43 new tests
+included); the one-minute golden stream regenerates **byte-identically** from the merged
+rules; the states oracle regenerates **byte-identically** (b1042's `seenAlive`/
+`seenSecondsAgo` are omitted at t=0/t=1000, where no seat has met a rival); the frozen JS
+port still passes its gate against the unchanged fixture. **No re-derivation** — the b1040
+corpus is now proven against two rule versions, which is the strongest thing that can be
+said about a fixture.
+
+**Divergences after the merge:** D1, D2, D3, D4, D6 verified present; S1–S5 all superseded
+(S5 new at this merge); **D5 still open** — their b1046 fixed the replay director's ghosts,
+not `anApplyFog`'s dead-owned-units path.
 
 ## The golden, and the one time we move it
 

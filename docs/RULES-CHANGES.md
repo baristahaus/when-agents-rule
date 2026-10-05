@@ -6,6 +6,39 @@ Most entries come from the determinism work: making a match replay exactly from 
 
 Newest first. The build is the `?v=` number on `js/game.js` in `index.html`.
 
+## Fork rules (not a parent build): what this tree adds to b1054 (5 October 2026)
+
+This is the fork's own section, added 5 October 2026 at the b1054 merge; every entry below
+it is the parent's, unmolested. This tree carries the parent's build plus its own
+divergences, one entry per behaviour in `docs/FORK-DIVERGENCES.md`. Three of them change what
+happens in a match, so a result from the parent's b1054 and a result from this tree are not
+comparable — the contract fingerprint recorded in every transcript separates them, and the
+golden corpus pins both sides: the b1040 fixtures regenerate byte-identically from this tree
+(measured 5 October 2026, stream and states oracle both).
+
+- **D1 — coincident units separate.** In the parent's rules two units landing on the same
+  point stay there; `js/simulation/position-rules.js` here pushes them apart the way every
+  other overlap is resolved.
+- **D2 — a unit standing on a building's origin escapes by its own bearing.** The parent's
+  rules send it to one fixed point southeast of the building whatever the approach direction;
+  here the exit follows the unit's own bearing into the site. Same file.
+- **D3 — a temple counts as a trainer exactly when the seat is told priests are available.**
+  The parent's rules answer "what trains here" twice and disagree: the survival predicate
+  reads the tier table only (a temple trains nothing, so a temple-only seat is eliminated)
+  while the model-facing vocabulary falls back to the building def (priests are offered).
+  Here `Game.trainOptionsFor` resolves both in one place — the predicate and the vocabulary
+  cannot disagree — pinned by `tests/elimination-predicate.test.cjs`.
+
+Withdrawn at this merge, because the parent solved it better: **S5**, our population-room
+gate inside `canAffordAnyMilitary`. The parent's b1054 gates the room in
+`isPlayerEliminated` itself, with climb-back clauses; `canAffordAnyMilitary` answers cost
+alone again, and the outcome (a roomless rich seat is out, however rich) is unchanged.
+
+The fork's direction is not more JS rules. The JS layer stays the parent's to own, and this
+tree's own work is the Odin core, held to these rules by the byte-exact golden corpus — the
+record of that effort is `docs/REBUILD-EFFORT.md`, the design is `docs/DESIGN_SPEC.md` §14
+and `docs/REBUILD_PROPOSAL.md`.
+
 ## Build 1054: producing needs a free population slot (4 October 2026)
 
 **Rules change (elimination); `game.js` changed.**

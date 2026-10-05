@@ -2,8 +2,9 @@
 
 Status: **the live record of the v2 rebuild effort** — where the port stands, what the method
 is, what each piece cost, and what the effort is teaching us. Updated as work lands, not at
-the end. Written at HEAD `f9dc0c3` plus an uncommitted working tree, **5 October 2026**;
-every number below was measured that day unless it names the date it was measured.
+the end. Written 5 October 2026, and revised the same day after the branch reconciliation
+and the b1054 merge; every number below was measured that day unless it names the date it
+was measured.
 
 What this document is *not*. It is not the product spec (`docs/DESIGN_SPEC.md` — what must be
 true), not the plan (`docs/REBUILD_PROPOSAL.md` — what we build, in what order), not the
@@ -72,19 +73,24 @@ compiler pinned to `dev-2026-09`):
   opening ones, its clock reads 1, and its `map`/`nodes`/`nearestNodes` match no single
   moment. The manifest says so, the corpus test asserts it, and §3's L4 records why.
 
-### 1.3 The middle layer — the frozen JS port (uncommitted, gate green)
+### 1.3 The middle layer — the frozen JS port (gate green, b1054-current)
 
-`tools/trace-states-port.cjs`, **1,807 lines, untracked**, is a re-implementation of the
+`tools/trace-states-port.cjs`, **1,807 lines**, is a re-implementation of the
 entire turn-1 path — RNG, terrain, civ tables, the game core, `WarPositionRules`, the
 250 ms discovery beat, and the whole `observe()` state view — run headless in Node.
 Measured today: `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl`
-prints **`GATE PASS: 8 lines, byte-identical`**. Why it exists and what it cost is §2's
-layer 3; how to read it is `spike/turn1/HANDOVER.md` §2 (a line map from a keyed draw to
-the canonicalizer).
+prints **`GATE PASS: 8 lines, byte-identical`** — before and after the b1054 merge, whose
+elimination semantics it was updated to match the same day (the superseded fork gate inside
+`canAffordAnyMilitary` removed, the parent's `room` gate and climb-back clauses transcribed
+into the predicate). One part of the reference is honestly *not* transcribed yet: the
+b1041/b1042 enemy-unit memory machinery, invisible at this gate's two moments and required
+at the first gate with contacts in it (P0(c)); the port's header says so. Why the layer
+exists and what it cost is §2's layer 3; how to read it is `spike/turn1/HANDOVER.md` §2
+(a line map from a keyed draw to the canonicalizer).
 
 ### 1.4 The Odin transcription — in flight, ~70%, does not compile
 
-`spike/turn1/main.odin`, **2,028 lines, untracked**, is the transcription of the port into
+`spike/turn1/main.odin`, **2,028 lines**, is the transcription of the port into
 Odin: one file, package `main`, byte-exact against the same 8-line fixture. Measured today,
 not inherited:
 
@@ -109,16 +115,15 @@ and the keyed worker spread (both checked against the raw golden bytes).
 
 ### 1.5 The suite and the tree
 
-`npm test` → **628/628** (the fork ledger's 622 was true at build 1040; the corpus gate
-added six). `node --test tests/contract.test.cjs` → 7/7. The ledger's caveat stands:
+`npm test` → **671/671** (628 before the b1054 merge; the parent's 43 new tests included
+— hold mode, enemy memory, history window, elimination-clear among them).
+`node --test tests/contract.test.cjs` → 7/7. The ledger's caveat stands:
 `npm test`'s glob runs `tests/*.test.cjs` and `tests/sim/*.test.cjs` only, so test files
 sitting beside their `js/` sources are not in it.
 
-Uncommitted in the tree: `spike/turn1/` (the WIP plus `HANDOVER.md`), 
-`tools/trace-states-port.cjs`, and the deletion of `.agents/skills/beads/` (SKILL.md and
-its agent config) — the beads embedded backend is append-only, which is recorded at
-`docs/MERGE-STATE.MD` (the 2026-10-04 note), and the project skill was a duplicate of the
-global one.
+The tree is committed and pushed: the four morning commits (the JS port, the turn-1 WIP
+with its handover, the beads-skill retirement, the docs pass), the branch reconciliation,
+and the b1054 merge with its ledgers. The working tree is clean.
 
 ### 1.6 The branches — measured, then decided (5 October 2026)
 
@@ -138,9 +143,10 @@ Decided by the owner the same day, and enacted:
 - **`sync/upstream-b1039` is retired** (deleted locally and on origin; its tip was an
   ancestor of the new `rebuild/v2`). `work/v2-core`, a stale duplicate of the pre-merge
   snapshot, went with it. `save/pre-upstream-sync` = `33a1f11` stays as the abort path.
-- The parent is **15 builds ahead** of our merge point (tip b1054; we merged through
-  b1039). Our line carries **65 commits** since the fork point. Absorbing the parent's
-  new rules is §5's seventh item.
+- The parent's fifteen builds are **absorbed** (b1040 → b1054, merged 5 October, §5's
+  seventh item): three conflicts, one supersession found by their own test, the golden
+  corpus measured unchanged by it. Our line carries **71 commits** since the fork point
+  and is **0 builds behind** the parent.
 
 ## 2. The method — five layers, and why each exists
 
@@ -376,14 +382,17 @@ turn-1 gate lands (§5, item 6).
    it as a standing second JS opinion — noting the parent already ships `js/resim.js` as
    *their* second implementation, so a third JS implementation needs a stated role, not a
    habit. The decision should be written down when the gate lands, not drifted into.
-7. **Absorb the parent's rules (b1040 → b1054), unmolested, with our take on top.** The
-   parent shipped 15 builds of rule changes since our merge, and the fork's standing
-   posture is that the JS layer is theirs to own. Merge their line in as-is, re-apply our
-   divergences (D1–D6 where they still apply, per `docs/FORK-DIVERGENCES.md` — the file
-   written for exactly this moment), measure what the merge does to the golden corpus (a
-   corpus re-derivation is an explicit decision with a section in CORE-REPLAN, never a
-   side effect), and record our own reading of their changes and our direction in the
-   rules ledgers.
+7. **Absorb the parent's rules (b1040 → b1054) — done, 5 October 2026.** Merged at
+   `c7fafd7`: three conflicts (their stamps, the taxonomy union with our `badCount`, their
+   b1054 site clause), one supersession their own test caught (our room gate inside
+   `canAffordAnyMilitary`, withdrawn — FORK-DIVERGENCES S5), D1–D4/D6 verified intact,
+   D5 still open. **The golden corpus survived the merge byte for byte** — both the
+   one-minute stream and the states oracle regenerate identically from the merged rules,
+   because the recorded match exercises none of the changed paths — so no re-derivation
+   was needed or done, and the b1040 fixtures are now proven against two rule versions.
+   Our own reading of their changes and our direction is in the rules ledgers: a fork
+   section in `docs/RULES-CHANGES.md`, the spec's §2/§4/§5/§13.2 updated for the absorbed
+   rules, and the sync story in `MERGE-STATE.MD`.
 
 ## 6. What the study still wants to learn
 

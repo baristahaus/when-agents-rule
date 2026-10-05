@@ -38,6 +38,16 @@
 //   ai manager   js/ai.js                      (the 250 ms discovery beat)
 //   state view   js/openai-ai.js observe()     (the whole buildGameStateJSON)
 //
+// Updated 5 October 2026, after the b1054 merge: isPlayerEliminated and
+// canAffordAnyMilitary below are the parent's b1054 semantics (the room gate
+// lives in the predicate; cost alone answers the afford question). One part of
+// the b1041/b1042 reference is NOT yet transcribed here: the enemy-unit memory
+// machinery (enemyUnits as remembered contacts, gameStats.opponents[].
+// seenAlive/seenSecondsAgo, the pruned recentEvents). It is invisible at this
+// gate's two moments — no seat has met a rival at t=0 or t=1000, which is why
+// the fixture and this port still agree byte for byte — and it becomes required
+// at the first gate with contacts in it (the whole-match gate, P0(c)).
+//
 // One deliberate simplification, flagged here rather than hidden: the
 // reference's WarMath (js/simulation/math.js) is a portable fdlibm port
 // because BROWSERS disagree in the last bit; on x64 Node it equals Math to
@@ -743,29 +753,41 @@ function makeGame() {
         return (ai.civilization || 'seat') + '-' + (seat > 0 ? seat : '?');
     };
 
-    // Is this player out of the match? Four ways back in, in order: a live
-    // fighter, a producing trainer, the funds for one, or a site to finish /
-    // a Town Center to gather into / the funds for one.
+    // Is this player out of the match? The parent's b1054 predicate, transcribed after
+    // the 5 October merge: a live fighter or a producing trainer or a unit in training;
+    // then the trainers and the Town Center, each gated on a population slot (`room`);
+    // then the climb-back clauses — a worker who can found a Town Center, build a house
+    // it may build, or finish a Town Center site (a producer site counts only with room).
+    // The fork's old gate inside canAffordAnyMilitary is gone: b1054 moved the room into
+    // this predicate, and canAffordAnyMilitary answers cost alone again (the parent's own
+    // test pins that; FORK-DIVERGENCES S5).
     game.isPlayerEliminated = function (ai) {
         if (!ai || ai._eliminated) return true;
         const units = (ai.units || []).filter(u => u.health > 0);
         if (units.some(u => u.type !== 'worker' && u.unitType !== 'support')) return false;
         const buildings = (ai.buildings || []).filter(b => b.health > 0);
         if (buildings.some(b => !b.underConstruction && b.isProducing && b.productionType)) return false;
-        if (this.canAffordAnyMilitary(ai)) return false;
+        const cap = ai.resources && ai.resources.maxPopulation;
+        const room = typeof cap !== 'number' || cap > units.length;   // no cap known: not the gate
+        if (room && this.canAffordAnyMilitary(ai)) return false;
         const can = cost => !!(ai.resources && cost && ai.resources.hasResources(cost));
         const def = id => getUnitDefFor(ai.civilization, id);
         const workerCost = (def('worker') || {}).cost || { food: 50 };
         const townCenter = buildings.some(b => b.type === 'town_center' && !b.underConstruction);
-        if (townCenter && can(workerCost)) return false;
+        if (townCenter && room && can(workerCost)) return false;
         if (!units.some(u => u.type === 'worker')) return true;
         const producer = b => b.type === 'town_center' || this.militaryOptions(ai, b.type).length > 0;
-        if (buildings.some(b => b.underConstruction && producer(b))) return false;
+        if (buildings.some(b => b.underConstruction && (b.type === 'town_center' || (room && producer(b))))) return false;
         if (townCenter) return false;
         const bdef = t => getBuildingDef(t);
         const tcCost = (bdef('town_center') || {}).cost || { food: 100, wood: 100, stone: 100, gold: 100 };
         if (can(tcCost)) return false;
-        for (const t of ['barracks', 'archery_range', 'stable']) if (can((bdef(t) || {}).cost)) return false;
+        if (room) {
+            for (const t of ['barracks', 'archery_range', 'stable']) if (can((bdef(t) || {}).cost)) return false;
+        } else {
+            const house = bdef('house');
+            if (house && can(house.cost) && (!house.requiresTech || (ai.researchedTechs && ai.researchedTechs[house.requiresTech]))) return false;
+        }
         return true;
     };
 
@@ -796,9 +818,10 @@ function makeGame() {
     };
 
     // A seat with a living trainer it can afford from is not yet eliminated.
+    // Cost alone — b1054 moved the population-room gate into isPlayerEliminated
+    // (the `room` line there), where it belongs; the fork's old gate here is gone.
     game.canAffordAnyMilitary = function (ai) {
         if (!ai || !ai.buildings || !ai.resources) return false;
-        if (ai.resources.population >= ai.resources.maxPopulation) return false;
         const aIdx = AGE_ORDER.indexOf(ai.age);
         for (const b of ai.buildings) {
             if (!(b.health > 0) || b.underConstruction) continue;

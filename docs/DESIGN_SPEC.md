@@ -336,14 +336,22 @@ rules as the game enforces them; the *contract* by which a model is told those r
 A *standing order* is persistent group intent issued by a controller to a set of units:
 it survives across turns, re-forms as members die, and knows what the group is for.
 
-- **Four modes:**
+- **Five modes** (the fifth added upstream, b1044/b1045):
   - `march` — move the group to a point, in formation, at a matched pace;
   - `scout` — move while not initiating combat at all (damage still triggers the
     retaliation of §2.7);
   - `guard` — hold a position (a guard on a target guards the target's *last observed*
     location if it dies between scans);
   - `patrol` — shuttle between two points, with engagement measured by distance to the
-    route, not to a single point.
+    route, not to a single point;
+  - `hold` — stand at a post in formation slots and defend what the seat owns there:
+    each unit attacks unprovoked only what its own attack range covers from its slot
+    (plus 1), answers an attacker within a fixed leash of 19 — one past the longest
+    reach in the game, so nothing can shoot a holding unit from where it may not go —
+    and, since b1045, defends *anything of the seat's* within that leash (a unit, a
+    building, a farm), not only its own group. A worker under any order, hold included,
+    never picks a fight (b1052): it answers only the unit that has hit it in the last
+    4 s, within its usual 30.
 - **A new order replaces the group's previous assignment** (with a generation token, so
   a stale order can never be re-issued over the fresh one); reassigned members leave the
   old formation immediately.
@@ -369,11 +377,15 @@ it survives across turns, re-forms as members die, and knows what the group is f
 The state separates *what is happening to you* from *what you know*:
 
 - `threats.underAttack`: your units/buildings that took damage in the last few seconds,
-  each with the attacker's position (when known) — "defend now".
+  each with the attacker's position (when known) — "defend now" — and, since b1042,
+  `noDefenders: true` when nothing answers.
 - `threats.enemyWonders`: every rival Wonder, complete or under construction, with its
   win-countdown — an always-visible existential threat.
-- `recentEvents`: up to eight one-line events (losses, kills, raids) with ages, e.g.
-  *"12s ago: LOSS: your house at (140, −80) — destroyed by egyptian"*.
+- `recentEvents`: up to eight one-line events, with ages, about **what became of the
+  seat's own orders** — an attack that found nothing, a node that ran dry under its
+  workers. Since b1042 this channel carries *only* order outcomes: contact lines moved
+  to the enemy-unit memory (§4.2), attack alarms to `threats.underAttack`, and
+  building losses to `recentLosses`.
 - `recentLosses`: your own buildings destroyed in the last two minutes, with the rival
   responsible when known — because a building simply *disappears* from the friendly list
   when it falls, and without this a structure you were told you had (a Wonder above all)
@@ -396,10 +408,13 @@ The state separates *what is happening to you* from *what you know*:
 game still asks of it. Concretely, a seat is *spared* when, at the moment of checking,
 it can still **field a military unit** — which the game decides from its *own training
 tables* (the same resolution order the training panel and the model-facing vocabulary
-use: host building present — finished, or under construction with a living worker on
-it —, unit affordable, age reached, **and a population slot to stand the unit in**) — or
-when it still holds **a Town Center, or a worker plus the resources to rebuild one**.
-Otherwise it is eliminated: no army, no way to field one, no base, no way to raise one.
+use: host building present and finished, unit affordable, age reached, **and a population
+slot to stand the unit in**) — or when it still holds **a Town Center, or a worker plus
+the resources to climb back**: found a Town Center, build a house it may build (its tech
+researched), or finish a Town Center site (b1054's climb-back clauses; an unfinished
+producer counts only with population room — a seat with nothing but a trainer and a full
+bank is out). Otherwise it is eliminated: no army, no way to field one, no base, no way
+to raise one.
 
 Design laws pinned around this predicate:
 
@@ -413,8 +428,14 @@ Design laws pinned around this predicate:
   surviving Temple has a cap of zero and cannot stand even the priest the Temple could
   train; that seat is out, however much gold it holds — and it is *told so*, because the
   same list it reads marks every such unit `blockedBy: ["pop"]`.
-- *Defeat is public but sparse.* A defeated rival remains listed (civ and age visible) as
-  a public true/false status; no locations, no terrain, no counts.
+- *Defeat is public but sparse, and final.* A defeated rival remains listed (civ and age
+  visible) as a public true/false status; no locations, no terrain, no counts. Since
+  b1053 the defeat is also *physical*: at the step a seat is found eliminated,
+  everything it still has is removed, with the usual death and collapse effects,
+  quietly — no battle losses, no lost-building notes, because nothing was destroyed by
+  anyone — and other seats forget its buildings as they already forgot its units. Only
+  matches with three or more seats are affected (with two, the first elimination ends
+  the match).
 - *The Wonder is a second base.* Losing it is reported in `recentLosses` with a flag,
   because it *is* the win condition and its vanishing must not be silent.
 
@@ -682,6 +703,19 @@ The design properties of the snapshot:
 - **It is fog-limited, completely.** The seat sees only what its own units and buildings
   have discovered, and it is told that a zero and an empty list each mean something
   specific (unscouted; nothing in sight).
+- **It remembers enemies, not just sights** (b1041/b1042). A rival unit once seen stays
+  in `enemyUnits` as the seat's memory: `visible: true` is in sight now; `visible:
+  false` is how and where it was last seen, with `secondsAgo`, its health and a
+  worker's cargo *as seen*, and a `sightedAt` heading when it moved from there. Fifty
+  are listed, in sight first then most recently seen; a unit leaves the list only for
+  what the seat could know — seen to die, killed by the seat's own units, or its owner
+  defeated — so one that died unseen stays remembered: dropping it would say it died.
+  Attack by id names only an enemy in sight, or a building; a remembered unit is
+  refused with its last-seen spot and age (`targetOutOfSight`). And
+  `gameStats.opponents[]` carries `seenAlive` and `seenSecondsAgo` for rivals already
+  met — counts by type of their units seen and not seen die, including ones whose
+  whereabouts were lost — so a 30-strong army that slipped away is no longer forgotten
+  with its last position.
 - **It separates the four ways a seat can be stuck.** Every unit, building, and tech the
   seat will ever be able to order is listed, split into *what you may order this turn*
   and *what you may not yet* — and in the second list, **each entry names its structural
@@ -743,7 +777,11 @@ that the old order, state-first, made the model answer a stale old result):
    - *minimize tokens*: each past move as one line (action, one-line reason, outcome),
      kept newest-first, filled to the remaining budget;
 3. the **current full state, always the last message** — the thing the turn is decided
-   from;
+   from; since b1043 it is sent as **one line, without whitespace** (indented JSON
+   measured 1.9× the characters of the same state, and the A/B found no difference in
+   how models read it — prompts at the same turn came out 1.2k–9.5k tokens smaller).
+   The transcript still stores the state as an object, and the viewers still show it
+   indented;
 4. any spectator **advice** sent to the seat (appended after the state).
 
 **Budgeting.** History is sized to *each model's context budget*: the seat's
@@ -756,7 +794,11 @@ plus 1500 of margin), then 80% of the balance as the history slice, estimated at
 pessimistic ~3-chars-per-token (dense JSON tokenizes well under 3.5). The slice has a
 2000-token floor, and a self-healing shrink factor — the ×0.7 ratchet of the
 self-healing paragraph below — multiplies it. A 128K model therefore remembers more of
-the match than a 32K one.
+the match than a 32K one. Since b1052 the window's *start* stays put while the history
+fits, and on overflow it jumps forward once, leaving 60% of the budget as history
+(`HISTORY_REFILL`): one full prefix recompute per jump — about every 85 turns in the
+measured match, instead of every turn — at the cost of the model seeing on average
+~80% of the budget as history rather than 100%.
 
 **Self-healing history.** The prompt is rebuilt from scratch every turn, so the harness —
 not any server's truncation rules — decides exactly what the model sees. Two failure
@@ -963,8 +1005,12 @@ in the middle of one seat's play".
    snapshots readable as "asked, missed" rather than "thought for fifteen
    minutes"), `request_failed` (a model request died; its category is recorded),
    `request_cancelled` (a cancellation, with its reason — e.g. the harness called it
-   off), and `final_word` (each seat's closing debrief at the end: the outcome, the
-   text, and a final full snapshot). The format is open-ended: any line with a type
+   off), `checkpoint` (since b1048, written every 200 steps / ten game seconds: the
+   world hash and a per-seat digest — resources, age, research, one hash per unit and
+   building — with no input, so a replay that diverges *names where it left its
+   recording*; every sixth checkpoint adds per-entity detail, so it names the entity
+   and the kind of field), and `final_word` (each seat's closing debrief at the end:
+   the outcome, the text, and a final full snapshot). The format is open-ended: any line with a type
    other than match/results/timeline is a marker, and the reader renders an unknown
    kind raw. A marker seals every open turn of that seat first, so it never jumps
    ahead of the turn it follows.
@@ -1781,6 +1827,11 @@ a new stack must *decide*, with the stated context for each:
    a unit that was seen and then walked into fog is currently "never lost, yet" —
    chased as the crow flies — and the memory refinement was *deliberately not
    implemented* as a side effect of the sight fix. Design decision, not oversight.
+   *(Answered upstream, b1041/b1042, absorbed here 5 October 2026: the seat now
+   remembers enemy units — last-seen position, an age, a leave rule, and an
+   attack-by-id refusal — as §4.2 records. The item stays listed because a rebuild
+   must still decide how its own core implements the memory; the parent's is now the
+   reference answer.)*
 3. **The late-answer rejection rule.** The measurements now exist per turn
    (`lateByRounds`) and per seat (`lateAnswers`, `lateAnswerMax`); *whether* an
    answer to a resolved round should ever be dropped is a gameplay decision (dropping

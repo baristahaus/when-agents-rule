@@ -37,10 +37,14 @@ golden/states-b1040-t0-t1.canonical.jsonl   (45,840 bytes, 8 lines — the targe
 
 ## 2. The spec: the verified JS port (frozen — do not modify)
 
-`tools/trace-states-port.cjs` (~1,810 lines) is a byte-verified transcription
+`tools/trace-states-port.cjs` (1,830 lines) is a byte-verified transcription
 of the reference (`js/game.js` + `js/openai-ai.js` + `js/civilizations.js` +
 `js/terrain.js` + `js/engine/texgen.js`). It passed `GATE PASS` in this session
-(run command in §4). **When in doubt, the port is the spec — read its
+(run command in §4), and was updated 5 October after the b1054 merge — the elimination
+predicate (lines 764–815) is now the parent's b1054 semantics (the `room` gate lives in
+`isPlayerEliminated`; `canAffordAnyMilitary` at 823 answers cost alone). The b1041/42
+enemy-unit memory is not transcribed yet; it is invisible at t=0/t=1000 and becomes
+required at the first gate with contacts. **When in doubt, the port is the spec — read its
 functions, not the browser game.** Key line map:
 
 | Concern | Port location |
@@ -55,7 +59,7 @@ functions, not the browser game.** Key line map:
 | `markExploration` (42×42), `explorationSummary` (7×7, %), `tileLabelAt` | 659–720 |
 | `updateRivalContacts` (monotonic first-contact memory) | 722–740 |
 | `seatLabel` → **opponent ids are `<civ>-<seat+1>`** | 742–750 |
-| `isPlayerEliminated` (four ways back in), `militaryOptions`, `canAffordAnyMilitary` | 752–815 |
+| `isPlayerEliminated` (b1054 semantics: the `room` gate, the climb-back clauses), `militaryOptions`, `canAffordAnyMilitary` (cost alone) | 764–837 |
 | `stepOnce` (the 50 ms step, §3.5) | 822–845 |
 | `WarPositionRules` (worker movement; the ONLY thing that moves units here) | 851–895 |
 | `makeAIPlayer` / `makeAIManager` (250 ms discovery beat) | 901–960 |
