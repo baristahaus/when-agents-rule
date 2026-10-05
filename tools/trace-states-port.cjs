@@ -24,6 +24,16 @@
 // applies between two recorded runs, and a fixture that only matches under
 // one id scheme would hide a drift in exactly that scheme.
 //
+// ROLE (decided 5 October 2026, the day the Odin turn-1 gate landed — see
+// docs/REBUILD-EFFORT.md §5 item 6): this file is the LINE-MAP SPEC for the remaining
+// transcription. The remaining gates — the enemy-unit memory (b1041/42), the enemy-building
+// memory, the rule brain, the whole-match sequence P0(c) — are transcribed from the functions
+// below, not from the browser game. It retires to provenance when the Odin port covers a whole
+// match (the rule-brain gate green, P0(c) green) and becomes the second oracle; the
+// “standing second JS opinion” role is declined — the parent already ships js/resim.js as
+// their second implementation, and a third JS implementation without a stated role is a habit,
+// not a check.
+//
 // What is re-implemented, and from which reference file:
 //   rng          js/simulation/rng.js          (keyed draws, id minting)
 //   terrain      js/terrain.js                 (seeded scatter, TC clearance)

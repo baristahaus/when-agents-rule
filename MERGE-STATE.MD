@@ -25,7 +25,7 @@ work lives on `rebuild/v2` (reconciled and pushed 5 October — see *Branch and 
 | Question | Command | Last measured |
 |---|---|---|
 | Do the Odin gates still pass (vectors, counts, coast, four map lines, no FMA, vet, corpus, turn-1 state view, leak tracker)? | `./spike/gates.sh` | 10/10 green, 5 Oct 2026 — gate 6 the turn-1 state view (8 lines byte-identical), gate 7 the leak tracker (mem.Tracking_Allocator, named and proven) |
-| Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026 |
+| Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026. Its role is decided (5 Oct): the line-map spec for the remaining transcription, retiring to provenance when the Odin port covers a whole match |
 | Does the Odin core reproduce turn 1? | `./spike/gates.sh` (gate 6) | green — 8 lines, 45,840 bytes, byte-identical, 5 Oct 2026 |
 | Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl golden/stream-b1040-1m.jsonl` | byte-identical, 2,722,912 bytes (run it locally — CI is off the repo since 5 Oct 2026, `docs/ci-disabled/`) |
 | Is the game green? | `npm test` | 671/671, 5 Oct 2026 (the parent's 43 new tests included) |

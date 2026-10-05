@@ -403,12 +403,21 @@ turn-1 gate lands (§5, item 6).
    whole match then needs the rule brain, which is the first *behaviour* the port will
    have to agree on rather than a projection of state; then the P0(c) state-sequence
    gate; then P1 (the daemon, the event stream, the match folder) per the proposal.
-6. **Decide the fate of layer 3.** Once the Odin port passes the turn-1 gate,
-   `trace-states-port.cjs` has three possible lives: retire it (the Odin port becomes the
-   second oracle); keep it as the line-map spec for the remaining transcription; or keep
-   it as a standing second JS opinion — noting the parent already ships `js/resim.js` as
-   *their* second implementation, so a third JS implementation needs a stated role, not a
-   habit. The decision should be written down when the gate lands, not drifted into.
+6. **The fate of layer 3 — decided 5 October 2026, the day the turn-1 gate landed.**
+   `trace-states-port.cjs` stays as **the line-map spec for the remaining transcription**,
+   with a stated end date and a declined alternative:
+   - **Why it stays:** the remaining gates still read it. The enemy-unit memory (b1041/42),
+     the enemy-building memory, the rule brain and the whole-match sequence (P0(c)) are
+     transcribed from its functions — its header already says which parts of the reference
+     it does not carry, and those are exactly the parts the contacts gate will need first.
+     Retiring it now would orphan the next gates' spec.
+   - **Its end date:** when the Odin port covers a whole match (the rule-brain gate green,
+     P0(c) green), the Odin port becomes the second oracle and this port retires — to
+     provenance, like the raw captures: the frozen spec the transcription was read from.
+   - **Declined: the standing second JS opinion.** The parent already ships `js/resim.js`
+     as their second implementation; a third JS implementation without a stated role is a
+     habit, not a check. The stated role is "the spec", and it has an end date.
+   The decision is also stated in the port's own header, where the next reader will look.
 7. **Absorb the parent's rules (b1040 → b1054) — done, 5 October 2026.** Merged at
    `c7fafd7`: three conflicts (their stamps, the taxonomy union with our `badCount`, their
    b1054 site clause), one supersession their own test caught (our room gate inside
