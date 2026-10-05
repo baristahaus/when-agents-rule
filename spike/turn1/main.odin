@@ -1123,6 +1123,7 @@ seat :: struct {
 	seen_amt: [1024]f64, // the seen amount the harness caches with the node
 	seen_set: [1024]byte,
 	explored: [42 * 42]byte, // the exploration bitmap, one per 19-unit cell
+	met: [4]bool, // first-contact memory: has this seat ever seen rival <i>?
 	k: keyed_rng,
 }
 
@@ -1131,6 +1132,7 @@ game_state :: struct {
 	terrain: terrain,
 	match_ms: f64, // clock.matchMs: 50 per step at the arena's 1x pace
 	step_no: int,
+	discovery_timer: f64, // the 4 Hz beat's own accumulator (mgr.update)
 }
 
 // resetTimeline: a fresh match — population 0, the match clock 0, the
@@ -2798,6 +2800,192 @@ observe_line :: proc(o: ^obs) {
 	j_end_obj(j) // the fixture line
 }
 
+// ===========================================================================
+// The 50 ms step and its machinery (port 822-845 and its pieces).
+// ===========================================================================
+
+// markExploration (port 671): the 42x42 bitmap; a unit's or building's sight
+// disc marks the cells it covers, forever — the fog's memory of the map.
+mark_exploration :: proc(s: ^seat, size: f64) -> int {
+	G := 42
+	cell := size / f64(G)
+	half := size / 2
+	marked := 0
+	mark :: proc(s: ^seat, x: f64, z: f64, rng: f64, cell: f64, half: f64) {
+		G := 42
+		cr := cast(int)(math.ceil(rng / cell))
+		cx := cast(int)(math.floor((x + half) / cell))
+		cz := cast(int)(math.floor((z + half) / cell))
+		for dz := -cr; dz <= cr; dz += 1 {
+			for dx := -cr; dx <= cr; dx += 1 {
+				gx := cx + dx
+				gz := cz + dz
+				if gx < 0 || gx >= G || gz < 0 || gz >= G {
+					continue
+				}
+				wx := (f64(gx) + 0.5)*cell - half
+				wz := (f64(gz) + 0.5)*cell - half
+				ddx := wx - x
+				ddz := wz - z
+				if math.sqrt(ddx*ddx + ddz*ddz) <= rng {
+					s.explored[gz*G + gx] = 1
+				}
+			}
+		}
+	}
+	for i in 0 ..< s.n_units {
+		u := &s.units[i]
+		if u.health > 0 {
+			mark(s, u.x, u.z, unit_vision(u), cell, half)
+			marked += 1
+		}
+	}
+	if s.home.health > 0 {
+		mark(s, s.home.x, s.home.z, building_vision(&s.home), cell, half)
+		marked += 1
+	}
+	return marked
+}
+
+// updateRivalContacts (port 730): first-contact memory — has the viewer
+// ever seen any unit or building of each rival? Monotonic; gates the rival
+// counts a state carries. At turn 1 no seat's sight reaches another's
+// spawn, so nothing is ever met here, but the walk runs as the reference
+// runs it. (The non-harness vision test the port builds here skips dead
+// buildings; the harness one skips construction sites — the arena has
+// neither, so make_eyes serves both.)
+update_rival_contacts :: proc(g: ^game_state, viewer: ^seat) {
+	es := make_eyes(viewer)
+	for oi in 0 ..< 4 {
+		if oi == viewer.ci || viewer.met[oi] {
+			continue
+		}
+		o := &g.seats[oi]
+		spotted := false
+		for i in 0 ..< o.n_units {
+			u := &o.units[i]
+			if u.health > 0 && see_test(&es, u.x, u.z) {
+				spotted = true
+			}
+		}
+		if o.home.health > 0 && see_test(&es, o.home.x, o.home.z) {
+			spotted = true
+		}
+		if spotted {
+			viewer.met[oi] = true
+		}
+	}
+}
+
+// WarPositionRules.apply (port 851): separation and building clearance at
+// the end of every simulation step. The pairs are same-owner (units from
+// different seats never interact — nothing crosses the 306-unit spawn
+// gap); the clearance pushes a unit away from its own finished buildings.
+war_position_rules :: proc(g: ^game_state, dt: f64) {
+	SEPARATION_DIST := f64(1.2)
+	SEPARATION_FORCE := f64(0.03)
+	sepK := math.min(f64(3), math.max(f64(0), dt) * 60)
+	// the port walks the global unit list; the degenerate-pair fallback
+	// direction uses the global index parity — gi tracks it
+	gi := 0
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		for i in 0 ..< s.n_units {
+			for k := i + 1; k < s.n_units; k += 1 {
+				a := &s.units[i]
+				b := &s.units[k]
+				dx := b.x - a.x
+				dz := b.z - a.z
+				dist := math.sqrt(dx*dx + dz*dz)
+				if dist < SEPARATION_DIST {
+					nx := f64(0)
+					nz := f64(0)
+					if dist > 0.01 {
+						nx = dx / dist
+						nz = dz / dist
+					} else {
+						if gi % 2 == 0 { nx = 1 } else { nx = -1 }
+						nz = 0
+					}
+					push := (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK
+					a.x -= nx * push
+					a.z -= nz * push
+					b.x += nx * push
+					b.z += nz * push
+				}
+			}
+			gi += 1
+		}
+	}
+	CLEAR_DIST := f64(4.5)
+	CLEAR_FORCE := f64(0.05)
+	clearK := math.min(f64(3), math.max(f64(0), dt) * 60)
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		for i in 0 ..< s.n_units {
+			u := &s.units[i]
+			if s.home.health > 0 {
+				dx := u.x - s.home.x
+				dz := u.z - s.home.z
+				dist := math.sqrt(dx*dx + dz*dz)
+				if dist > 0.01 && dist < CLEAR_DIST {
+					push := (CLEAR_DIST - dist) * CLEAR_FORCE * clearK
+					u.x += (dx / dist) * push
+					u.z += (dz / dist) * push
+				}
+			}
+		}
+	}
+}
+
+// The harness per-step discovery (port 1106-1132): the node indices each
+// seat's sight now covers, into the persistent known set — the batched
+// test, harness rules. The enemy-building walk that runs beside it
+// populates a per-seat memory that is invisible at this gate (no seat's
+// sight reaches another spawn, and no rival building exists to see); it
+// becomes required at the first gate with contacts, like the b1041/42
+// enemy-unit memory the handover already scopes there.
+observe_step :: proc(g: ^game_state) {
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		es := make_eyes(s)
+		for idx in 0 ..< g.terrain.n_nodes {
+			if s.known[idx] != 0 {
+				continue
+			}
+			n := &g.terrain.nodes[idx]
+			if see_test(&es, n.x, n.z) {
+				s.known[idx] = 1
+			}
+		}
+	}
+}
+
+// The 50 ms step, in the order the rules run it (port 832-845): population
+// first, then the 4 Hz discovery beat, the clock, the position rules, and
+// the harness discovery. The rule-based brain thinks on simulated time;
+// every seat is harness-controlled, so only the beat runs. Worker tasks,
+// production, research and combat all run inside the reference's
+// simulation step and none can fire on a seat that has issued no order —
+// omitted on purpose rather than ported as theatre.
+step_once :: proc(g: ^game_state) {
+	dt := f64(50)
+	for i in 0 ..< 4 {
+		g.seats[i].pop = g.seats[i].n_units
+	}
+	g.discovery_timer += dt
+	if g.discovery_timer >= 250 {
+		g.discovery_timer -= 250
+		for i in 0 ..< 4 {
+			mark_exploration(&g.seats[i], g.terrain.size)
+			update_rival_contacts(g, &g.seats[i])
+		}
+	}
+	g.step_no += 1
+	war_position_rules(g, dt / 1000)
+	observe_step(g)
+}
+
 // The driver: terrain, seats, four lines at t=0, the output file. The
 // t=1000 half (twenty 50 ms steps of stepOnce, then four more lines) is
 // not written yet — stepOnce does not exist; when it does, the loop goes
@@ -2824,6 +3012,23 @@ main :: proc() {
 		j.buf[j.n] = '\n'
 		j.n += 1
 		j.sep = false // the comma flag resets between lines — each line is its own object
+	}
+
+	// Twenty 50 ms steps to t=1000. The match clock advances before each
+	// step, as the reference driver does (advanceMatchClock, then stepOnce),
+	// and the step itself runs the discovery beat, the position rules and the
+	// harness discovery — in that order.
+	for st in 0 ..< 20 {
+		g.match_ms += 50
+		step_once(&g)
+	}
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		o := obs{g = &g, j = j, s = s, t_ms = 1000}
+		observe_line(&o)
+		j.buf[j.n] = '\n'
+		j.n += 1
+		j.sep = false
 	}
 	_ = os.write_entire_file(os.args[1], j.buf[:j.n])
 }
