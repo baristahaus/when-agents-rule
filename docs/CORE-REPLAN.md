@@ -474,3 +474,37 @@ Also owed before the map gate is fully self-supporting: the Town Center clearanc
 (`after Town Center clearance`), which today provably removed nothing in four recorded conditions —
 provably, because the counts match the un-clipped base exactly — but which is still an untranscribed
 step in the path.
+
+## 14. What happened after this document (status note, 5 October 2026)
+
+Everything §13 ordered was done, and then the method grew one layer this document did not
+predict. The live record of costs is now **`docs/REBUILD-EFFORT.md`** — this section only
+says what became of §13, so nobody reads the estimate as the state.
+
+1. **The state dumper is built** — not by extending `tools/golden/record.cjs` as §13
+   sketched, but as `tools/golden/dump-states.cjs`, which starts a real match through
+   `tools/bench/realm.cjs` (no browser, whole 50 ms steps) and writes the per-seat state
+   at named millisecond moments, plus `tools/golden/canonicalize-states.cjs`, which
+   re-keys session-minted ids. The oracle is `golden/states-b1040-t0-t1.canonical.jsonl`
+   (45,840 bytes, 8 lines, t=0 and t=1000 ms), and the corpus gate **regenerates it from
+   the reference on every run**, so the fixture cannot quietly outlive a rule change.
+   The older `golden/turn1-b1040.jsonl` capture is provenance only — today's reference
+   does not reproduce it at any whole step (locale and moment, both documented in
+   `skills/odin-core-port/reference/golden.md`).
+2. **A frozen JS port became the transcription spec.** `tools/trace-states-port.cjs`
+   (1,807 lines) re-implements the whole turn-1 path headless — RNG, terrain, civ tables,
+   the game core, `WarPositionRules`, the discovery beat, and the entire `observe()`
+   state view — and passes a byte-exact gate against the canonical fixture (measured
+   5 October: `GATE PASS, 8 lines, byte-identical`). It exists because `observe()` is
+   ≈1,100 lines inside a browser-entangled 44,135-line bundle: transcribing it straight
+   from the game means porting it twice, once to find out what it does. The port is now
+   the spec a transcription reads — its line map is `spike/turn1/HANDOVER.md` §2.
+3. **The Odin transcription of turn 1 is in flight.** `spike/turn1/main.odin`, 2,028
+   lines, ~70% of the state view, four known shape bugs, missing sections and no
+   `main()` — it does not compile yet, by design, mid-refactor. `spike/turn1/HANDOVER.md`
+   is the map (verified ground truth in its §3, the order of attack in its §7).
+
+The two items §13 said were owed are still owed, unchanged: the Town Center clearance
+step (proved harmless in four conditions, not yet transcribed) and the leak tracker's
+real name in this `core:mem` (unfound; the claim "Odin's harness tracks memory" is
+withdrawn until it is).

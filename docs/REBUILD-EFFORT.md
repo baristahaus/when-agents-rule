@@ -1,0 +1,424 @@
+# Rebuild effort — the record of the Odin re-creation, and its lessons
+
+Status: **the live record of the v2 rebuild effort** — where the port stands, what the method
+is, what each piece cost, and what the effort is teaching us. Updated as work lands, not at
+the end. Written at HEAD `f9dc0c3` plus an uncommitted working tree, **5 October 2026**;
+every number below was measured that day unless it names the date it was measured.
+
+What this document is *not*. It is not the product spec (`docs/DESIGN_SPEC.md` — what must be
+true), not the plan (`docs/REBUILD_PROPOSAL.md` — what we build, in what order), not the
+decision arithmetic (`docs/CORE-REPLAN.md` — why Odin, scored), and not the fork ledger
+(`MERGE-STATE.MD` — where the fork stands against the parent). It is the record those four
+kept deferring to each other: **the effort itself, and what it says about re-creating a
+system like this one.** Where they disagree with this file, this file is wrong and says so
+in its next revision; where they are silent, this file is the answer.
+
+---
+
+## 0. What this is studying
+
+The fork exists to answer one question: **can a small team of LLM agents re-create a
+complex, unfamiliar system — byte-exactly — from a reference it does not own, in a language
+the agents barely know?**
+
+- The **system** is the parent's browser game: 37,099 lines of top-level JavaScript, 44,135
+  with `js/simulation/` and `js/engine/` (measured today; the smaller number is what
+  `js/*.js` alone adds to).
+- The **vehicle** is the Odin core (spec §14.1, decision 1) — a language chosen partly
+  *because* agents know it poorly, which makes it a fair test of method-over-memory.
+- The **measure** is the golden corpus: byte-exact recordings of the rules at build 1040,
+  which a port either reproduces or does not, with no adjectives in between.
+- The **point** is the lessons (§3), not the game. The Rust port that preceded this effort
+  proved the method and was retired the day the question changed; nothing in this record
+  should read as attachment to an artifact.
+
+The evidence standard is the repo's, restated because it is the study's spine: **byte-exact
+or wrong** ("close" keeps the numbers plausible while the divergence compounds); **measured
+or marked unverified** (an unverified claim is a future retraction — this repo has
+retracted a test count, a tool list, a file path and a whole harness that never existed);
+**corrected in place, with the date**, where the next reader will land.
+
+## 1. Where the effort stands — measured 5 October 2026
+
+### 1.1 The gates, all green (run today)
+
+`./spike/gates.sh`, eight gates, zero red — the same run CI repeats (`.github/workflows/odin-gates.yml`,
+compiler pinned to `dev-2026-09`):
+
+| gate | what it proves | today's answer |
+|---|---|---|
+| 1 | the compiler, present and named | `dev-2026-09-nightly:a2fb372` |
+| 2 | keyed vectors `#a9b8bccd` / `#9fd153da` | ok — the RNG transcription is exact |
+| 2b | node counts 98/784/40/20 (= 942) | ok — nothing was dropped |
+| 2d | coast table, `f32` **bit patterns** | ok — the noise lattice and wobble match |
+| 2e | map lines, **four conditions** | byte-identical: `golden medium 4` 47,098 B; `alpha easy 2` 61,503 B; `alpha hard 3` 14,368 B; `beta medium 4` 47,091 B |
+| 3 | no FMA, even forced | ok — 0 fused, 9 multiplies at `-o:aggressive -microarch:x86-64-v4 -target-features:fma` |
+| 4 | `odin check -vet -vet-unused -vet-shadowing -vet-tabs -strict-style` | ok — no diagnostics |
+| 5 | the golden corpus | ok — the fixtures are the pinned bytes and the states oracle regenerates |
+
+### 1.2 The corpus — the treaty, pinned and regenerating
+
+`golden/MANIFEST.json` pins nine files by sha256 and byte count, enforced by
+`tests/golden-fixtures.test.cjs` (which is why the suite grew from 622 to **628 tests,
+628 pass, 0 fail, ~55 s — measured today**). Two properties matter more than the list:
+
+- **The oracle regenerates.** Gate 5 re-runs `tools/golden/dump-states.cjs -at 0,1000`
+  (civs `egyptian,greek,persian,yamato`) through `tools/golden/canonicalize-states.cjs`
+  and byte-compares against `golden/states-b1040-t0-t1.canonical.jsonl` — 45,840 bytes,
+  8 lines. `ci.yml` does the same for the one-minute stream. A fixture that cannot be
+  regenerated is a rumour; none of the gates depend on a rumour.
+- **One capture is provenance, not an oracle.** `golden/turn1-b1040.jsonl` (21,147 bytes)
+  cannot be reproduced by today's reference at any whole step — its unit positions are the
+  opening ones, its clock reads 1, and its `map`/`nodes`/`nearestNodes` match no single
+  moment. The manifest says so, the corpus test asserts it, and §3's L4 records why.
+
+### 1.3 The middle layer — the frozen JS port (uncommitted, gate green)
+
+`tools/trace-states-port.cjs`, **1,807 lines, untracked**, is a re-implementation of the
+entire turn-1 path — RNG, terrain, civ tables, the game core, `WarPositionRules`, the
+250 ms discovery beat, and the whole `observe()` state view — run headless in Node.
+Measured today: `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl`
+prints **`GATE PASS: 8 lines, byte-identical`**. Why it exists and what it cost is §2's
+layer 3; how to read it is `spike/turn1/HANDOVER.md` §2 (a line map from a keyed draw to
+the canonicalizer).
+
+### 1.4 The Odin transcription — in flight, ~70%, does not compile
+
+`spike/turn1/main.odin`, **2,028 lines, untracked**, is the transcription of the port into
+Odin: one file, package `main`, byte-exact against the same 8-line fixture. Measured today,
+not inherited:
+
+- `odin build spike/turn1/main.odin -file` **fails**. The first errors are rune literals —
+  Odin reads `'cavalry'` as a character, not a string — starting at line 533 and recurring
+  through the civ tables. This is L7's predicted trap, in the file, uncorrected.
+- The tail is cut off mid-block (it ends at `j_end_obj(j) // unlockedContent`, braces
+  unbalanced) and there is **no `func main`** (grep: zero matches).
+- The four shape bugs the handover lists verify by grep: `workers` writes `gatherFood` /
+  `attackMove` keys (lines 1905, 1915) where the golden wants `total, idle, building, farm,
+  scouting, moving, fighting, food, wood, stone, gold`; `unlockedContent` writes a
+  training/building object (line 1994) where the golden is exactly `{"buildings":[]}`;
+  `busy`/`activity`/`producing` appear nowhere (the `friendlyBuildings` entries are missing
+  them); `blockedBy` appears twice in 2,028 lines (the research section drops it when empty).
+- The missing sections verify the same way: `threats`, `gameStats`, `underAttack`,
+  `enemyWonders` — zero occurrences.
+
+What is *good* in the file is verified in the handover's §3 and was left alone: the fdlibm
+kernels and keyed RNG, the terrain tables, the civ data with `tech_ids` in tree order, the
+JSON writer with `fmt.f64` shortest-round-trip, the `obs_scratch` node pass, `arena_spawns`
+and the keyed worker spread (both checked against the raw golden bytes).
+
+### 1.5 The suite and the tree
+
+`npm test` → **628/628** (the fork ledger's 622 was true at build 1040; the corpus gate
+added six). `node --test tests/contract.test.cjs` → 7/7. The ledger's caveat stands:
+`npm test`'s glob runs `tests/*.test.cjs` and `tests/sim/*.test.cjs` only, so test files
+sitting beside their `js/` sources are not in it.
+
+Uncommitted in the tree: `spike/turn1/` (the WIP plus `HANDOVER.md`), 
+`tools/trace-states-port.cjs`, and the deletion of `.agents/skills/beads/` (SKILL.md and
+its agent config) — the beads embedded backend is append-only, which is recorded at
+`docs/MERGE-STATE.MD` (the 2026-10-04 note), and the project skill was a duplicate of the
+global one.
+
+### 1.6 The branches, measured rather than remembered
+
+- HEAD = `sync/upstream-b1039` = `f9dc0c3`, **one commit ahead** of
+  `origin/sync/upstream-b1039` (`b5bc685`) — the branch the post-merge work actually ran
+  on, and the live v2 line.
+- `origin/rebuild/v2` = `c4a32da` ("Retire the Rust port") — **17 commits stale**. The
+  fork ledger still calls `rebuild/v2` "the branch v2 work continues on"; it did, until it
+  didn't, and nobody moved the pointer. Reconciling the two is §5's third item.
+- `origin/main` = `c7fafd7` — **the parent's b1054 tip, identical to `upstream/main`**.
+  The ledger claims "main = `33a1f11`, pushed"; the remote no longer agrees. Whether the
+  fork's GitHub main is meant to mirror the parent or to carry our v1 line is a question
+  for whoever owns that remote; this record states the mismatch instead of picking a story.
+- The parent is **15 builds ahead** of our merge point (tip b1054; we merged through
+  b1039). Our line carries **65 commits** since the fork point. `main` locally is still
+  `33a1f11`, the pre-sync snapshot and documented abort path.
+
+## 2. The method — five layers, and why each exists
+
+The effort did not start with this shape; it is what the map, the state view and one
+retired language taught. Each layer exists because the layer below it was either
+untrustworthy or unreadable, and each has a measured cost.
+
+**Layer 0 — the reference.** The parent's `js/`, owned by them, authoritative for the
+browser (spec §14.1, decision 5). It is the only definition of the rules — and it is
+44,135 lines, DOM-entangled, with `observe()` alone spanning `js/openai-ai.js:2975–4079`
+(≈1,105 lines, measured today; CORE-REPLAN §13 called it ~1,070). Nobody ports this
+directly; every layer above exists to avoid having to.
+
+**Layer 1 — the golden corpus.** Byte-exact recordings at build 1040, pinned by hash,
+regenerated only by explicit decision (CORE-REPLAN's rule: "it fails" always means "the
+port is wrong", never "the fixtures are stale"). Cost: a 10-minute and a 1-minute
+recording, re-derived once at the merge. What it bought: a language-independent oracle —
+the Rust port's byte-exactness survived the language swap precisely because the oracle
+never knew what a port was.
+
+**Layer 2 — the gates.** `spike/gates.sh` locally, `odin-gates.yml` in CI, ordered so each
+gate is cheap where cheap is possible: vectors (≈120 lines) → counts (≈90) → coast (≈150,
+as `f32` bit patterns) → map (≈230 plus a day of diagnosis) → FMA → vet → corpus. Three
+design rules in the gates are load-bearing: a gate that cannot run **says SKIP and why**
+("a green light from a check that did not execute is the worst kind of green"); the FMA
+gate **counts multiplies first** so an empty object file cannot pass; and the map gate runs
+**four conditions**, because one fixture hid the port's only real bug (§3, L2).
+
+**Layer 3 — the frozen JS port.** `tools/trace-states-port.cjs`, 1,807 lines, born 5
+October. The problem it answers: the state view is the *product* (it is what a model sees
+every turn), it lives inside a 577 KB file inside the layer-0 bundle, and "transcribe
+`observe()` from the browser game" means porting it twice — once to find out what it does,
+once to do it. So the finding-out was made into an artifact: a single-file,
+browser-free, Node-runnable re-implementation, **byte-verified against the same fixture
+the Odin port must match**, small enough that a line map of it (HANDOVER §2) can serve as
+a table of contents for the transcription. It also encodes quirks a diff would otherwise
+attribute to the port: the two-mode `knownAmount` (observe-commit vs look), the NaN case
+a coarse sight test produces, the 250 ms discovery beat that must not fire at t=0, the
+monotonic rival-contact memory. Cost: one session, in the language the agents know best.
+Payoff so far: the Odin WIP's verified-correct sections were transcribed from this file,
+not from the game.
+
+**Layer 4 — the Odin transcription.** `spike/turn1/main.odin`, transcribing layer 3 line
+by line ("when in doubt, the port is the spec"). Two disciplines hold it to the reference:
+byte-exact comparison against layer 1's regenerated oracle, and the compiler's own vet
+(gate 4) for everything the bytes cannot see. It is the first layer with real language
+risk — which is the study's point — and §3's L7 is the running account of that risk.
+
+**The rules that hold the stack together**, stated once because every layer assumes them:
+fixtures come from the reference, never from a port; a diff is `cmp`, not a similarity;
+a claim is measured or marked unverified; session-minted ids are canonicalized before any
+comparison; and the compiler is the reviewer of record — its diagnostics are free, fast,
+and cannot be charmed.
+
+## 3. The lessons — the study's findings so far
+
+Each lesson is stated with its evidence; none is offered without one.
+
+**L1 — Fixtures before code, and only from the reference.** The corpus predates every
+green gate in this record, and it is what survived two language choices: the Rust port's
+map line and the Odin map lines prove the *same* 47,098 bytes, three weeks and one
+retirement apart. The oracle must be produced by the thing being copied, never by the
+thing being built — a port that generates its own fixtures is grading its own exam.
+
+**L2 — One fixture is one condition.** The map port passed its one fixture and was wrong
+at two and three seats: the spawn array was a fixed `[4]`, filled only as far as the seats
+in play, and the keep-out loop iterated the whole array — so the unfilled tail sat at the
+origin and rejected every stone and gold candidate. **The node counts stayed perfect.**
+The bug cost a day of diagnosis and was invisible until a second and third condition
+existed (`alpha/easy/2`, `alpha/hard/3`, `beta/medium/4` — about a minute each to record).
+The general rule: a gate that checks one input tests one branch of every table behind it.
+
+**L3 — "Close" is the failure mode that hurts.** The reference rounds stone
+`round(20/3)=7` per seat at three seats, where `ceil` says 42 — and a `ceil` port *looked
+correct at four seats*. The coast table is `Float32Array`, and comparing six decimal
+digits is "exactly the slop that lets a wrong-coastline port look fine until positions
+drift". This is why every gate is a `cmp`, and why the skill file's first rule is
+"transcribe, never redesign".
+
+**L4 — A fixture you cannot regenerate is a rumour, not a gate.** The legacy
+`turn1-b1040.jsonl` capture matched no whole step of today's reference — unit positions
+from t=0, a clock reading 1, map sections from neither moment — and a port diffed against
+it would have chased a provenance artefact. The response was infrastructure, not caution:
+`dump-states.cjs` (which names the moment in milliseconds, because "turn 1" is not a
+moment), `canonicalize-states.cjs`, and a corpus gate that regenerates the oracle from the
+reference on every run.
+
+**L5 — Two look-alikes: locale and moment.** A first state dump reported `"Ägypter"`
+because the bench harness loads no i18n and the reference's source strings are German; it
+read as a stale core. The dumper now loads `js/i18n.js`, pins English, and *fails the run*
+if a translated field did not change. With the moment question (L4) this makes the rule:
+**when a state diff appears, decide which of three things it is — locale, moment, or a
+real rule difference — before believing anything else.** The first two look exactly like
+the third.
+
+**L6 — Measure the claim; do not inherit it.** This repo has retracted, in writing: a
+test count (6,074; the real number was 622, and is 628 today), a tool list that never
+existed (`test/manifest.cjs`, `tools/gate-selftest.cjs` and friends), a spec path that
+never existed (`docs/specs/REBUILD_SPEC.md`), a harness that never existed
+(`js/war-harness.js`), and a misdiagnosis (the golden's frozen clock was a build 934–949
+*bug*, not an invariant — the spec was wrong, not the fixture). Today's instance, found
+while writing this record: the turn-1 handover quotes its target fixture at 49,555 bytes;
+the file is 45,840 (corrected in place, with the date). In an agent-driven project prose
+compounds errors unless something re-measures; here that something is the gates — which
+fail in CI whether or not anybody read the document.
+
+**L7 — Agents write confident wrong Odin; the compiler is the cheapest reviewer.** The
+first ~120-line spike needed four syntax corrections *found by the compiler, not by
+memory* (XOR is `~` not `^`; deref is postfix `^`; no `inout`/`ref` modes; `fmt.println`
+does not interpolate). `skills/odin-core-port/reference/build.md` now records a table of
+rejected guesses — width verbs, `reverse` ranges, read-only parameters, no closures,
+`cast(u32)(x)`, no `wrapping_mul` builtin, `strings.builder_free` gone — and today's WIP
+adds the largest class yet: **single-quoted strings**, which Odin reads as rune literals,
+in the civ tables of a 2,028-line file. The mitigation is mechanical, not attitudinal: a
+reference file of this compiler's actual surface, and gates that fail without a human in
+the loop. The cost of each correction is seconds; the cost of *not* making them is a port
+that diverges silently — which is the one failure this method exists to prevent.
+
+**L8 — Determinism unknowns are measured, not assumed — and re-measured by gate.** Odin's
+floating-point contraction is documented nowhere, so it was measured: four build
+configurations, including FMA explicitly enabled, produce **zero fused instructions**
+(`llvm-dis`/`objdump`, counted). Gate 3 repeats the count on every run and checks the
+multiply count first, because a compiler release is exactly the kind of thing that changes
+quietly. The vet flags came from `odin check --help`, not folklore — after `check` was
+caught exiting 0 while printing `Invalid flag`, which is a mistyped flag *masquerading as
+a pass*. And the honesty runs both ways: the memory-leak tracker's real name in this
+`core:mem` is **still unfound**, so the repo's own reference file says "do not repeat
+'Odin's harness tracks memory'" rather than inheriting the claim from CORE-REPLAN §12.1.
+
+**L9 — The middle layer converts "port the game" into "transcribe the port".** 1,807
+lines of JavaScript — the agents' strongest language — bought a headless runnable spec, a
+line map that doubles as the Odin work's table of contents, an encoding of the quirks
+(L4/L5's classes of confusion), and a second opinion on the rules. The alternative was
+transcribing a ~1,105-line `observe()` out of a DOM-entangled 44,135-line bundle, twice.
+The layer is also this effort's clearest *method* finding: when the cost of a step is
+much larger than the plan assumed, **add a layer; do not grind.** Its own fate is §5's
+sixth item.
+
+**L10 — Costs, measured, reshape the plan.** CORE-REPLAN §13 priced turn 1 honestly
+("it is not the next file; it is the game") and the plan bent: dumper first, data model
+before tick, `observe()` last. The measured ladder so far: vectors ≈120 lines; counts ≈90;
+coast ≈150; map ≈230 plus a day of diagnosis; the dumper and canonicalizer small; the JS
+port 1,807 lines in one session; the Odin transcription 2,028 lines and unfinished —
+against a Rust-era turn-1 gate that cost 746 lines of `state.rs` for a *smaller* oracle
+(4 raw states, one moment, no canonical form). The two numbers are not comparable as
+"Odin vs Rust" until the gate lands; they are comparable as evidence that the oracle
+got richer and the method grew to match.
+
+**L11 — Reproducibility needs a canonical form, not just reproducible bytes.** v1 mints
+seat ids from `Math.random` by design; keyed draws make the *bytes* reproducible, but only
+in first-appearance order, so `canonicalize-states.cjs` re-keys to `seat<n>` and
+first-appearance entity ids before any comparison — "a fixture that only matches under one
+id scheme would hide a drift in exactly that scheme". The same discipline exists between
+two recorded runs (`tools/golden/compare.cjs`), which is what makes "byte-identical" a
+statement about the rules rather than about one session's random numbers.
+
+**L12 — Honest instrumentation is part of the study.** The beads tracker's embedded
+backend accepts creates and refuses every update and close — measured, not guessed, and
+recorded with the exact failures (`docs/MERGE-STATE.MD`, 2026-10-04): "a tracker you can
+append to but never close is worse than no tracker." The CI workflow describes itself as
+"a claim about a machine I am not on"; Playwright is absent on this box, so the honest
+sentence about the UI is "CI has not looked at it". A study about verification cannot
+launder its own bookkeeping failures — they get recorded with dates, like everything else.
+
+## 4. The design as it stands (v2 in brief)
+
+The depth lives in the spec and the proposal; this is the state of it, so the record is
+complete without six documents open.
+
+**The three bets** (proposal §1): **B1** a deterministic core, written once, run
+everywhere it matters; **B2** the agent harness as a daemon that owns the provider
+conversation and writes the full trace; **B3** a match's record as a folder — transcript,
+frame-accurate events, per-seat traces — complete by construction.
+
+**The faces** (proposal §2, amended by spec §14): the browser keeps the parent's JS and
+every v1 property ("open the folder and play") — **v2 ships no browser core**; the
+desktop is one native binary around a webview the project owns (Tauri rejected on one
+fact: its backend is Rust); the headless binary is `war-core` (`--serve`, `--batch`,
+`--record`); a hosted arena is P4 and optional; mobile is a spectator, later.
+
+**The phases and their gates** (proposal §9): P0 the core, P1 the trace, P2 the face,
+P3 the eyes, P4 optional. No phase starts until the prior one is green. Where P0 stands
+today:
+
+| P0 gate step | status |
+|---|---|
+| (a) map line byte-identical | **green** — four conditions, measured 4–5 October |
+| (b) turn-1 state view byte-identical | **in flight** — oracle live and regenerating; the JS port passes it byte-identical; the Odin transcription is ~70%, not compiling |
+| (c) state sequence for a fixed seed set | **not started** — the first gate with real size (a 2.7 MB stream), where the method meets its scaling test (§6) |
+
+**The decisions closed** (spec §14.1): Odin for the core; no browser face for it; the
+web UI survives its demotion (it reads a record); no Tauri; the golden is the treaty
+between engines. **The reopen triggers** stand as written: fused multiply-add in the
+compiler's output (measured zero, re-checked every run — gate 3); the first webview shim
+costing more than a few days (§14.3's fallback: reconsider the shell, not ship three
+languages by drift).
+
+**Still open, needing an owner's call** (proposal §10, items 3–5): whether v2 ends at P3
+or includes P4; whether the small embedded mesh set is acceptable for §7's look; the
+name (`war-core`, alias `war`). Plus one this record adds: the fate of layer 3 once the
+turn-1 gate lands (§5, item 6).
+
+## 5. The road ahead, in order
+
+1. **Land the turn-1 gate.** The order of attack is `spike/turn1/HANDOVER.md` §7, and it
+   is verified against the file as of today: repair the tail and stub a `func main` so the
+   file compiles; fix the four shape bugs one at a time with a `cmp` after each; add
+   `units`, `buildings`, `threats`, `gameStats` in golden order, transcribing the port's
+   functions; add `stepOnce` (the 50 ms step: population → the 250 ms discovery beat →
+   clock → `WarPositionRules` → the harness observation) and the driver; `cmp` all 8 lines.
+   When it is green, wire it into `spike/gates.sh` as a new gate (build, run, `cmp`) so
+   CI owns it — a gate that exists only in a handover is a wish with a deadline.
+2. **Commit the working tree.** Suggested shape, not run (the session profile is
+   conservative): one commit for `tools/trace-states-port.cjs` (the why belongs in the
+   message: it is the transcription spec, byte-verified); one for `spike/turn1/` marked
+   mid-flight with the handover; one for the `.agents/skills/beads/` deletions, pointing
+   at the blocker note. Uncommitted work is unverifiable work — nobody can check out a
+   claim that lives only in a working tree.
+3. **Reconcile the branches.** HEAD is one commit past `origin/sync/upstream-b1039` and
+   seventeen past `origin/rebuild/v2`. Either fast-forward `rebuild/v2` to HEAD and push,
+   or make `sync/upstream-b1039` the acknowledged v2 line in the fork ledger — but pick
+   one, because "the branch v2 work continues on" is currently true of neither remote
+   pointer. And the `origin/main` question (§1.6) needs an owner's answer: the fork's
+   GitHub main mirrors the parent's b1054 today.
+4. **The two owed items** (unchanged from CORE-REPLAN §13, still owed): transcribe the
+   Town Center clearance step — four recorded conditions prove it removed nothing, which
+   is not the same as transcribing it; and find the leak tracker's real name in this
+   `core:mem`, because until then the one-arena-per-match shape rests on `Arena` plus
+   discipline, not on a check.
+5. **After turn 1.** The tick is already in scope (`stepOnce` is part of the gate); a
+   whole match then needs the rule brain, which is the first *behaviour* the port will
+   have to agree on rather than a projection of state; then the P0(c) state-sequence
+   gate; then P1 (the daemon, the event stream, the match folder) per the proposal.
+6. **Decide the fate of layer 3.** Once the Odin port passes the turn-1 gate,
+   `trace-states-port.cjs` has three possible lives: retire it (the Odin port becomes the
+   second oracle); keep it as the line-map spec for the remaining transcription; or keep
+   it as a standing second JS opinion — noting the parent already ships `js/resim.js` as
+   *their* second implementation, so a third JS implementation needs a stated role, not a
+   habit. The decision should be written down when the gate lands, not drifted into.
+
+## 6. What the study still wants to learn
+
+The lessons in §3 are answered questions. These are the open ones, and they are the
+reason the effort is worth its cost even if the game itself never ships a v2:
+
+- **Velocity per gate, measured.** Lines and sessions per byte-exact gate, Odin against
+  the Rust port at the *same* gate. Not comparable yet — the turn-1 oracle grew richer
+  between the two — but comparable the moment gate (b) lands.
+- **The agent-error taxonomy, growing.** `reference/build.md`'s rejected-guess table plus
+  the rune-literal class from today is enough to see the shape: syntax guessed from
+  Rust/JS intuition, and semantic traps (f32 vs f64, rounding discipline, no implicit
+  conversions). Worth a per-gate tally once the port compiles — it is the raw material
+  for the reference data no ecosystem provides (CORE-REPLAN §12.3's finding: there is no
+  agent skill for this language, only name collisions pretending to be one).
+- **Whether the middle layer generalizes.** Layer 3 was built for turn 1. The next gates
+   — the tick, the rule brain, a whole match — will say whether "port the port" stays
+   cheaper than "port the game" as the surface grows, or whether the JS layer becomes a
+   second codebase to maintain.
+- **Where the method stops scaling.** Byte-exact transcription has been cheap because
+  every gate so far is small. P0(c) is a 2.7 MB stream — the corpus exists, but no port
+  has yet been diffed against anything that size. That gate is where the method meets its
+  first real scale, and the study should watch what breaks: the diff tooling, the
+  diagnosis workflow, or the assumption that any divergence can be localized to a function.
+
+## 7. The document map
+
+| To answer | Read | Status |
+|---|---|---|
+| What must the product be? | `docs/DESIGN_SPEC.md` §0–13 | current |
+| What was decided about the stack, and why? | spec §14 + `docs/CORE-REPLAN.md` §11–12 | current (the replan's §1–10 are the arithmetic behind a decision now taken; §13 is superseded by this record) |
+| What is the v2 plan, in what order? | `docs/REBUILD_PROPOSAL.md` | current, amended for Odin (§2, §4, §8, §9, §10) |
+| Where does the effort stand *right now*? | **this document** §1 | current — supersedes CORE-REPLAN §13, the skill's "next session" note, and the handover's status role |
+| How does a port step get done? | `skills/odin-core-port/` (SKILL + `reference/`) + `spike/turn1/HANDOVER.md` | current (the handover is a mid-flight map; it retires when the turn-1 gate lands) |
+| What are the fixtures and vectors? | `golden/MANIFEST.json` + `skills/odin-core-port/reference/golden.md` | current |
+| Where does the fork stand against the parent? | `MERGE-STATE.MD` + `docs/FORK-DIVERGENCES.md` | current (ledger updated 5 October 2026) |
+| Why is the tracker append-only? | `docs/MERGE-STATE.MD` (the 2026-10-04 note) | current |
+| What did the quality review find? | `docs/QUALITY_REVIEW.md` | v1-era; historical |
+| What changed in the rules, build by build? | `docs/RULES-CHANGES.md` | v1-era; the parent's convention |
+| The v1 renderer branch? | `ENGINE.md` | parent-surface work, unrelated to the rebuild |
+
+---
+
+*How to keep this record honest: update §1 when a gate changes colour, with the date and
+the run's numbers; add lessons in §3 only with evidence; correct wrong numbers in place
+where the next reader will find them, never in a footnote elsewhere; and mark anything
+this file cannot measure as unverified rather than softening it. The gates are the
+arbiters — this document is their interpreter.*

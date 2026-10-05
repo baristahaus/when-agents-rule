@@ -98,7 +98,7 @@ closed by writing both sentences rather than by arguing about them (spec §14).
 
 ```mermaid
 flowchart TB
-  subgraph core ["The core (Rust) — written once"]
+  subgraph core ["The core (Odin) — written once"]
     direction LR
     SIM[the sim<br/>rules, ages, combat, win] 
     MAP[map gen<br/>seed → layout]
@@ -225,7 +225,7 @@ the claim v1 could not: **"the same seed, the same match, bit for bit"** — a c
 event stream then *verifies* rather than asserts (§6.2).
 
 **Verification: differential testing is the gate.** The existing 35+ test files are the
-contract, and they run **against the new core through the WASM boundary**, not deleted
+contract, and they run **against the new core at its native boundary**, not deleted
 and rewritten. The golden test is: for a set of seeds, the new core produces the same
 *state sequence* (the serialized form the state contract already pins, §5.4) as the
 shipped JS sim and the shipped sample corpus. That is the single most important test in
@@ -580,17 +580,11 @@ sim's frame budget, and the §9 gate checks it on real hardware.
   today, keeping "open and play" and every §11.3 property. There is no `?core=wasm` flag and
   no browser core to select (spec §14.1, decision 2): the parent owns that surface, and the
   golden (§3.4) is what proves the native engine agrees with it.
-  compiled core (WASM) + the built renderer + the UI, no server required for personal
-  play. During the transition a `?core=wasm` flag selects the core; it defaults to the
-  new core at the end of P2, and the README's "no build step" claim is *re-decided and
-  written down* at that moment (§2, §11.3).
 - **The desktop** is **one native binary around a webview we own** (Win / macOS / Linux):
   the *same* web UI, native file dialogs (transcript import / export with no browser
   download), a low-latency audio path (`miniaudio`), multi-monitor, always-on-top and
   **gamepad** input — without inheriting a second language to get any of it (spec §14.1).
-  shell, plus native file dialogs (transcript import / export with no browser download),
-  a low-latency audio path, multi-monitor, always-on-top, and **gamepad** input. This
-  is the "most polished" face and the one a spectator lives in for a long match.
+  This is the "most polished" face and the one a spectator lives in for a long match.
 - **The headless** is **one binary, `war-core`**, with three verbs:
   - `war-core --serve [port]` — a **hosted match**: the core runs the sim, the daemon
     serves the seats (a human on a laptop, an agent on another machine, a spectator
@@ -631,7 +625,7 @@ sequence is ordered so that the *riskiest* bet (the core port) is first and the
 
 | # | Phase | The bet | The gate (pass criteria) |
 |---|---|---|---|
-| **P0** | **The core** — the Odin sim, native only: the map, then turn 1, then the rule brain | B1 | **The golden diff**, in three gated steps: (a) the **map line** — 942 nodes, 47,097 bytes — byte-identical to `golden/stream-1m.jsonl`; (b) the four **turn-1 states** byte-identical to `golden/turn1-b1040.jsonl`, worker spread and advancing clock included; (c) the **state sequence** (the §5.4 serialized form) byte-identical to the shipped corpus for a fixed seed set. The existing JS suite passes unchanged; the §12 invariants are green; and the build's object file holds **no `fma` instruction** (`llvm-dis`, counted in CI), because contraction changes the answer and the whole claim is the answer. |
+| **P0** | **The core** — the Odin sim, native only: the map, then turn 1, then the rule brain | B1 | **The golden diff**, in three gated steps: (a) the **map line** — 942 nodes, 47,097 bytes — byte-identical to `golden/stream-b1040-1m.jsonl`; (b) the **turn-1 state view** byte-identical to `golden/states-b1040-t0-t1.canonical.jsonl` — the per-seat observation at t=0 and t=1000 ms, worker spread and advancing clock included; the oracle regenerates from the reference (the corpus gate), and the older `golden/turn1-b1040.jsonl` capture is provenance, not a gate; (c) the **state sequence** (the §5.4 serialized form) byte-identical to the shipped corpus for a fixed seed set. The existing JS suite passes unchanged; the §12 invariants are green; and the build's object file holds **no `fma` instruction** (`llvm-dis`, counted in CI), because contraction changes the answer and the whole claim is the answer. *Status (5 October 2026, measured): (a) green — four conditions byte-identical; (b) in flight — the oracle and a byte-verified JS transcription spec exist (`tools/trace-states-port.cjs`), the Odin port is mid-flight; the live record is `docs/REBUILD-EFFORT.md` §1.* |
 | **P1** | **The trace** — the daemon, the event stream, the match folder, the redaction at export | B2, B3 | A **headless 4-seat match** (no browser, no display) produces a *folder*; the `transcript.jsonl` validates against the v1 schema; the `events.jsonl` is present and, for two runs of the same seed, **diffs to empty**; the `traces/` carry the full raw usage; the *exported* folder has **no key, no endpoint, no cost** (the existing redaction/audit test passes on the new format). |
 | **P2** | **The face** — the webview shell, the renderer refinement (§7), the UI polish | the visual | **Playable and recordable on Win, macOS, and Linux**; the §7 visual work is in; the existing **Playwright visual-regression** suite is green; the §7.2 performance target is met on a mid desktop (the same scene at 60 fps, the showcase cap ~3×); the README's "no build step" claim is re-decided and the decision is written into the doc. |
 | **P3** | **The eyes** — the analyzer (web + CLI), the benchmark runner, the OTel export | the analysis | The **A/B view** renders over a two-match corpus (the diff of the decision, the diff of the outcome); the **causal-chain** view answers "why did this kill happen" from `events.jsonl` alone; the **report** command emits a correct per-match and per-corpus document; the **OTel export** is ingested by a standard APM/LLM-observability tool without a new viewer. |
@@ -660,16 +654,18 @@ proposal does not pre-commit it.
 ## 10. What I need from you (the decisions)
 
 The spec's §13 lists eleven open questions a rebuild *must decide*; this proposal answers
-most of them. Five are load-bearing enough — and costly enough — that I want **your**
-call before P0 starts, because each one changes what "done" means:
+most of them. Five were load-bearing enough — and costly enough — to want **your** call
+before P0 starts, because each one changes what "done" means. Two are now decided and
+closed in writing (items 1 and 2 below); three remain yours:
 
-1. **The core language: Rust — confirm, or name the alternative.** The proposal is
-   written for Rust (one source → WASM + three native targets + a no-GC hot path). The
-   rejected alternatives and their costs are stated in §4 (TypeScript: the weaker version
-   of the same idea; C++: the build-system tax; WASM-only: no canonical server). If you
-   want a different language, the §4 determinism contract and the P0 golden-diff gate
-   are *language-agnostic* and survive — but the "one source, three targets" property is
-   what makes the gate cheap, and Rust is the only language that gives it for free.
+1. **The core language: decided — Odin** (spec §14.1, decision 1, 4 October 2026; the
+   scoring and the arithmetic are `docs/CORE-REPLAN.md`, the measured costs are
+   `docs/REBUILD-EFFORT.md`). The rejected alternatives and their costs stay recorded in
+   §4 (TypeScript: the weaker version of the same idea; C++: the build-system tax;
+   WASM-only: no canonical server; Rust: retired rather than failed, kept as the tagged
+   reference `rust-core-final-b1040`). One measurement reopens it: fused multiply-add in
+   the compiler's object files — measured zero, and gate 3 of `spike/gates.sh` re-checks
+   it on every run.
 2. **The desktop shell: decided — no Tauri** (spec §14.1, decision 4). Its backend is Rust,
    so an Odin core under a Tauri shell is three languages in one product. A webview behind a
    thin C ABI, served by the same binary, keeps the polish and drops the language. Revisit

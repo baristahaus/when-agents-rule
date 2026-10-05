@@ -4,43 +4,55 @@ One page that is always true about where this fork stands against the parent, wr
 that whoever picks it up next (including a future me with no memory) can rebuild the whole
 picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Last updated: build 1040, 4 October 2026, at `rebuild/v2` HEAD (`83ac1ce`).
+Last updated: 5 October 2026, at HEAD `f9dc0c3` on `sync/upstream-b1039` — the v2 line
+has moved past `rebuild/v2`; see *Branch and remote state* below.
 
 ## The one-paragraph version
 
 We are a fork of `https://github.com/asp67/when-agents-rule` (the parent, which ships the
-game). Our line keeps a **parallel Rust core** (`rust/core`) held to the shipped JS by
-byte-exact golden traces, plus a handful of simulation fixes. The parent has moved 156
-builds since we forked. We have now merged the parent through **build 1039**
-(`43ac04a`), re-applied our fixes on top, and **re-derived the golden** so the port is
-measured against the current rules instead of a year-old recording. `main` stays shippable
-v1 (the parent's JS); v2 work lives on `rebuild/v2`.
+game). Our line keeps a handful of simulation fixes and a **byte-exact golden corpus**
+(`golden/`) that holds any core to the shipped JS; the parallel Rust core that proved the
+porting method is **retired** (tag `rust-core-final-b1040`), and the v2 core is being
+rebuilt in **Odin** against the same corpus — its record is `docs/REBUILD-EFFORT.md`. We
+merged the parent through **build 1039** (`43ac04a`), re-applied our fixes on top, and
+**re-derived the golden** so any port is measured against the current rules instead of a
+year-old recording; the parent has since shipped 15 more builds (tip b1054), unmerged.
+`main` stays shippable v1 (the parent's JS); v2 work lives on `sync/upstream-b1039` at
+HEAD (see *Branch and remote state* — `rebuild/v2` is stale).
 
 ## Commands that answer every question here
 
 | Question | Command | Last measured |
 |---|---|---|
-| Does the map still match the reference byte for byte? | `cd rust/core && cargo run --release --offline --bin golden-diff -- golden/stream-1m.jsonl` | PASS, 942 nodes, 47,097 bytes |
-| Does the core reproduce turn 1? | `cd rust/core && cargo test --offline` | 5 lib + 1 gate, 0 failed |
-| Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl rust/core/golden/stream-1m.jsonl` | byte-identical, 2,722,912 bytes |
-| Is the game green? | `npm test` | 622/622 |
-| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1039) |
-| What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | our 33 + the 3 sync commits |
-| Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7 |
+| Do the Odin gates still pass (vectors, counts, coast, four map lines, no FMA, vet, corpus)? | `./spike/gates.sh` | 8/8 green, 5 Oct 2026 — four map conditions byte-identical |
+| Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026 |
+| Does the Odin core reproduce turn 1? | *(in flight — `spike/turn1/main.odin` ~70%, does not compile yet; the map is `spike/turn1/HANDOVER.md`)* | not green yet |
+| Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl golden/stream-b1040-1m.jsonl` | byte-identical, 2,722,912 bytes (CI runs it) |
+| Is the game green? | `npm test` | 628/628, 5 Oct 2026 |
+| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 15 (parent tip b1054; last merged b1039) |
+| What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | 65 commits, 5 Oct 2026 |
+| Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7, 5 Oct 2026 |
 
 ## Branch and remote state
 
     origin   git@github.com-war:baristahaus/when-agents-rule   (our fork)
     upstream https://github.com/asp67/when-agents-rule         (the parent, read-only for us)
 
-- `main` — our **v1** line: 33 fork commits including the pre-sync WIP snapshot. Pushed.
-- `rebuild/v2` — this merge plus the divergence fixes and the re-derived golden. Pushed:
-  `origin/rebuild/v2` = `83ac1ce` (merge → divergence fixes → golden → D6 arity → inert-edit
-  revert). This is the branch v2 work continues on.
+- `main` = `33a1f11` — our **v1** line: 33 fork commits including the pre-sync WIP snapshot.
+  **Measured 5 October: `origin/main` = `c7fafd7`, the parent's b1054 tip** (identical to
+  `upstream/main`). The claim further down that "main = `33a1f11`" was pushed no longer
+  matches the remote; whether the fork's GitHub main is meant to mirror the parent or to
+  carry our v1 is a question for whoever owns that remote — recorded here as a mismatch,
+  not resolved by assumption.
+- `rebuild/v2` = `c4a32da` (pushed; "Retire the Rust port") — **stale by 17 commits**.
+  This ledger used to call it "the branch v2 work continues on"; the work continued
+  elsewhere (below), and the pointer was never moved.
+- `sync/upstream-b1039` = `f9dc0c3` = **HEAD** — the branch the post-merge work actually
+  ran on: the Rust retirement, the Odin spike and its gates, the state dumper, the CI
+  workflows. No longer identical to `rebuild/v2`; the live v2 line until the two are
+  reconciled. `origin/sync/upstream-b1039` = `b5bc685`, one commit behind HEAD.
 - `save/pre-upstream-sync` = `33a1f11` — the exact pre-merge tree, kept as the undo button.
   `git reset --hard save/pre-upstream-sync` is the documented abort path.
-- `sync/upstream-b1039` — the branch the sync work ran on; now identical to `rebuild/v2`.
-  Delete when convenient.
 - The parent also has a branch `upstream/next-level`; we do not track it. Ask before
   merging it — it is not in this ledger's history.
 
@@ -211,19 +223,25 @@ shows two commits and nothing fork-shaped.
 
 ## Next, in order
 
-1. D5 — the replay fog that reveals dead owned units. `anApplyFog` should key off the
-   same alive test the live fog does.
-2. Decide what `js/resim.js` (theirs) and `rust/core` (ours) should be to each other before
-   either grows more. Today they are two answers to one question, in one repo.
-3. Port park-and-spread with its key: `sim/vision.rs::rand_jitter` is wired and uncalled, and
-   its rule site is `rand(unit, 'node-spot')` now (`js/game.js:2005`). Also decide the fate of
-   the two unwired Rust drafts (`src/model.rs`, `src/match.rs`) — a mutation test
-   (overwrite with garbage, `cargo build` stays green) proves nothing reads them.
-4. The replay's own build check: our line should refuse to re-simulate a recording whose
-   `coreHash` it cannot reproduce, and say so, rather than replaying a match it cannot
-   explain.
-5. Consider a real file-list audit gate (recorder ↔ `js/manifest.js` ↔ `index.html`), since
-   the ledger keeps finding drift in exactly that seam.
+1. **Still open** — D5, the replay fog that reveals dead owned units. `anApplyFog` should
+   key off the same alive test the live fog does.
+2. **Answered 4 October (spec §14.1, decision 5)** — what `js/resim.js` (theirs) and our
+   port should be to each other: the golden is the treaty between engines. The Rust core
+   is retired (tag `rust-core-final-b1040`); the parent's JS stays authoritative in the
+   browser; our Odin core is authoritative for native and headless; `js/resim.js` remains
+   the parent's replay engine, on their side of the treaty.
+3. **Resolved by the retirement** — park-and-spread and the two unwired Rust drafts: the
+   drafts are deleted with the port (the tag preserves them), and the keyed worker spread
+   is transcribed and verified in the turn-1 work in flight (`spike/turn1/`, checked
+   against the golden's raw bytes).
+4. **Still open** — the replay's own build check: our line should refuse to re-simulate a
+   recording whose `coreHash` it cannot reproduce, and say so, rather than replaying a
+   match it cannot explain.
+5. **Still open** — a real file-list audit gate (recorder ↔ `js/manifest.js` ↔
+   `index.html`), since the ledger keeps finding drift in exactly that seam.
+
+The rebuild's own next steps — the turn-1 gate, the uncommitted tree, the branch
+reconciliation — are ordered in `docs/REBUILD-EFFORT.md` §5.
 
 ```
 $ node tools/upstream-check.cjs --branch=share/upstream-contract --claim-build=1040

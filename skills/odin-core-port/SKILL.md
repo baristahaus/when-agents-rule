@@ -62,10 +62,16 @@ language"; read them before trusting a state diff, because a locale or a moment 
 indistinguishable from a rule difference until you name which it is. The older `turn1-b1040.jsonl` is
 provenance only: today's reference does not reproduce it.
 
-The next increment is **turn 1 against the new fixture** — port the economy, the worker spread and the
-clock far enough that a dumped state diffs clean, which is the first time the rule brain's output has to
-agree and not just the map.
+The next increment is **turn 1 against the new fixture**, and it is in flight. Two artifacts
+exist that the original plan did not have: `tools/trace-states-port.cjs` (1,807 lines) — a
+byte-verified, headless JS re-implementation of the whole turn-1 path, gate-checked against
+the canonical fixture — which is now **the spec to transcribe**; and `spike/turn1/main.odin`
+(2,028 lines), the Odin transcription, ~70% written, with four shape bugs, four missing
+sections and no `main()` — it does not compile yet. Read `spike/turn1/HANDOVER.md` first:
+its §2 is the port's line map, its §3 is verified ground truth (do not "fix" the spawn
+formula or the worker keys), its §7 is the order of attack. The live record of the effort —
+state, costs, lessons — is `docs/REBUILD-EFFORT.md`.
 
-Two things are owed and both are listed in `docs/CORE-REPLAN.md` §13: the Town Center clearance step
-(the record is taken after it, and today's four conditions prove it removed nothing but not that it
+Two things are owed and both are listed in `docs/CORE-REPLAN.md` §13 (status in its §14): the Town Center
+clearance step (the record is taken after it, and today's four conditions prove it removed nothing but not that it
 is transcribed), and the leak tracker's real name in this `core:mem`, which nobody has found yet.
