@@ -530,7 +530,7 @@ egypt :: civ = {
 	id: "egyptian", name_en: "Egyptians",
 	bldg_mult: 1.5, honus_harvest: 1.0, honus_techcost: 1.0,
 	wonder_id: "pyramid", wonder_cost: {4800, 4800, 4250, 2650},
-	excluded: ['cavalry', 'heavy_cavalry'], n_excluded: 2,
+	excluded: ["cavalry", "heavy_cavalry"], n_excluded: 2,
 	units: [
 		{id: "priest", cost: {50, 0, 0, 30}, health: 60, speed: 1.2, u_type: "support", tier: "bronze"},
 		{id: "slinger", cost: {60, 20, 0, 0}, health: 45, speed: 1, u_type: "ranged", tier: "neolithic", train_at: "archery_range"},
@@ -540,16 +540,16 @@ egypt :: civ = {
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone", requires: ['farm'], n_req: 1},
+		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone", requires: ["farm"], n_req: 1},
 		{cost: {80, 40, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {50, 50, 50, 0}, research_at: "academy", required_age: "neolithic", requires: ['academy'], n_req: 1},
+		{cost: {50, 50, 50, 0}, research_at: "academy", required_age: "neolithic", requires: ["academy"], n_req: 1},
 		{cost: {100, 100, 0, 50}, research_at: "academy", required_age: "neolithic"},
 		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
 		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
 		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ['bronze_armor'], n_req: 1},
+		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["bronze_armor"], n_req: 1},
 		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
 	], n_techs: 14,
 }
@@ -558,7 +558,7 @@ greek :: civ = {
 	id: "greek", name_en: "Greeks",
 	bldg_mult: 1.3, honus_harvest: 1.0, honus_techcost: 1.0,
 	wonder_id: "akropolis", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ['cavalry', 'heavy_cavalry'], n_excluded: 2,
+	excluded: ["cavalry", "heavy_cavalry"], n_excluded: 2,
 	units: [
 		{id: "hoplite", cost: {80, 0, 50, 30}, health: 150, speed: 0.9, u_type: "infantry", tier: "neolithic", train_at: "barracks"},
 		{id: "phalanx", cost: {60, 0, 40, 20}, health: 100, speed: 0.8, u_type: "infantry", tier: "bronze", train_at: "barracks"},
@@ -568,15 +568,15 @@ greek :: civ = {
 		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {100, 100, 0, 0}, research_at: "town_center", required_age: "stone", requires: ['barracks'], n_req: 1},
+		{cost: {100, 100, 0, 0}, research_at: "town_center", required_age: "stone", requires: ["barracks"], n_req: 1},
 		{cost: {100, 50, 0, 30}, research_at: "town_center", required_age: "stone"},
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {200, 0, 0, 150}, research_at: "academy", required_age: "neolithic", requires: ['academy'], n_req: 1},
-		{cost: {300, 0, 0, 200}, research_at: "academy", required_age: "bronze", requires: ['philosophy'], n_req: 1},
+		{cost: {200, 0, 0, 150}, research_at: "academy", required_age: "neolithic", requires: ["academy"], n_req: 1},
+		{cost: {300, 0, 0, 200}, research_at: "academy", required_age: "bronze", requires: ["philosophy"], n_req: 1},
 		{cost: {0, 50, 150, 100}, research_at: "academy", required_age: "bronze"},
 		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ['phalanx_armor'], n_req: 1},
+		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["phalanx_armor"], n_req: 1},
 		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
 	], n_techs: 14,
 }
@@ -585,7 +585,7 @@ persian :: civ = {
 	id: "persian", name_en: "Persians",
 	bldg_mult: 1.0, honus_harvest: 1.2, honus_techcost: 1.0,
 	wonder_id: "firetemple", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ['', '', '', ''], n_excluded: 0,
+	excluded: ["", "", "", ""], n_excluded: 0,
 	units: [
 		{id: "archer", cost: {70, 30, 0, 0}, health: 50, speed: 1.1, u_type: "ranged", tier: "neolithic"},
 		{id: "cavalry", cost: {110, 0, 0, 40}, health: 140, speed: 2, u_type: "cavalry", tier: "bronze"},
@@ -598,12 +598,12 @@ persian :: civ = {
 		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {150, 50, 0, 100}, research_at: "academy", required_age: "neolithic", requires: ['horseback'], n_req: 1},
-		{cost: {0, 0, 200, 150}, research_at: "academy", required_age: "bronze", requires: ['cavalry_training'], n_req: 1},
+		{cost: {150, 50, 0, 100}, research_at: "academy", required_age: "neolithic", requires: ["horseback"], n_req: 1},
+		{cost: {0, 0, 200, 150}, research_at: "academy", required_age: "bronze", requires: ["cavalry_training"], n_req: 1},
 		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
 		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
 		{cost: {100, 100, 0, 50}, research_at: "academy", required_age: "bronze"},
-		{cost: {0, 200, 150, 200}, research_at: "academy", required_age: "iron", requires: ['archery'], n_req: 1},
+		{cost: {0, 200, 150, 200}, research_at: "academy", required_age: "iron", requires: ["archery"], n_req: 1},
 		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
 	], n_techs: 13,
 }
@@ -612,7 +612,7 @@ yamato_civ :: civ = {
 	id: "yamato", name_en: "Yamato",
 	bldg_mult: 1.0, honus_harvest: 1.0, honus_techcost: 0.7,
 	wonder_id: "shrine", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ['', '', '', ''], n_excluded: 0,
+	excluded: ["", "", "", ""], n_excluded: 0,
 	units: [
 		{id: "samurai", cost: {100, 50, 0, 50}, health: 130, speed: 1.3, u_type: "infantry", tier: "bronze", train_at: "barracks"},
 		{id: "archer_ship", cost: {150, 150, 0, 50}, health: 200, speed: 1.5, u_type: "ranged"},
@@ -621,15 +621,15 @@ yamato_civ :: civ = {
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {150, 0, 0, 100}, research_at: "town_center", required_age: "stone", requires: ['barracks'], n_req: 1},
+		{cost: {150, 0, 0, 100}, research_at: "town_center", required_age: "stone", requires: ["barracks"], n_req: 1},
 		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
 		{cost: {100, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
 		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
 		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {0, 100, 150, 150}, research_at: "academy", required_age: "bronze", requires: ['bushido'], n_req: 1},
+		{cost: {0, 100, 150, 150}, research_at: "academy", required_age: "bronze", requires: ["bushido"], n_req: 1},
 		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ['armor'], n_req: 1},
+		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["armor"], n_req: 1},
 		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
 	], n_techs: 13,
 }
@@ -639,10 +639,10 @@ civs :: [4]civ = [egypt, greek, persian, yamato_civ]
 // Tech tree ids in tree order (the observation walks this order), parallel to
 // civs[ci].techs[i].
 tech_ids :: [4][14]string = [
-	['house', 'farm', 'barracks', 'agriculture', 'pottery', 'longbow', 'academy', 'mining', 'archery', 'bronze_armor', 'horseback', 'healing', 'iron_working', 'fire_arrows'],
-	['house', 'farm', 'barracks', 'horseback', 'falx', 'farsight', 'longbow', 'academy', 'philosophy', 'democracy', 'phalanx_armor', 'healing', 'iron_working', 'fire_arrows'],
-	['house', 'farm', 'barracks', 'horseback', 'longbow', 'academy', 'cavalry_training', 'cavalry_armor', 'immortals', 'healing', 'archery', 'siege', 'fire_arrows'],
-	['house', 'farm', 'barracks', 'bushido', 'healing', 'speed', 'longbow', 'academy', 'horseback', 'armor', 'lamellar_armor', 'iron_working', 'fire_arrows'],
+	["house", "farm", "barracks", "agriculture", "pottery", "longbow", "academy", "mining", "archery", "bronze_armor", "horseback", "healing", "iron_working", "fire_arrows"],
+	["house", "farm", "barracks", "horseback", "falx", "farsight", "longbow", "academy", "philosophy", "democracy", "phalanx_armor", "healing", "iron_working", "fire_arrows"],
+	["house", "farm", "barracks", "horseback", "longbow", "academy", "cavalry_training", "cavalry_armor", "immortals", "healing", "archery", "siege", "fire_arrows"],
+	["house", "farm", "barracks", "bushido", "healing", "speed", "longbow", "academy", "horseback", "armor", "lamellar_armor", "iron_working", "fire_arrows"],
 ]
 
 // ===========================================================================
@@ -677,7 +677,7 @@ type bldg_def struct {
 }
 
 std_bldg_defs :: [9]bldg_def = [
-	{id: "town_center", cost: {100, 100, 100, 100}, base_health: 1000, req_age: "stone", train_opts: ['worker'], n_train: 1, can_train: true},
+	{id: "town_center", cost: {100, 100, 100, 100}, base_health: 1000, req_age: "stone", train_opts: ["worker"], n_train: 1, can_train: true},
 	{id: "house", cost: {30, 20, 0, 0}, base_health: 300, req_age: "stone", req_tech: "house"},
 	{id: "farm", cost: {50, 50, 0, 0}, base_health: 400, req_age: "stone", req_tech: "farm"},
 	{id: "barracks", cost: {50, 150, 0, 0}, base_health: 800, req_age: "stone", req_tech: "barracks", can_train: true},
@@ -685,7 +685,7 @@ std_bldg_defs :: [9]bldg_def = [
 	{id: "stable", cost: {100, 100, 0, 50}, base_health: 700, req_age: "neolithic", req_tech: "horseback", can_train: true},
 	{id: "academy", cost: {100, 100, 100, 50}, base_health: 700, req_age: "neolithic", req_tech: "academy"},
 	{id: "tower", cost: {50, 50, 100, 0}, base_health: 600, req_age: "stone"},
-	{id: "temple", cost: {100, 100, 150, 100}, base_health: 800, req_age: "bronze", train_opts: ['priest'], n_train: 1, can_train: true},
+	{id: "temple", cost: {100, 100, 150, 100}, base_health: 800, req_age: "bronze", train_opts: ["priest"], n_train: 1, can_train: true},
 ]
 
 bldg_def_by_id :: proc(id: string) -> ^bldg_def {
@@ -723,7 +723,7 @@ civ_unit_def :: proc(ci: int, id: string) -> ^unit_def {
 // age scales by 1.5^index (WarMath.powInt: exact whole power), rounded to a 50-unit
 // step, floored at 50.
 building_max_health :: proc(d: ^bldg_def, ci: int, age: string) -> f64 {
-	agess := [4]string{'stone', 'neolithic', 'bronze', 'iron'}
+	agess := [4]string{"stone", "neolithic", "bronze", "iron"}
 	var idx i32 = 0
 	for i, a in agess {
 		if a == age {
@@ -1428,7 +1428,7 @@ j_end_arr :: proc(j: ^jw) {
 // golden/turn1-b1040.canonical.jsonl.
 // ===========================================================================
 
-AGES_ORDER :: [4]string = ['stone', 'neolithic', 'bronze', 'iron']
+AGES_ORDER :: [4]string = ["stone", "neolithic", "bronze", "iron"]
 
 age_idx :: proc(a: string) -> i32 {
 	for i, x in AGES_ORDER {
