@@ -35,7 +35,10 @@
 
 package main
 
-import "core:fmt" "core:math" "core:os"
+import "core:fmt"
+import "core:math"
+import "core:os"
+import "core:strconv"
 
 // ===========================================================================
 // Portable math — a transcription of js/simulation/math.js.
@@ -73,15 +76,24 @@ m_abs :: proc(v: f64) -> f64 {
 
 // V8's Math.hypot, two-term: normalised by the largest term. With two terms the
 // Kahan compensation is exactly zero, so this straight line gives V8's bits.
+m_inf : f64 = transmute(f64)u64(0x7ff0000000000000) // +inf, the fdlibm INF (this core:math ships no inf constant)
+m_nan : f64 = transmute(f64)u64(0x7ff8000000000000) // quiet NaN, the fdlibm NAN
+
 m_hypot :: proc(a: f64, b: f64) -> f64 {
 	x := m_abs(a)
 	y := m_abs(b)
 	if x != x || y != y {
-		return math.inf if x == math.inf or y == math.inf else math.nan
+		if x == m_inf || y == m_inf {
+			return m_inf
+		}
+		return m_nan
 	}
-	max := x if x > y else y
-	if max == math.inf {
-		return math.inf
+	max := x
+	if y > x {
+		max = y
+	}
+	if max == m_inf {
+		return m_inf
 	}
 	if max == 0 {
 		return 0
@@ -92,19 +104,18 @@ m_hypot :: proc(a: f64, b: f64) -> f64 {
 }
 
 // --- fdlibm kernels on [-pi/4, pi/4]; y is the tail of the reduced argument. ---
-S1c :: f64 = -1.66666666666666324348e-01
-S2c :: f64 = 8.33333333332248946124e-03
-S3c :: f64 = -1.98412698298579493134e-04
-S4c :: f64 = 2.75573137070700676789e-06
-S5c :: f64 = -2.50507602534068634195e-08
-S6c :: f64 = 1.58969099521155010221e-10
-C1c :: f64 = 4.16666666666666019037e-02
-C2c :: f64 = -1.38888888888741095749e-03
-C3c :: f64 = 2.48015872894767294178e-05
-C4c :: f64 = -2.75573143513906633035e-07
-C5c :: f64 = 2.08757232129817482790e-09
-C6c :: f64 = -1.13596475577881948265e-11
-
+S1c :: f64(-1.66666666666666324348e-01)
+S2c :: f64(8.33333333332248946124e-03)
+S3c :: f64(-1.98412698298579493134e-04)
+S4c :: f64(2.75573137070700676789e-06)
+S5c :: f64(-2.50507602534068634195e-08)
+S6c :: f64(1.58969099521155010221e-10)
+C1c :: f64(4.16666666666666019037e-02)
+C2c :: f64(-1.38888888888741095749e-03)
+C3c :: f64(2.48015872894767294178e-05)
+C4c :: f64(-2.75573143513906633035e-07)
+C5c :: f64(2.08757232129817482790e-09)
+C6c :: f64(-1.13596475577881948265e-11)
 k_sin :: proc(x: f64, y: f64, iy: i32) -> f64 {
 	if (high32(x) & cast(i32)(0x7fffffff)) < cast(i32)(0x3e400000) && cast(i32)(x) == 0 {
 		return x
@@ -128,7 +139,10 @@ k_cos :: proc(x: f64, y: f64) -> f64 {
 	if ix < cast(i32)(0x3fd33333) {
 		return 1 - (0.5*z - (z*r - x*y))
 	}
-	qx := 0.28125 if ix > cast(i32)(0x3fe90000) else with_high(ix - cast(i32)(0x00200000), 0)
+	qx := f64(0.28125)
+	if ix <= cast(i32)(0x3fe90000) {
+		qx = with_high(ix - cast(i32)(0x00200000), 0)
+	}
 	hz := 0.5 * z - qx
 	a := 1 - qx
 	return a - (hz - (z*r - x*y))
@@ -136,24 +150,64 @@ k_cos :: proc(x: f64, y: f64) -> f64 {
 
 // x - n*pi/2 as a head and tail, for |x| up to 2^20 * pi/2 (fdlibm's medium
 // range). Beyond it the argument is first brought down with %, which is exact.
-invpio2c :: f64 = 6.36619772367581382433e-01
-pio2_1c :: f64 = 1.57079632673412561417e+00
-pio2_1tc :: f64 = 6.07710050650619224932e-11
-pio2_2c :: f64 = 6.07710050630396597660e-11
-pio2_2tc :: f64 = 2.02226624879595063154e-21
-pio2_3c :: f64 = 2.02226624871116645580e-21
-pio2_3tc :: f64 = 8.47842766036889956997e-32
-
-npio2_hw :: [32]i32 = [
+invpio2c :: f64(6.36619772367581382433e-01)
+pio2_1c :: f64(1.57079632673412561417e+00)
+pio2_1tc :: f64(6.07710050650619224932e-11)
+pio2_2c :: f64(6.07710050630396597660e-11)
+pio2_2tc :: f64(2.02226624879595063154e-21)
+pio2_3c :: f64(2.02226624871116645580e-21)
+pio2_3tc :: f64(8.47842766036889956997e-32)
+npio2_hw : [32]i32 = {
 	0x3FF921FB, 0x400921FB, 0x4012D97C, 0x401921FB, 0x401F6A7A, 0x4022D97C,
 	0x4025FDBB, 0x402921FB, 0x402C463A, 0x402F6A7A, 0x4031475C, 0x4032D97C,
 	0x40346B9C, 0x4035FDBB, 0x40378FDB, 0x403921FB, 0x403AB41B, 0x403C463A,
 	0x403DD85A, 0x403F6A7A, 0x40407E4C, 0x4041475C, 0x4042106C, 0x4042D97C,
 	0x4043A28C, 0x40446B9C, 0x404534AC, 0x4045FDBB, 0x4046C6CB, 0x40478FDB,
 	0x404858EB, 0x404921FB,
-]
+}
 
-rem_pio2 :: proc(x: f64, y0: ^f64, y1: ^f64) -> i32 {
+// The JS '%' on doubles: the ECMAScript remainder, which is fmod semantics —
+// the result carries the sign of the dividend, and x - result is an exact
+// multiple of the divisor. fdlibm's __rem_pio2 medium path leans on it for
+// |x| > 329571 (0x413921fb); the arena never sends such an x, but the branch
+// is transcribed anyway, and a transcription of '%' is this, not a guess.
+// The loop is the binary-subtraction form of fmod: every subtraction is
+// Sterbenz-exact (r/2 < s <= r holds at each step), so the returned value
+// is the true mathematical remainder — no rounding enters anywhere.
+m_fmod :: proc(x_in: f64, y_in: f64) -> f64 {
+	ax := m_abs(x_in)
+	ay := m_abs(y_in)
+	if ay == 0 || ax == m_inf || ax != ax || ay != ay {
+		return m_nan // x % 0, x % NaN, inf % y: all NaN in JS
+	}
+	if ax == 0 || ax < ay {
+		return x_in // 0 % y = 0 (sign kept); |x| < |y|: x unchanged
+	}
+	r := ax
+	for r >= ay {
+		s := ay
+		for s + s <= r {
+			s += s
+		}
+		r -= s
+	}
+	if x_in < 0 {
+		return -r
+	}
+	return r
+}
+
+// floor4: the JS Math.floor((cost || 0) * mult) the research table uses.
+floor4 :: proc(v: f64, mult: f64) -> f64 {
+	return math.floor(v * mult)
+}
+
+// The node-type names, in type order (0 food, 1 wood, 2 stone, 3 gold) —
+// the reference indexes its own array inline; the port names it.
+res_type_name : [4]string = {"food", "wood", "stone", "gold"}
+
+rem_pio2 :: proc(x_in: f64, y0: ^f64, y1: ^f64) -> i32 {
+	x := x_in
 	hx := high32(x)
 	ix := hx & cast(i32)(0x7fffffff)
 	if ix <= cast(i32)(0x3fe921fb) {
@@ -186,7 +240,7 @@ rem_pio2 :: proc(x: f64, y0: ^f64, y1: ^f64) -> i32 {
 		return -1
 	}
 	if ix > cast(i32)(0x413921fb) {
-		x = x % 6.283185307179586
+		x = m_fmod(x, 6.283185307179586)
 		hx = high32(x)
 		ix = hx & cast(i32)(0x7fffffff)
 		if ix <= cast(i32)(0x3fe921fb) {
@@ -239,7 +293,7 @@ m_sin :: proc(x: f64) -> f64 {
 	if ix >= cast(i32)(0x7ff00000) {
 		return x - x // NaN
 	}
-	var y0, y1 f64
+	y0, y1: f64
 	switch rem_pio2(x, &y0, &y1) & 3 {
 	case 0:
 		return k_sin(y0, y1, 1)
@@ -247,9 +301,8 @@ m_sin :: proc(x: f64) -> f64 {
 		return k_cos(y0, y1)
 	case 2:
 		return -k_sin(y0, y1, 1)
-	default:
-		return -k_cos(y0, y1)
 	}
+	return -k_cos(y0, y1)
 }
 
 m_cos :: proc(x: f64) -> f64 {
@@ -260,7 +313,7 @@ m_cos :: proc(x: f64) -> f64 {
 	if ix >= cast(i32)(0x7ff00000) {
 		return x - x
 	}
-	var y0, y1 f64
+	y0, y1: f64
 	switch rem_pio2(x, &y0, &y1) & 3 {
 	case 0:
 		return k_cos(y0, y1)
@@ -268,25 +321,24 @@ m_cos :: proc(x: f64) -> f64 {
 		return -k_sin(y0, y1, 1)
 	case 2:
 		return -k_cos(y0, y1)
-	default:
-		return k_sin(y0, y1, 1)
 	}
+	return k_sin(y0, y1, 1)
 }
 
 // --- fdlibm atan and atan2. ---
-atanhi :: [4]f64 = [
+atanhi : [4]f64 = {
 	4.63647609000806093515e-01,
 	7.85398163397448278999e-01,
 	9.82793723247329054082e-01,
 	1.57079632679489655800e+00,
-]
-atanlo :: [4]f64 = [
+}
+atanlo : [4]f64 = {
 	2.26987774529616870924e-17,
 	3.06161699786838301793e-17,
 	1.39033110312309984516e-17,
 	6.12323399573676603587e-17,
-]
-aT :: [11]f64 = [
+}
+aT : [11]f64 = {
 	3.33333333333329318027e-01,
 	-1.99999999998764832476e-01,
 	1.42857142725034663711e-01,
@@ -298,17 +350,21 @@ aT :: [11]f64 = [
 	4.97687799461593236017e-02,
 	-3.65315727442169155270e-02,
 	1.62858201153657823623e-02,
-]
+}
 
-m_atan :: proc(x: f64) -> f64 {
+m_atan :: proc(x_in: f64) -> f64 {
+	x := x_in
 	hx := high32(x)
 	ix := hx & cast(i32)(0x7fffffff)
-	var id i32
+	id: i32
 	if ix >= cast(i32)(0x44100000) {
 		if ix > cast(i32)(0x7ff00000) || (ix == cast(i32)(0x7ff00000) && low32(x) != 0) {
 			return x + x
 		}
-		return hx > 0 ? atanhi[3] + atanlo[3] : -atanhi[3] - atanlo[3]
+		if hx > 0 {
+			return atanhi[3] + atanlo[3]
+		}
+		return -atanhi[3] - atanlo[3]
 	}
 	if ix < cast(i32)(0x3fdc0000) {
 		if ix < cast(i32)(0x3e200000) {
@@ -341,15 +397,17 @@ m_atan :: proc(x: f64) -> f64 {
 		return x - x*(s1 + s2)
 	}
 	r := atanhi[id] - ((x*(s1 + s2) - atanlo[id]) - x)
-	return hx < 0 ? -r : r
+	if hx < 0 {
+		return -r
+	}
+	return r
 }
 
-pim :: f64 = 3.1415926535897931160e+00
-pi_o_2m :: f64 = 1.5707963267948965580e+00
-pi_o_4m :: f64 = 7.8539816339744827900e-01
-pi_lom :: f64 = 1.2246467991473531772e-16
-tinym :: f64 = 1.0e-300
-
+pim :: f64(3.1415926535897931160e+00)
+pi_o_2m :: f64(1.5707963267948965580e+00)
+pi_o_4m :: f64(7.8539816339744827900e-01)
+pi_lom :: f64(1.2246467991473531772e-16)
+tinym :: f64(1.0e-300)
 m_atan2 :: proc(yv: f64, x: f64) -> f64 {
 	if x != x || yv != yv {
 		return x + yv
@@ -368,22 +426,33 @@ m_atan2 :: proc(yv: f64, x: f64) -> f64 {
 		if m == 0 || m == 1 {
 			return yv
 		}
-		return m == 2 ? pim + tinym : -pim - tinym
+		if m == 2 {
+			return pim + tinym
+		}
+		return -pim - tinym
 	}
 	if (ix | cast(i32)(lx)) == 0 {
-		return hy < 0 ? -pi_o_2m - tinym : pi_o_2m + tinym
+		if hy < 0 {
+			return -pi_o_2m - tinym
+		}
+		return pi_o_2m + tinym
 	}
 	if ix == cast(i32)(0x7ff00000) {
 		if iy == cast(i32)(0x7ff00000) {
-			return [pi_o_4m + tinym, -pi_o_4m - tinym, 3*pi_o_4m + tinym, -3*pi_o_4m - tinym][m]
+			vals := [4]f64{pi_o_4m + tinym, -pi_o_4m - tinym, 3*pi_o_4m + tinym, -3*pi_o_4m - tinym}
+			return vals[m]
 		}
-		return [0, -0, pim + tinym, -pim - tinym][m]
+		vals := [4]f64{0, -0, pim + tinym, -pim - tinym}
+		return vals[m]
 	}
 	if iy == cast(i32)(0x7ff00000) {
-		return hy < 0 ? -pi_o_2m - tinym : pi_o_2m + tinym
+		if hy < 0 {
+			return -pi_o_2m - tinym
+		}
+		return pi_o_2m + tinym
 	}
 	k := (iy - ix) >> 20
-	var z f64
+	z: f64
 	if k > 60 {
 		z = pi_o_2m + 0.5*pi_lom
 		m &= 1
@@ -399,15 +468,14 @@ m_atan2 :: proc(yv: f64, x: f64) -> f64 {
 		return -z
 	case 2:
 		return pim - (z - pi_lom)
-	default:
-		return (z - pi_lom) - pim
 	}
+	return (z - pi_lom) - pim
 }
 
 // A small whole power by repeated multiplication: exact wherever the result is.
 m_pow_int :: proc(base: f64, n: i32) -> f64 {
 	r := f64(1)
-	for i := 0; i < n; i += 1 {
+	for i := 0; i < cast(int)(n); i += 1 {
 		r *= base
 	}
 	return r
@@ -486,164 +554,166 @@ keyed_draw :: proc(seed: string, key: string, n: u32) -> f64 {
 // German data; the English names below are the i18n table, js/i18n.js).
 // ===========================================================================
 
-type cost4 struct {
-	food, wood, stone, gold f64
+cost4 :: struct {
+	food, wood, stone, gold: f64,
 }
 
-type tech struct {
-	cost         cost4
-	research_at  string
-	required_age string
-	requires     [4]string
-	n_req        int
+tech :: struct {
+	cost: cost4,
+	research_at: string,
+	required_age: string,
+	requires: [4]string,
+	n_req: int,
 }
 
-type unit_def struct {
-	id       string
-	cost     cost4
-	health   f64
-	speed    f64
-	u_type   string // 'worker', 'infantry', 'ranged', 'cavalry', 'support'
-	tier     string // the epoch that trains it
-	train_at string // set for uniques that need a specific building
+unit_def :: struct {
+	id: string,
+	cost: cost4,
+	health: f64,
+	speed: f64,
+	u_type: string, // 'worker', 'infantry', 'ranged', 'cavalry', 'support'
+	tier: string, // the epoch that trains it
+	train_at: string, // set for uniques that need a specific building
 }
 
-type civ struct {
-	id          string
-	name_en     string
+civ :: struct {
+	id: string,
+	name_en: string,
 	// per-building health multiplier from the civ bonus ('Pyramide' 1.5, 'Akropolis' 1.3)
-	bldg_mult      f64
+	bldg_mult: f64,
 	// the observation's bonuses table: harvest 1.2 (Satrapie) / techCostMult 0.7 (Schrein)
-	honus_harvest  f64
-	honus_techcost f64
-	wonder_id   string
-	wonder_cost cost4
-	excluded    [4]string
-	n_excluded  int
-	units       [8]unit_def
-	n_units     int
-	techs       [14]tech
-	n_techs     int
+	honus_harvest: f64,
+	honus_techcost: f64,
+	wonder_id: string,
+	wonder_cost: cost4,
+	excluded: [4]string,
+	n_excluded: int,
+	units: [8]unit_def,
+	n_units: int,
+	techs: [14]tech,
+	n_techs: int,
 }
 
-egypt :: civ = {
-	id: "egyptian", name_en: "Egyptians",
-	bldg_mult: 1.5, honus_harvest: 1.0, honus_techcost: 1.0,
-	wonder_id: "pyramid", wonder_cost: {4800, 4800, 4250, 2650},
-	excluded: ["cavalry", "heavy_cavalry"], n_excluded: 2,
-	units: [
-		{id: "priest", cost: {50, 0, 0, 30}, health: 60, speed: 1.2, u_type: "support", tier: "bronze"},
-		{id: "slinger", cost: {60, 20, 0, 0}, health: 45, speed: 1, u_type: "ranged", tier: "neolithic", train_at: "archery_range"},
-		{id: "horse_carriage", cost: {60, 20, 40, 40}, health: 100, speed: 2, u_type: "cavalry", tier: "bronze", train_at: "stable"},
-	], n_units: 3,
-	techs: [
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone", requires: ["farm"], n_req: 1},
-		{cost: {80, 40, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {50, 50, 50, 0}, research_at: "academy", required_age: "neolithic", requires: ["academy"], n_req: 1},
-		{cost: {100, 100, 0, 50}, research_at: "academy", required_age: "neolithic"},
-		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
-		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["bronze_armor"], n_req: 1},
-		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
-	], n_techs: 14,
+egypt :: civ{
+	id = "egyptian", name_en = "Egyptians",
+	bldg_mult = 1.5, honus_harvest = 1.0, honus_techcost = 1.0,
+	wonder_id = "pyramid", wonder_cost = {4800, 4800, 4250, 2650},
+	excluded = {"cavalry", "heavy_cavalry", "", ""}, n_excluded = 2,
+	units = {
+		{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1.2, u_type = "support", tier = "bronze"},
+		{id = "slinger", cost = {60, 20, 0, 0}, health = 45, speed = 1, u_type = "ranged", tier = "neolithic", train_at = "archery_range"},
+		{id = "horse_carriage", cost = {60, 20, 40, 40}, health = 100, speed = 2, u_type = "cavalry", tier = "bronze", train_at = "stable"},
+	{}, {}, {}, {}, {}}, n_units = 3,
+	techs = {
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"farm", "", "", ""}, n_req = 1},
+		{cost = {80, 40, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {50, 50, 50, 0}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1},
+		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "neolithic"},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"bronze_armor", "", "", ""}, n_req = 1},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+	}, n_techs = 14,
 }
 
-greek :: civ = {
-	id: "greek", name_en: "Greeks",
-	bldg_mult: 1.3, honus_harvest: 1.0, honus_techcost: 1.0,
-	wonder_id: "akropolis", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ["cavalry", "heavy_cavalry"], n_excluded: 2,
-	units: [
-		{id: "hoplite", cost: {80, 0, 50, 30}, health: 150, speed: 0.9, u_type: "infantry", tier: "neolithic", train_at: "barracks"},
-		{id: "phalanx", cost: {60, 0, 40, 20}, health: 100, speed: 0.8, u_type: "infantry", tier: "bronze", train_at: "barracks"},
-	], n_units: 2,
-	techs: [
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {100, 100, 0, 0}, research_at: "town_center", required_age: "stone", requires: ["barracks"], n_req: 1},
-		{cost: {100, 50, 0, 30}, research_at: "town_center", required_age: "stone"},
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {200, 0, 0, 150}, research_at: "academy", required_age: "neolithic", requires: ["academy"], n_req: 1},
-		{cost: {300, 0, 0, 200}, research_at: "academy", required_age: "bronze", requires: ["philosophy"], n_req: 1},
-		{cost: {0, 50, 150, 100}, research_at: "academy", required_age: "bronze"},
-		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["phalanx_armor"], n_req: 1},
-		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
-	], n_techs: 14,
+greek :: civ{
+	id = "greek", name_en = "Greeks",
+	bldg_mult = 1.3, honus_harvest = 1.0, honus_techcost = 1.0,
+	wonder_id = "akropolis", wonder_cost = {4500, 4500, 4000, 2500},
+	excluded = {"cavalry", "heavy_cavalry", "", ""}, n_excluded = 2,
+	units = {
+		{id = "hoplite", cost = {80, 0, 50, 30}, health = 150, speed = 0.9, u_type = "infantry", tier = "neolithic", train_at = "barracks"},
+		{id = "phalanx", cost = {60, 0, 40, 20}, health = 100, speed = 0.8, u_type = "infantry", tier = "bronze", train_at = "barracks"},
+	{}, {}, {}, {}, {}, {}}, n_units = 2,
+	techs = {
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1},
+		{cost = {100, 50, 0, 30}, research_at = "town_center", required_age = "stone"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {200, 0, 0, 150}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1},
+		{cost = {300, 0, 0, 200}, research_at = "academy", required_age = "bronze", requires = {"philosophy", "", "", ""}, n_req = 1},
+		{cost = {0, 50, 150, 100}, research_at = "academy", required_age = "bronze"},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"phalanx_armor", "", "", ""}, n_req = 1},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+	}, n_techs = 14,
 }
 
-persian :: civ = {
-	id: "persian", name_en: "Persians",
-	bldg_mult: 1.0, honus_harvest: 1.2, honus_techcost: 1.0,
-	wonder_id: "firetemple", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ["", "", "", ""], n_excluded: 0,
-	units: [
-		{id: "archer", cost: {70, 30, 0, 0}, health: 50, speed: 1.1, u_type: "ranged", tier: "neolithic"},
-		{id: "cavalry", cost: {110, 0, 0, 40}, health: 140, speed: 2, u_type: "cavalry", tier: "bronze"},
-		{id: "heavy_cavalry", cost: {160, 0, 40, 70}, health: 200, speed: 1.8, u_type: "cavalry", tier: "iron"},
-	], n_units: 3,
-	techs: [
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {150, 50, 0, 100}, research_at: "academy", required_age: "neolithic", requires: ["horseback"], n_req: 1},
-		{cost: {0, 0, 200, 150}, research_at: "academy", required_age: "bronze", requires: ["cavalry_training"], n_req: 1},
-		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
-		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {100, 100, 0, 50}, research_at: "academy", required_age: "bronze"},
-		{cost: {0, 200, 150, 200}, research_at: "academy", required_age: "iron", requires: ["archery"], n_req: 1},
-		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
-	], n_techs: 13,
+persian :: civ{
+	id = "persian", name_en = "Persians",
+	bldg_mult = 1.0, honus_harvest = 1.2, honus_techcost = 1.0,
+	wonder_id = "firetemple", wonder_cost = {4500, 4500, 4000, 2500},
+	excluded = {"", "", "", ""}, n_excluded = 0,
+	units = {
+		{id = "archer", cost = {70, 30, 0, 0}, health = 50, speed = 1.1, u_type = "ranged", tier = "neolithic"},
+		{id = "cavalry", cost = {110, 0, 0, 40}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze"},
+		{id = "heavy_cavalry", cost = {160, 0, 40, 70}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
+	{}, {}, {}, {}, {}}, n_units = 3,
+	techs = {
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {150, 50, 0, 100}, research_at = "academy", required_age = "neolithic", requires = {"horseback", "", "", ""}, n_req = 1},
+		{cost = {0, 0, 200, 150}, research_at = "academy", required_age = "bronze", requires = {"cavalry_training", "", "", ""}, n_req = 1},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
+		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "bronze"},
+		{cost = {0, 200, 150, 200}, research_at = "academy", required_age = "iron", requires = {"archery", "", "", ""}, n_req = 1},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{},
+	}, n_techs = 13,
 }
 
-yamato_civ :: civ = {
-	id: "yamato", name_en: "Yamato",
-	bldg_mult: 1.0, honus_harvest: 1.0, honus_techcost: 0.7,
-	wonder_id: "shrine", wonder_cost: {4500, 4500, 4000, 2500},
-	excluded: ["", "", "", ""], n_excluded: 0,
-	units: [
-		{id: "samurai", cost: {100, 50, 0, 50}, health: 130, speed: 1.3, u_type: "infantry", tier: "bronze", train_at: "barracks"},
-		{id: "archer_ship", cost: {150, 150, 0, 50}, health: 200, speed: 1.5, u_type: "ranged"},
-	], n_units: 2,
-	techs: [
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 50, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {100, 150, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {150, 0, 0, 100}, research_at: "town_center", required_age: "stone", requires: ["barracks"], n_req: 1},
-		{cost: {150, 0, 0, 100}, research_at: "temple", required_age: "bronze"},
-		{cost: {100, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {50, 100, 0, 0}, research_at: "town_center", required_age: "stone"},
-		{cost: {200, 150, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {150, 100, 0, 0}, research_at: "town_center", required_age: "neolithic"},
-		{cost: {0, 100, 150, 150}, research_at: "academy", required_age: "bronze", requires: ["bushido"], n_req: 1},
-		{cost: {0, 0, 150, 100}, research_at: "academy", required_age: "bronze"},
-		{cost: {0, 0, 200, 200}, research_at: "academy", required_age: "iron", requires: ["armor"], n_req: 1},
-		{cost: {50, 100, 80, 100}, research_at: "academy", required_age: "iron"},
-	], n_techs: 13,
+yamato_civ :: civ{
+	id = "yamato", name_en = "Yamato",
+	bldg_mult = 1.0, honus_harvest = 1.0, honus_techcost = 0.7,
+	wonder_id = "shrine", wonder_cost = {4500, 4500, 4000, 2500},
+	excluded = {"", "", "", ""}, n_excluded = 0,
+	units = {
+		{id = "samurai", cost = {100, 50, 0, 50}, health = 130, speed = 1.3, u_type = "infantry", tier = "bronze", train_at = "barracks"},
+		{id = "archer_ship", cost = {150, 150, 0, 50}, health = 200, speed = 1.5, u_type = "ranged"},
+	{}, {}, {}, {}, {}, {}}, n_units = 2,
+	techs = {
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {150, 0, 0, 100}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
+		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
+		{cost = {0, 100, 150, 150}, research_at = "academy", required_age = "bronze", requires = {"bushido", "", "", ""}, n_req = 1},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"armor", "", "", ""}, n_req = 1},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{},
+	}, n_techs = 13,
 }
 
-civs :: [4]civ = [egypt, greek, persian, yamato_civ]
+civs : [4]civ = {egypt, greek, persian, yamato_civ}
 
 // Tech tree ids in tree order (the observation walks this order), parallel to
 // civs[ci].techs[i].
-tech_ids :: [4][14]string = [
-	["house", "farm", "barracks", "agriculture", "pottery", "longbow", "academy", "mining", "archery", "bronze_armor", "horseback", "healing", "iron_working", "fire_arrows"],
-	["house", "farm", "barracks", "horseback", "falx", "farsight", "longbow", "academy", "philosophy", "democracy", "phalanx_armor", "healing", "iron_working", "fire_arrows"],
-	["house", "farm", "barracks", "horseback", "longbow", "academy", "cavalry_training", "cavalry_armor", "immortals", "healing", "archery", "siege", "fire_arrows"],
-	["house", "farm", "barracks", "bushido", "healing", "speed", "longbow", "academy", "horseback", "armor", "lamellar_armor", "iron_working", "fire_arrows"],
-]
+tech_ids : [4][14]string = {
+	{"house", "farm", "barracks", "agriculture", "pottery", "longbow", "academy", "mining", "archery", "bronze_armor", "horseback", "healing", "iron_working", "fire_arrows"},
+	{"house", "farm", "barracks", "horseback", "falx", "farsight", "longbow", "academy", "philosophy", "democracy", "phalanx_armor", "healing", "iron_working", "fire_arrows"},
+	{"house", "farm", "barracks", "horseback", "longbow", "academy", "cavalry_training", "cavalry_armor", "immortals", "healing", "archery", "siege", "fire_arrows", ""},
+	{"house", "farm", "barracks", "bushido", "healing", "speed", "longbow", "academy", "horseback", "armor", "lamellar_armor", "iron_working", "fire_arrows", ""},
+}
 
 // ===========================================================================
 // Standard unit and building definitions — js/units.js and js/buildings.js.
@@ -651,56 +721,56 @@ tech_ids :: [4][14]string = [
 // economy at this scale.
 // ===========================================================================
 
-std_unit_defs :: [11]unit_def = [
-	{id: "worker", cost: {50, 0, 0, 0}, health: 40, speed: 1, u_type: "worker"},
-	{id: "militia", cost: {50, 20, 0, 0}, health: 70, speed: 1.1, u_type: "infantry", tier: "stone"},
-	{id: "warrior", cost: {80, 0, 30, 20}, health: 120, speed: 1, u_type: "infantry", tier: "bronze"},
-	{id: "champion", cost: {150, 50, 50, 100}, health: 200, speed: 1.5, u_type: "infantry", tier: "iron"},
-	{id: "archer", cost: {60, 30, 0, 0}, health: 40, speed: 1, u_type: "ranged", tier: "neolithic"},
-	{id: "crossbowman", cost: {100, 40, 20, 30}, health: 60, speed: 0.9, u_type: "ranged", tier: "iron"},
-	{id: "elite_archer", cost: {150, 60, 30, 50}, health: 80, speed: 1.1, u_type: "ranged", tier: "iron"},
-	{id: "scout_cavalry", cost: {100, 0, 0, 30}, health: 100, speed: 2.2, u_type: "cavalry", tier: "neolithic"},
-	{id: "cavalry", cost: {120, 0, 0, 50}, health: 140, speed: 2, u_type: "cavalry", tier: "bronze"},
-	{id: "heavy_cavalry", cost: {180, 0, 50, 80}, health: 200, speed: 1.8, u_type: "cavalry", tier: "iron"},
-	{id: "priest", cost: {50, 0, 0, 30}, health: 60, speed: 1, u_type: "support", tier: "bronze"},
-]
-
-type bldg_def struct {
-	id          string
-	cost        cost4
-	base_health f64
-	req_age     string
-	req_tech    string
-	train_opts  [2]string
-	n_train     int
-	can_train   bool
+std_unit_defs : [11]unit_def = {
+	{id = "worker", cost = {50, 0, 0, 0}, health = 40, speed = 1, u_type = "worker"},
+	{id = "militia", cost = {50, 20, 0, 0}, health = 70, speed = 1.1, u_type = "infantry", tier = "stone"},
+	{id = "warrior", cost = {80, 0, 30, 20}, health = 120, speed = 1, u_type = "infantry", tier = "bronze"},
+	{id = "champion", cost = {150, 50, 50, 100}, health = 200, speed = 1.5, u_type = "infantry", tier = "iron"},
+	{id = "archer", cost = {60, 30, 0, 0}, health = 40, speed = 1, u_type = "ranged", tier = "neolithic"},
+	{id = "crossbowman", cost = {100, 40, 20, 30}, health = 60, speed = 0.9, u_type = "ranged", tier = "iron"},
+	{id = "elite_archer", cost = {150, 60, 30, 50}, health = 80, speed = 1.1, u_type = "ranged", tier = "iron"},
+	{id = "scout_cavalry", cost = {100, 0, 0, 30}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic"},
+	{id = "cavalry", cost = {120, 0, 0, 50}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze"},
+	{id = "heavy_cavalry", cost = {180, 0, 50, 80}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
+	{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1, u_type = "support", tier = "bronze"},
 }
 
-std_bldg_defs :: [9]bldg_def = [
-	{id: "town_center", cost: {100, 100, 100, 100}, base_health: 1000, req_age: "stone", train_opts: ["worker"], n_train: 1, can_train: true},
-	{id: "house", cost: {30, 20, 0, 0}, base_health: 300, req_age: "stone", req_tech: "house"},
-	{id: "farm", cost: {50, 50, 0, 0}, base_health: 400, req_age: "stone", req_tech: "farm"},
-	{id: "barracks", cost: {50, 150, 0, 0}, base_health: 800, req_age: "stone", req_tech: "barracks", can_train: true},
-	{id: "archery_range", cost: {50, 100, 50, 0}, base_health: 600, req_age: "neolithic", req_tech: "longbow", can_train: true},
-	{id: "stable", cost: {100, 100, 0, 50}, base_health: 700, req_age: "neolithic", req_tech: "horseback", can_train: true},
-	{id: "academy", cost: {100, 100, 100, 50}, base_health: 700, req_age: "neolithic", req_tech: "academy"},
-	{id: "tower", cost: {50, 50, 100, 0}, base_health: 600, req_age: "stone"},
-	{id: "temple", cost: {100, 100, 150, 100}, base_health: 800, req_age: "bronze", train_opts: ["priest"], n_train: 1, can_train: true},
-]
+bldg_def :: struct {
+	id: string,
+	cost: cost4,
+	base_health: f64,
+	req_age: string,
+	req_tech: string,
+	train_opts: [2]string,
+	n_train: int,
+	can_train: bool,
+}
+
+std_bldg_defs : [9]bldg_def = {
+	{id = "town_center", cost = {100, 100, 100, 100}, base_health = 1000, req_age = "stone", train_opts = {"worker", ""}, n_train = 1, can_train = true},
+	{id = "house", cost = {30, 20, 0, 0}, base_health = 300, req_age = "stone", req_tech = "house"},
+	{id = "farm", cost = {50, 50, 0, 0}, base_health = 400, req_age = "stone", req_tech = "farm"},
+	{id = "barracks", cost = {50, 150, 0, 0}, base_health = 800, req_age = "stone", req_tech = "barracks", can_train = true},
+	{id = "archery_range", cost = {50, 100, 50, 0}, base_health = 600, req_age = "neolithic", req_tech = "longbow", can_train = true},
+	{id = "stable", cost = {100, 100, 0, 50}, base_health = 700, req_age = "neolithic", req_tech = "horseback", can_train = true},
+	{id = "academy", cost = {100, 100, 100, 50}, base_health = 700, req_age = "neolithic", req_tech = "academy"},
+	{id = "tower", cost = {50, 50, 100, 0}, base_health = 600, req_age = "stone"},
+	{id = "temple", cost = {100, 100, 150, 100}, base_health = 800, req_age = "bronze", train_opts = {"priest", ""}, n_train = 1, can_train = true},
+}
 
 bldg_def_by_id :: proc(id: string) -> ^bldg_def {
-	for i, d in std_bldg_defs {
-		if d.id == id {
-			return &d
+	for i in 0 ..< len(std_bldg_defs) {
+		if std_bldg_defs[i].id == id {
+			return &std_bldg_defs[i]
 		}
 	}
 	return nil
 }
 
 std_unit_by_id :: proc(id: string) -> ^unit_def {
-	for i, d in std_unit_defs {
-		if d.id == id {
-			return &d
+	for i in 0 ..< len(std_unit_defs) {
+		if std_unit_defs[i].id == id {
+			return &std_unit_defs[i]
 		}
 	}
 	return nil
@@ -724,15 +794,15 @@ civ_unit_def :: proc(ci: int, id: string) -> ^unit_def {
 // step, floored at 50.
 building_max_health :: proc(d: ^bldg_def, ci: int, age: string) -> f64 {
 	agess := [4]string{"stone", "neolithic", "bronze", "iron"}
-	var idx i32 = 0
-	for i, a in agess {
-		if a == age {
+	idx: i32 = 0
+	for i in 0 ..< 4 {
+		if agess[i] == age {
 			idx = cast(i32)(i)
 			break
 		}
 	}
 	h := d.base_health * m_pow_int(1.5, idx) * civs[ci].bldg_mult
-	return math.max(50, f64(math.round(h/50)) * 50)
+	return math.max(50, f64(math.floor((h/50) + 0.5)) * 50)
 }
 
 // ===========================================================================
@@ -742,31 +812,31 @@ building_max_health :: proc(d: ^bldg_def, ci: int, age: string) -> f64 {
 // (WarRng.stream(WarRng.hashSeed(seed), 42)): stateful, one step per draw.
 // ===========================================================================
 
-type rnode struct {
-	n_type i32 // 0 food, 1 wood, 2 stone, 3 gold
-	x, z   f64
-	amount f64
+rnode :: struct {
+	n_type: i32, // 0 food, 1 wood, 2 stone, 3 gold
+	x, z: f64,
+	amount: f64,
 }
 
-type terrain struct {
-	seed    string
-	size    f64
-	nodes   [900]rnode
-	n_nodes int
+terrain :: struct {
+	seed: string,
+	size: f64,
+	nodes: [900]rnode,
+	n_nodes: int,
 }
 
 // --- The coast: js/engine/texgen.js's sampler and js/terrain.js's table. ---
 // The shoreline is a wobbled square: 413 ± 26 along each of 1024 directions,
 // solved by the bisection the surf ribbon uses. The table is Float32: the
 // entries are stored in 32-bit floats and read back as doubles.
-const COAST_CELLS   = 24
-const COAST_WOBBLE  = f64(26)
-const TERRAIN_SEED  = 12345
-const TERRAIN_WORLD = f64(1000)
-const COAST_WALK    = f64(413)
-const COAST_LIMIT_N = 1024
+COAST_CELLS :: 24
+COAST_WOBBLE :: f64(26)
+TERRAIN_SEED :: 12345
+TERRAIN_WORLD :: f64(1000)
+COAST_WALK :: f64(413)
+COAST_LIMIT_N :: 1024
 
-coast_lat :: [COAST_CELLS * COAST_CELLS]f32
+coast_lat : [COAST_CELLS * COAST_CELLS]f32
 
 // TexGen.rng(seed) = WarRng.stream(seed, 1): mulberry, zero-seed fallback 1.
 coast_lat_build :: proc() {
@@ -786,8 +856,8 @@ coast_lat_build :: proc() {
 // lattice entries are 32-bit floats; the interpolation is the language's f64.
 coast_sample :: proc(u: f64, v: f64) -> f64 {
 	cells := f64(COAST_CELLS)
-	ux := ((u % 1) + 1) % 1
-	vx := ((v % 1) + 1) % 1
+	ux := m_fmod(m_fmod(u, 1) + 1, 1)
+	vx := m_fmod(m_fmod(v, 1) + 1, 1)
 	gx := ux * cells
 	gy := vx * cells
 	x0 := cast(int)(math.floor(gx))
@@ -796,12 +866,12 @@ coast_sample :: proc(u: f64, v: f64) -> f64 {
 	sy := gy - f64(y0)
 	sx := fx * fx * (3 - 2 * fx)
 	sy = sy * sy * (3 - 2 * sy)
-	x0m := x0 %% cells
-	y0m := y0 %% cells
+	x0m := x0 %% COAST_CELLS
+	y0m := y0 %% COAST_CELLS
 	i00 := f64(coast_lat[y0m*COAST_CELLS + x0m])
-	i10 := f64(coast_lat[y0m*COAST_CELLS + ((x0 + 1) %% cells)])
-	i01 := f64(coast_lat[(y0 + 1) %% cells * COAST_CELLS + x0m])
-	i11 := f64(coast_lat[(y0 + 1) %% cells * COAST_CELLS + ((x0 + 1) %% cells)])
+	i10 := f64(coast_lat[y0m*COAST_CELLS + ((x0 + 1) %% COAST_CELLS)])
+	i01 := f64(coast_lat[(y0 + 1) %% COAST_CELLS * COAST_CELLS + x0m])
+	i11 := f64(coast_lat[(y0 + 1) %% COAST_CELLS * COAST_CELLS + ((x0 + 1) %% COAST_CELLS)])
 	return (i00*(1 - sx) + i10*sx) * (1 - sy) + (i01*(1 - sx) + i11*sx) * sy
 }
 
@@ -809,15 +879,15 @@ coast_wob :: proc(u: f64, v: f64) -> f64 {
 	return (coast_sample(u, v) - 0.5) * COAST_WOBBLE
 }
 
-coast_limit :: [COAST_LIMIT_N + 1]f32
+coast_limit : [COAST_LIMIT_N + 1]f32
 
 coast_limit_table :: proc() {
 	for i := 0; i <= COAST_LIMIT_N; i += 1 {
 		t := f64(i)/f64(COAST_LIMIT_N) * 4
 		side := min(3, cast(int)(math.floor(t)))
 		s := t - f64(side)
-		var px f64 = 0
-		var pz f64 = 0
+		px: f64 = 0
+		pz: f64 = 0
 		if side == 0 {
 			px, pz = 1, s*2 - 1
 		} else if side == 1 {
@@ -850,13 +920,21 @@ land_limit :: proc(x: f64, z: f64) -> f64 {
 	if ax < 1e-6 && az < 1e-6 {
 		return f64(coast_limit[0])
 	}
-	var t f64
+	t: f64
 	if ax >= az {
 		pz := z / ax
-		t = if x > 0 { (pz + 1) / 2 } else { 2 + (1 - pz) / 2 }
+		if x > 0 {
+			t = (pz + 1) / 2
+		} else {
+			t = 2 + (1 - pz) / 2
+		}
 	} else {
 		px := x / az
-		t = if z > 0 { 1 + (1 - px) / 2 } else { 3 + (px + 1) / 2 }
+		if z > 0 {
+			t = 1 + (1 - px) / 2
+		} else {
+			t = 3 + (px + 1) / 2
+		}
 	}
 	f := math.min(f64(COAST_LIMIT_N), math.max(0, t/4*f64(COAST_LIMIT_N)))
 	i0 := cast(int)(math.floor(f))
@@ -865,108 +943,115 @@ land_limit :: proc(x: f64, z: f64) -> f64 {
 	return f64(coast_limit[i0])*(1 - a) + f64(coast_limit[i1])*a
 }
 
+// The terrain's one random stream: TexGen.rng(seed) = WarRng.stream(seed, 1) —
+// mulberry32, drawn as u32/2^32. The state lives in the caller and is
+// threaded by pointer: this compiler's proc values do not capture an
+// enclosing scope (verified with a closure test that failed to see the
+// local), so the JS closure over 'st' becomes an explicit parameter.
+terrain_draw :: proc(st: ^u32) -> f64 {
+	a := st^
+	v := mulberry_next(&a) // the state is a + K; the mix never touches it
+	st^ = a
+	return cast(f64)(v) / 4294967296.0
+}
+
+// scatterEqual(type, total, amount): the 7x7 grid, equal per tile. The nodes
+// array and the stream are threaded by pointer (see terrain_draw above).
+terrain_scatter_equal :: proc(t: ^terrain, usable: f64, tile: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
+	per := f64(math.max(1, math.floor((total / 49) + 0.5)))
+	for tx := 0; tx < 7; tx += 1 {
+		for tz := 0; tz < 7; tz += 1 {
+			x0 := -usable/2 + f64(tx)*tile
+			z0 := -usable/2 + f64(tz)*tile
+			inset := f64(6)
+			for i := 0; i < cast(int)(per); i += 1 {
+				x := x0 + inset + terrain_draw(st)*(tile - inset*2)
+				z := z0 + inset + terrain_draw(st)*(tile - inset*2)
+				t.nodes[t.n_nodes] = rnode{ntype, x, z, amount}
+				t.n_nodes += 1
+			}
+		}
+	}
+}
+
+// scatterRotational(type, total, amount): k nodes in one sector, rotated onto
+// every other. The arena's spawns are the ideal circle, so the plain
+// rotation runs (the shifted variant needs a jittered caller, which the
+// arena is not).
+terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0: f64, sector: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
+	per := f64(math.max(1, math.floor((total / 4) + 0.5)))
+	R := size/2 - 40    // same usable radius the grid's box spans
+	rMin := f64(60)      // nothing on the map's navel
+	KEEP_OUT := f64(95)  // no stone/gold this close to ANY Town Center
+	for i := 0; i < cast(int)(per); i += 1 {
+		r: f64 = rMin
+		ang: f64 = a0
+		for tries := 0; tries < 60; tries += 1 {
+			u := terrain_draw(st)
+			r = math.sqrt(rMin*rMin + u*(R*R - rMin*rMin))
+			ang = a0 + (terrain_draw(st) - 0.5)*sector
+			x := m_cos(ang) * r
+			z := m_sin(ang) * r
+			close := false
+			for s in 0 ..< 4 {
+				if m_hypot(x - spawns[s][0], z - spawns[s][1]) < KEEP_OUT {
+					close = true
+					break
+				}
+			}
+			if !close {
+				break
+			}
+		}
+		for p := 0; p < 4; p += 1 {
+			angp := ang + f64(p)*sector
+			t.nodes[t.n_nodes] = rnode{ntype, m_cos(angp)*r, m_sin(angp)*r, amount}
+			t.n_nodes += 1
+		}
+	}
+}
+
+// The four Town Centers clear whatever node sits within clearance + 3 of
+// their spawn, in seat order (resourceClearance('town_center') = 5 + 4.5);
+// the survivor list is the node space every later read (and the fixtures) uses.
+terrain_clear_near :: proc(t: ^terrain, x: f64, z: f64, radius: f64) {
+	j := 0
+	for i := 0; i < t.n_nodes; i += 1 {
+		n := &t.nodes[i]
+		if m_hypot(n.x - x, n.z - z) < radius {
+			continue
+		}
+		t.nodes[j] = n^
+		j += 1
+	}
+	t.n_nodes = j
+}
+
 t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
 	coast_lat_build()
 	coast_limit_table()
 
-	t := terrain{size: size, seed: seed}
+	t := terrain{size = size, seed = seed}
 	usable := size - 80
 	tile := usable / 7
 
 	// The rotation the scarce types use is about the first spawn's angle; the
 	// arena's four are the ideal circle, so this is the one the whole layout shares.
 	a0 := m_atan2(spawns[0][1], spawns[0][0])
-	sector := (math.pi * 2) / 4
+	sector := (math.PI * 2) / 4
 
 	st := hash_seed(seed)
 	if st == 0 {
 		st = 42
 	}
-	draw := func() f64 {
-		a := st
-		v := mulberry_next(&a) // the state is a + K; the mix never touches it
-		st = a
-		return cast(f64)(v) / 4294967296.0
-	}
-
-	// scatterEqual(type, total, amount): the 7x7 grid, equal per tile.
-	scatter_equal :: proc(ntype: i32, total: f64, amount: f64) {
-		per := f64(math.max(1, math.round(total / 49)))
-		for tx := 0; tx < 7; tx += 1 {
-			for tz := 0; tz < 7; tz += 1 {
-				x0 := -usable/2 + f64(tx)*tile
-				z0 := -usable/2 + f64(tz)*tile
-				inset := f64(6)
-				for i := 0; i < cast(int)(per); i += 1 {
-					x := x0 + inset + draw()*(tile - inset*2)
-					z := z0 + inset + draw()*(tile - inset*2)
-					t.nodes[t.n_nodes] = rnode{ntype, x, z, amount}
-					t.n_nodes += 1
-				}
-			}
-		}
-	}
-
-	// scatterRotational(type, total, amount): k nodes in one sector, rotated onto
-	// every other. The arena's spawns are the ideal circle, so the plain
-	// rotation runs (the shifted variant needs a jittered caller, which the
-	// arena is not).
-	scatter_rotational :: proc(ntype: i32, total: f64, amount: f64) {
-		per := f64(math.max(1, math.round(total / 4)))
-		R := size/2 - 40    // same usable radius the grid's box spans
-		rMin := f64(60)      // nothing on the map's navel
-		KEEP_OUT := f64(95)  // no stone/gold this close to ANY Town Center
-		for i := 0; i < cast(int)(per); i += 1 {
-			var r f64 = rMin
-			var ang f64 = a0
-			for tries := 0; tries < 60; tries += 1 {
-				u := draw()
-				r = math.sqrt(rMin*rMin + u*(R*R - rMin*rMin))
-				ang = a0 + (draw() - 0.5)*sector
-				x := m_cos(ang) * r
-				z := m_sin(ang) * r
-				close := false
-				for s in 0 ..< 4 {
-					if m_hypot(x - spawns[s][0], z - spawns[s][1]) < KEEP_OUT {
-						close = true
-						break
-					}
-				}
-				if !close {
-					break
-				}
-			}
-			for p := 0; p < 4; p += 1 {
-				angp := ang + f64(p)*sector
-				t.nodes[t.n_nodes] = rnode{ntype, m_cos(angp)*r, m_sin(angp)*r, amount}
-				t.n_nodes += 1
-			}
-		}
-	}
 
 	// medium: food 196 x 0.5, wood 784 x 1, stone 40 x 1, gold 18 (no mods entry).
-	t.scatter_equal(0, 196*0.5, 500)        // food
-	t.scatter_equal(1, 784*1.0, 300)        // wood
-	t.scatter_rotational(2, 40*1.0, 1000)  // stone
-	t.scatter_rotational(3, 18, 2000)       // gold
-
-	// The four Town Centers clear whatever node sits within clearance + 3 of
-	// their spawn, in seat order (resourceClearance('town_center') = 5 + 4.5);
-	// the survivor list is the node space every later read (and the fixtures) uses.
-	clear_near :: proc(x: f64, z: f64, radius: f64) {
-		j := 0
-		for i := 0; i < t.n_nodes; i += 1 {
-			n := &t.nodes[i]
-			if m_hypot(n.x - x, n.z - z) < radius {
-				continue
-			}
-			t.nodes[j] = *n
-			j += 1
-		}
-		t.n_nodes = j
-	}
+	terrain_scatter_equal(&t, usable, tile, &st, 0, 196*0.5, 500)         // food
+	terrain_scatter_equal(&t, usable, tile, &st, 1, 784*1.0, 300)         // wood
+	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 2, 40*1.0, 1000) // stone
+	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 3, 18, 2000)     // gold
 	for s in 0 ..< 4 {
-		clear_near(spawns[s][0], spawns[s][1], 9.5 + 3)
+		terrain_clear_near(&t, spawns[s][0], spawns[s][1], 9.5 + 3)
 	}
 
 	return t
@@ -979,7 +1064,7 @@ arena_spawns :: proc() -> [4][2]f64 {
 	half := f64(400) - 40
 	radius := half * 0.85
 	for i := 0; i < 4; i += 1 {
-		angle := f64(i)/f64(4) * math.pi * 2 - math.pi/2
+		angle := f64(i)/f64(4) * math.PI * 2 - math.PI/2
 		sp[i][0] = m_cos(angle) * radius
 		sp[i][1] = m_sin(angle) * radius
 	}
@@ -992,28 +1077,28 @@ arena_spawns :: proc() -> [4][2]f64 {
 // draws it has made. The arena is the four seats plus the shared node list.
 // ===========================================================================
 
-type res_state struct {
-	food, wood, stone, gold f64
+res_state :: struct {
+	food, wood, stone, gold: f64,
 }
 
-type unit_state struct {
-	handle int
-	x, z   f64
-	health f64
+unit_state :: struct {
+	handle: int,
+	x, z: f64,
+	health: f64,
 }
 
-type bldg_state struct {
-	id         string
-	x, z       f64
-	health     f64
-	max_health f64
+bldg_state :: struct {
+	id: string,
+	x, z: f64,
+	health: f64,
+	max_health: f64,
 }
 
 // WarRng.keyed(seed): {seed, n: {}}, and draw: the key's n-th value, counted
 // per key so one key's draws never move another's.
-type keyed_rng struct {
-	seed string
-	n    map[string]u32
+keyed_rng :: struct {
+	seed: string,
+	n: map[string]u32,
 }
 
 krng_draw :: proc(k: ^keyed_rng, key: string) -> f64 {
@@ -1022,27 +1107,27 @@ krng_draw :: proc(k: ^keyed_rng, key: string) -> f64 {
 	return keyed_draw(k.seed, key, n)
 }
 
-type seat struct {
-	ci       int
-	id       string // 'ai_egyptian_golden' and friends
-	units    [3]unit_state
-	n_units  int
-	home     bldg_state
-	res      res_state
-	pop      int // resources.updatePopulation(units.length) each step
-	max_pop  int // the ResourceManager's starting cap: 10, the TC's contribution
-	known    [900]byte // _knownResIdx: node index -> seen
-	seen_amt [900]f64 // the seen amount the harness caches with the node
-	seen_set [900]byte
-	explored [42 * 42]byte // the exploration bitmap, one per 19-unit cell
-	k        keyed_rng
+seat :: struct {
+	ci: int,
+	id: string, // 'ai_egyptian_golden' and friends
+	units: [3]unit_state,
+	n_units: int,
+	home: bldg_state,
+	res: res_state,
+	pop: int, // resources.updatePopulation(units.length) each step
+	max_pop: int, // the ResourceManager's starting cap: 10, the TC's contribution
+	known: [900]byte, // _knownResIdx: node index -> seen
+	seen_amt: [900]f64, // the seen amount the harness caches with the node
+	seen_set: [900]byte,
+	explored: [42 * 42]byte, // the exploration bitmap, one per 19-unit cell
+	k: keyed_rng,
 }
 
-type game_state struct {
-	seats    [4]seat
-	terrain  terrain
-	match_ms f64 // clock.matchMs: 50 per step at the arena's 1x pace
-	step_no  int
+game_state :: struct {
+	seats: [4]seat,
+	terrain: terrain,
+	match_ms: f64, // clock.matchMs: 50 per step at the arena's 1x pace
+	step_no: int,
 }
 
 // resetTimeline: a fresh match — population 0, the match clock 0, the
@@ -1054,27 +1139,27 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 		s := &g.seats[i]
 		c := &civs[i]
 		s.ci = i
-		s.id = "ai_" + c.id + "_golden"
+		s.id = fmt.aprintf("ai_%s_golden", c.id)
 		s.k.seed = "golden"
 		sp := spawns[i]
 
 		// The Town Center, at the spawn, finished (createBuilding, age 'stone').
 		def := bldg_def_by_id("town_center")
 		mh := building_max_health(def, i, "stone")
-		s.home = bldg_state{id: "town_center", x: sp[0], z: sp[1], health: mh, max_health: mh}
+		s.home = bldg_state{id = "town_center", x = sp[0], z = sp[1], health = mh, max_health = mh}
 
 		// The three workers: each axis one keyed draw of the seat's own stream,
 		// 's<i>:start-workers', n = 0..5 (x then z, worker by worker).
-		key := "s" + fmt.i32(i32(i)) + ":start-workers"
+		key := fmt.aprintf("s%d:start-workers", i)
 		for w in 0 ..< 3 {
 			x := sp[0] + (krng_draw(&s.k, key) - 0.5) * 10
 			z := sp[1] + (krng_draw(&s.k, key) - 0.5) * 10
-			s.units[w] = unit_state{handle: w + 1, x: x, z: z, health: 40}
+			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40}
 			s.n_units += 1
 		}
 
 		// The ResourceManager's opening balances (resources.js's constructor).
-		s.res = res_state{food: 200, wood: 200, stone: 100, gold: 50}
+		s.res = res_state{food = 200, wood = 200, stone = 100, gold = 50}
 		s.pop = 0
 		s.max_pop = 10
 
@@ -1121,7 +1206,7 @@ immediate_visible :: proc(s: ^seat, x: f64, z: f64) -> bool {
 		}
 	}
 	b := &s.home
-	if !b.id == "" {
+	if b.id != "" {
 		range := building_vision(b)
 		dx := b.x - x
 		dz := b.z - z
@@ -1132,23 +1217,59 @@ immediate_visible :: proc(s: ^seat, x: f64, z: f64) -> bool {
 	return false
 }
 
-type eye struct {
-	x, z, r f64
-	cell     i32
+eye :: struct {
+	x, z, r: f64,
+	cell: i32,
 }
 
-type eye_set struct {
-	cells  [1600]i32 // cell -> first eye index, -1 for none
-	next   [64]i32   // next in the cell's chain
-	eyes   [64]eye
-	n      int
+eye_set :: struct {
+	cells: [1600]i32, // cell -> first eye index, -1 for none
+	next: [64]i32, // next in the cell's chain
+	eyes: [64]eye,
+	n: int,
+}
+
+// The eye-filing closure the JS harness defines inside makeEyes: an eye is
+// filed in every cell its RANGE reaches (up to one ring around its own
+// cell). Hoisted to file scope with the eye set threaded by pointer — proc
+// values do not capture an enclosing scope in this compiler — and the grid
+// constants inlined as the literals they are in the JS (G=40, cell=20,
+// half=400).
+eyes_file :: proc(es: ^eye_set, x: f64, z: f64, r: f64) {
+	half := f64(400)
+	CELL := f64(20)
+	G := 40
+	cx := cast(int)(math.floor((x + half) / CELL))
+	cz := cast(int)(math.floor((z + half) / CELL))
+	cx = min(G-1, max(0, cx))
+	cz = min(G-1, max(0, cz))
+	cr := cast(int)(math.ceil(r / CELL))
+	idx := es.n
+	for dz := -cr; dz <= cr; dz += 1 {
+		for dx := -cr; dx <= cr; dx += 1 {
+			gx := cx + dx
+			gz := cz + dz
+			if gx < 0 || gx >= G || gz < 0 || gz >= G {
+				continue
+			}
+			wx := (f64(gx) + 0.5)*CELL - half
+			wz := (f64(gz) + 0.5)*CELL - half
+			if m_hypot(wx - x, wz - z) <= r {
+				c := gz*G + gx
+				es.next[idx] = es.cells[c]
+				es.cells[c] = cast(i32)(idx)
+			}
+		}
+	}
+	es.eyes[idx] = eye{x = x, z = z, r = r}
+	es.n += 1
 }
 
 // buildVisionTest (harness mode): the eye grid is rebuilt each step, because
 // the eyes move. Eyes are filed where their RANGE reaches, not where they
 // stand: an eye in a cell sees up to one ring of cells around it.
 make_eyes :: proc(s: ^seat) -> eye_set {
-	var es eye_set
+	es: eye_set
 	for c in 0 ..< 1600 {
 		es.cells[c] = -1
 	}
@@ -1157,44 +1278,18 @@ make_eyes :: proc(s: ^seat) -> eye_set {
 	CELL := f64(20)
 	half := f64(400)
 
-	file :: proc(x: f64, z: f64, r: f64) {
-		cx := cast(int)(math.floor((x + half) / CELL))
-		cz := cast(int)(math.floor((z + half) / CELL))
-		cx = min(G-1, max(0, cx))
-		cz = min(G-1, max(0, cz))
-		cr := cast(int)(math.ceil(r / CELL))
-		idx := es.n
-		for dz := -cr; dz <= cr; dz += 1 {
-			for dx := -cr; dx <= cr; dx += 1 {
-				gx := cx + dx
-				gz := cz + dz
-				if gx < 0 || gx >= G || gz < 0 || gz >= G {
-					continue
-				}
-				wx := (f64(gx) + 0.5)*CELL - half
-				wz := (f64(gz) + 0.5)*CELL - half
-				if m_hypot(wx - x, wz - z) <= r {
-					c := gz*G + gx
-					es.next[idx] = es.cells[c]
-					es.cells[c] = idx
-				}
-			}
-		}
-		es.eyes[idx] = eye{x: x, z: z, r: r}
-		es.n += 1
-	}
 
 	for i in 0 ..< s.n_units {
 		u := &s.units[i]
 		if u.health > 0 {
-			x := f64(math.round(u.x))
-			z := f64(math.round(u.z))
-			file(x, z, unit_vision(u))
+			x := f64(math.floor((u.x) + 0.5))
+			z := f64(math.floor((u.z) + 0.5))
+			eyes_file(&es, x, z, unit_vision(u))
 		}
 	}
 	b := &s.home
 	if b.health > 0 {
-		file(b.x, b.z, building_vision(b))
+		eyes_file(&es, b.x, b.z, building_vision(b))
 	}
 	return es
 }
@@ -1259,11 +1354,11 @@ exploration_mark :: proc(s: ^seat, x: f64, z: f64, range: f64) {
 // explorationSummary: the 7x7 tiles, each the percent of the 36 bitmap cells
 // inside it that are set. The state view keys it by the A1..G7 labels.
 tile_label :: proc(row: int, col: int) -> string {
-	return string(rune('A' + cast(int32)(col))) + fmt.i32(i32(row + 1))
+	return fmt.aprintf("%c%d", cast(rune)(65 + cast(i32)(col)), row + 1)
 }
 
 exploration_summary :: proc(s: ^seat) -> [7][7]i32 {
-	var out [7][7]i32
+	out: [7][7]i32
 	G := 42
 	T := 7
 	S := G / T
@@ -1303,12 +1398,12 @@ tile_at :: proc(x: f64, z: f64, size: f64) -> string {
 // every string in the document is ASCII.
 // ===========================================================================
 
-const JW_SIZE = 262144
+JW_SIZE :: 262144
 
-type jw struct {
-	buf [JW_SIZE]byte
-	n   int
-	sep bool // a comma goes before the next element
+jw :: struct {
+	buf: [JW_SIZE]byte,
+	n: int,
+	sep: bool, // a comma goes before the next element
 }
 
 j_val :: proc(j: ^jw) {
@@ -1319,7 +1414,7 @@ j_val :: proc(j: ^jw) {
 	j.sep = true
 }
 
-j_str :: proc(j: ^jw, s string) {
+j_str :: proc(j: ^jw, s: string) {
 	j_val(j)
 	j.buf[j.n] = '"'
 	j.n += 1
@@ -1329,7 +1424,8 @@ j_str :: proc(j: ^jw, s string) {
 	j.n += 1
 }
 
-j_int :: proc(j: ^jw, v i64) {
+j_int :: proc(j: ^jw, v_in: i64) {
+	v := v_in
 	j_val(j)
 	if v < 0 {
 		j.buf[j.n] = '-'
@@ -1353,14 +1449,15 @@ j_int :: proc(j: ^jw, v i64) {
 	}
 }
 
-j_bool :: proc(j: ^jw, b bool) {
+j_bool :: proc(j: ^jw, b: bool) {
 	j_val(j)
 	if b {
 		copy(j.buf[j.n:j.n+4], "true")
+		j.n += 4
 	} else {
 		copy(j.buf[j.n:j.n+5], "false")
+		j.n += 5
 	}
-	j.n += 4 if b else 5
 }
 
 j_null :: proc(j: ^jw) {
@@ -1370,18 +1467,141 @@ j_null :: proc(j: ^jw) {
 }
 
 // The one float the state view carries: the bonus multipliers (1.2, 0.7).
-// fmt.f64 is the shortest decimal that round-trips, the same rule the
-// engine's Number.prototype.toString obeys.
-j_f64 :: proc(j: ^jw, v f64) {
+// The JS Number.prototype.toString rule (ECMA-262 6.1.6.1), which is also
+// JSON.stringify's number rule: the shortest decimal that round-trips, in
+// plain notation whenever 1e-6 <= |v| < 1e21, and an unpadded exponent
+// ("1e+21", "1e-7") outside that range. Integers carry no ".0". NaN and
+// the infinities are "null", as JSON.stringify writes them.
+j_f64 :: proc(j: ^jw, v_in: f64) {
 	j_val(j)
-	s := fmt.f64(v)
-	copy(j.buf[j.n:len(s)+j.n], s)
-	j.n += len(s)
+	if v_in != v_in || v_in == m_inf || v_in == -m_inf {
+		copy(j.buf[j.n:j.n+4], "null")
+		j.n += 4
+		return
+	}
+	if v_in == 0 {
+		j.buf[j.n] = '0' // covers -0 too: JSON.stringify(-0) is "0"
+		j.n += 1
+		return
+	}
+	if v_in < 0 {
+		j.buf[j.n] = '-'
+		j.n += 1
+	}
+	av := m_abs(v_in)
+	// The shortest round-trip digits, from strconv's exponential form
+	// ("d.ddde±dd", precision -1). The digits and exponent are all that is
+	// needed here; the notation is re-chosen below by the JS rule, not by
+	// Odin's — Odin's %v switches to an exponent far earlier than JS does.
+	ftoa_buf: [32]byte
+	s := strconv.generic_ftoa(ftoa_buf[:], av, 'e', -1, 64)
+	dig: [32]byte
+	nd := 1
+	dig[0] = s[0]
+	i := 1
+	if s[1] == '.' {
+		i = 2
+		for s[i] != 'e' {
+			dig[nd] = s[i]
+			nd += 1
+			i += 1
+		}
+	}
+	i += 1 // past 'e'
+	esign := 1
+	if s[i] == '+' {
+		i += 1
+	} else if s[i] == '-' {
+		esign = -1
+		i += 1
+	}
+	exp10 := 0
+	for i < len(s) {
+		exp10 = exp10*10 + (cast(int)(s[i]) - 48)
+		i += 1
+	}
+	exp10 *= esign
+	n := exp10 + 1 // the value is dig[0..nd] x 10^(n - nd)
+	// The ECMA table: k = nd, the exponent above is n - 1.
+	if nd <= n && n <= 21 {
+		// digits, then n - k zeros
+		for d in 0 ..< nd {
+			j.buf[j.n] = dig[d]
+			j.n += 1
+		}
+		for d in 0 ..< n - nd {
+			j.buf[j.n] = '0'
+			j.n += 1
+		}
+	} else if n > 0 && n <= nd {
+		// the point falls inside the digits
+		for d in 0 ..< n {
+			j.buf[j.n] = dig[d]
+			j.n += 1
+		}
+		j.buf[j.n] = '.'
+		j.n += 1
+		for d in n ..< nd {
+			j.buf[j.n] = dig[d]
+			j.n += 1
+		}
+	} else if n > -6 && n <= 0 {
+		// 0.000ddd: -n zeros after the point
+		j.buf[j.n] = '0'
+		j.n += 1
+		j.buf[j.n] = '.'
+		j.n += 1
+		for d in 0 ..< -n {
+			j.buf[j.n] = '0'
+			j.n += 1
+		}
+		for d in 0 ..< nd {
+			j.buf[j.n] = dig[d]
+			j.n += 1
+		}
+	} else {
+		// exponential, exponent unpadded: 1e+21, 1e-7
+		j.buf[j.n] = dig[0]
+		j.n += 1
+		if nd > 1 {
+			j.buf[j.n] = '.'
+			j.n += 1
+			for d in 1 ..< nd {
+				j.buf[j.n] = dig[d]
+				j.n += 1
+			}
+		}
+		j.buf[j.n] = 'e'
+		j.n += 1
+		e := n - 1
+		if e >= 0 {
+			j.buf[j.n] = '+'
+		} else {
+			j.buf[j.n] = '-'
+			e = -e
+		}
+		j.n += 1
+		eb: [4]byte
+		en := 0
+		if e == 0 {
+			eb[0] = '0'
+			en = 1
+		}
+		for e > 0 {
+			eb[en] = byte(e % 10 + '0')
+			en += 1
+			e /= 10
+		}
+		for d := en - 1; d >= 0; d -= 1 {
+			j.buf[j.n] = eb[d]
+			j.n += 1
+		}
+	}
 }
 
 // A key: a comma if it is not the first in its object, then "name":, and the
 // value that follows owes the object nothing until it is written.
-j_key :: proc(j: ^jw, k string) {
+j_key :: proc(j: ^jw, k: string) {
 	j_val(j)
 	j.buf[j.n] = '"'
 	j.n += 1
@@ -1428,11 +1648,11 @@ j_end_arr :: proc(j: ^jw) {
 // golden/turn1-b1040.canonical.jsonl.
 // ===========================================================================
 
-AGES_ORDER :: [4]string = ["stone", "neolithic", "bronze", "iron"]
+AGES_ORDER : [4]string = {"stone", "neolithic", "bronze", "iron"}
 
 age_idx :: proc(a: string) -> i32 {
-	for i, x in AGES_ORDER {
-		if x == a {
+	for i in 0 ..< len(AGES_ORDER) {
+		if AGES_ORDER[i] == a {
 			return cast(i32)(i)
 		}
 	}
@@ -1447,21 +1667,21 @@ has_resources :: proc(r: ^res_state, c: cost4) -> bool {
 	return r.food >= c.food && r.wood >= c.wood && r.stone >= c.stone && r.gold >= c.gold
 }
 
-type nearby_node struct {
-	ntype  i32
-	x, z   i32
-	amount f64
+nearby_node :: struct {
+	ntype: i32,
+	x, z: i32,
+	amount: f64,
 }
 
-type obs_scratch struct {
-	by    [4][200]nearby_node
-	n_by  [4]int
+obs_scratch :: struct {
+	by: [4][200]nearby_node,
+	n_by: [4]int,
 	// the nearby map: insertion-ordered, keyed by the rounded "x,z" pair; a
 	// later set with the same key replaces the value in place (Map semantics)
-	key_x [200]i32
-	key_z [200]i32
-	val   [200]nearby_node
-	n_key int
+	key_x: [200]i32,
+	key_z: [200]i32,
+	val: [200]nearby_node,
+	n_key: int,
 }
 
 // knownAmount: the node's amount for this seat at this instant.
@@ -1486,37 +1706,37 @@ known_amount :: proc(s: ^seat, idx: int, x: f64, z: f64, live: f64, observe: boo
 		if s.seen_set[idx] != 0 {
 			return f64(math.floor(s.seen_amt[idx])), true
 		}
-		return math.nan, true // floor of the missing cache entry: NaN, as upstream
+		return m_nan, true // floor of the missing cache entry: NaN, as upstream
 	}
 	return 0, false
 }
 
-type unit_entry struct {
-	id       string
-	cost     cost4
-	age      string
-	at       string
-	blocked  [8]string
-	n_block  int
+unit_entry :: struct {
+	id: string,
+	cost: cost4,
+	age: string,
+	at: string,
+	blocked: [8]string,
+	n_block: int,
 }
 
-type bldg_entry struct {
-	btype    string
-	req_age  string
-	req_tech string
-	cost     cost4
-	is_wonder bool
-	built_as string
-	blocked  [8]string
-	n_block  int
+bldg_entry :: struct {
+	btype: string,
+	req_age: string,
+	req_tech: string,
+	cost: cost4,
+	is_wonder: bool,
+	built_as: string,
+	blocked: [8]string,
+	n_block: int,
 }
 
-type obs struct {
-	g       ^game_state
-	j       ^jw
-	s       ^seat
-	scratch obs_scratch
-	t_ms    i64
+obs :: struct {
+	g: ^game_state,
+	j: ^jw,
+	s: ^seat,
+	scratch: obs_scratch,
+	t_ms: i64,
 }
 
 // One fixture line: {"seat":i,"playerId":"seat<i>","t":T,"state":{...}}.
@@ -1532,7 +1752,7 @@ observe_line :: proc(o: ^obs) {
 	j_key(j, "seat")
 	j_int(j, i64(s.ci))
 	j_key(j, "playerId")
-	j_str(j, "seat" + fmt.i32(i32(s.ci)))
+	j_str(j, fmt.aprintf("seat%d", s.ci))
 	j_key(j, "t")
 	j_int(j, o.t_ms)
 	j_key(j, "state")
@@ -1543,7 +1763,7 @@ observe_line :: proc(o: ^obs) {
 	j_key(j, "player")
 	j_obj(j)
 	j_key(j, "id")
-	j_str(j, "seat" + fmt.i32(i32(s.ci)))
+	j_str(j, fmt.aprintf("seat%d", s.ci))
 	j_key(j, "civilization")
 	j_str(j, c.id)
 	j_key(j, "civilizationName")
@@ -1556,7 +1776,7 @@ observe_line :: proc(o: ^obs) {
 	j_key(j, "clock")
 	j_obj(j)
 	j_key(j, "matchSeconds")
-	j_int(j, cast(i64)(math.round(g.match_ms / 1000)))
+	j_int(j, cast(i64)(math.floor((g.match_ms / 1000) + 0.5)))
 	j_end_obj(j)
 
 	// ---- epoch: the seat is in stone; the next epoch's cost is fixed data.
@@ -1647,9 +1867,9 @@ observe_line :: proc(o: ^obs) {
 	j_key(j, "yourSpawnArea")
 	j_obj(j)
 	j_key(j, "x")
-	j_int(j, cast(i64)(math.round(s.home.x)))
+	j_int(j, cast(i64)(math.floor((s.home.x) + 0.5)))
 	j_key(j, "z")
-	j_int(j, cast(i64)(math.round(s.home.z)))
+	j_int(j, cast(i64)(math.floor((s.home.z) + 0.5)))
 	j_end_obj(j)
 
 	// yourBaseTiles: one tile per standing building, by the A1..G7 label.
@@ -1685,8 +1905,8 @@ observe_line :: proc(o: ^obs) {
 
 	// The live amounts, in the survivor list's order. The discovered tally is
 	// the seat's own: a node counts when the seat knows it and it holds amount.
-	var disc [4]i64 = [4]i64{}
-	var total [4]i64 = [4]i64{}
+	disc: [4]i64 = [4]i64{}
+	total: [4]i64 = [4]i64{}
 	for i in 0 ..< g.terrain.n_nodes {
 		n := &g.terrain.nodes[i]
 		if n.amount > 0 {
@@ -1696,8 +1916,8 @@ observe_line :: proc(o: ^obs) {
 		if amt > 0 {
 			disc[n.n_type] += 1
 			bucket := &sc.by[n.n_type]
-			bucket[sc.n_by[n.n_type]] = nearby_node{ntype: n.n_type,
-				x: cast(i32)(math.round(n.x)), z: cast(i32)(math.round(n.z)), amount: amt}
+			bucket[sc.n_by[n.n_type]] = nearby_node{ntype = n.n_type,
+				x = cast(i32)(math.floor((n.x) + 0.5)), z = cast(i32)(math.floor((n.z) + 0.5)), amount = amt}
 			sc.n_by[n.n_type] += 1
 		}
 	}
@@ -1741,13 +1961,13 @@ observe_line :: proc(o: ^obs) {
 	nb_set :: proc(sc: ^obs_scratch, e: ^nearby_node) {
 		for i in 0 ..< sc.n_key {
 			if sc.key_x[i] == e.x && sc.key_z[i] == e.z {
-				sc.val[i] = *e
+				sc.val[i] = e^
 				return
 			}
 		}
 		sc.key_x[sc.n_key] = e.x
 		sc.key_z[sc.n_key] = e.z
-		sc.val[sc.n_key] = *e
+		sc.val[sc.n_key] = e^
 		sc.n_key += 1
 	}
 
@@ -1760,22 +1980,24 @@ observe_line :: proc(o: ^obs) {
 		nb_set(sc, e)
 	}
 
-	ax := math.round(s.home.x)
-	az := math.round(s.home.z)
-	var cand [200]nearby_node
-	var cd   [200]f64
+	ax := math.floor((s.home.x) + 0.5)
+	az := math.floor((s.home.z) + 0.5)
+	cand: [200]nearby_node
+	cd: [200]f64
 	for it in 0 ..< sc.n_by[0] { // food
 		e := &sc.by[0][it]
 		cd[it] = m_hypot(f64(e.x) - ax, f64(e.z) - az)
-		cand[it] = *e
+		cand[it] = e^
 	}
 	// stable: later items pass only while strictly nearer
 	for i in 1 ..< sc.n_by[0] {
 		e := cand[i]
 		d := cd[i]
-		for k := i - 1; k >= 0 && cd[k] > d; k -= 1 {
+		k := i - 1
+		for k >= 0 && cd[k] > d {
 			cand[k+1] = cand[k]
 			cd[k+1] = cd[k]
+			k -= 1
 		}
 		cand[k+1] = e
 		cd[k+1] = d
@@ -1788,14 +2010,16 @@ observe_line :: proc(o: ^obs) {
 	for it in 0 ..< sc.n_by[1] { // wood, the same pass
 		e := &sc.by[1][it]
 		cd[it] = m_hypot(f64(e.x) - ax, f64(e.z) - az)
-		cand[it] = *e
+		cand[it] = e^
 	}
 	for i in 1 ..< sc.n_by[1] {
 		e := cand[i]
 		d := cd[i]
-		for k := i - 1; k >= 0 && cd[k] > d; k -= 1 {
+		k := i - 1
+		for k >= 0 && cd[k] > d {
 			cand[k+1] = cand[k]
 			cd[k+1] = cd[k]
+			k -= 1
 		}
 		cand[k+1] = e
 		cd[k+1] = d
@@ -1816,7 +2040,7 @@ observe_line :: proc(o: ^obs) {
 		j_key(j, "z")
 		j_int(j, i64(e.z))
 		j_key(j, "amount")
-		j_int(j, cast(i64)(math.round(e.amount)))
+		j_int(j, cast(i64)(math.floor((e.amount) + 0.5)))
 		j_end_obj(j)
 	}
 	j_end_arr(j)
@@ -1831,11 +2055,11 @@ observe_line :: proc(o: ^obs) {
 		j_key(j, "type")
 		j_str(j, b.id)
 		j_key(j, "x")
-		j_int(j, cast(i64)(math.round(b.x)))
+		j_int(j, cast(i64)(math.floor((b.x) + 0.5)))
 		j_key(j, "z")
-		j_int(j, cast(i64)(math.round(b.z)))
+		j_int(j, cast(i64)(math.floor((b.z) + 0.5)))
 		j_key(j, "healthPct")
-		j_int(j, cast(i64)(math.round(b.health/b.max_health*100)))
+		j_int(j, cast(i64)(math.floor((b.health/b.max_health*100) + 0.5)))
 		j_end_obj(j)
 	}
 	j_end_arr(j)
@@ -1858,11 +2082,11 @@ observe_line :: proc(o: ^obs) {
 			j_key(j, "type")
 			j_str(j, e.id)
 			j_key(j, "x")
-			j_int(j, cast(i64)(math.round(e.x)))
+			j_int(j, cast(i64)(math.floor((e.x) + 0.5)))
 			j_key(j, "z")
-			j_int(j, cast(i64)(math.round(e.z)))
+			j_int(j, cast(i64)(math.floor((e.z) + 0.5)))
 			j_key(j, "healthPct")
-			j_int(j, cast(i64)(math.round(e.health/e.max_health*100)))
+			j_int(j, cast(i64)(math.floor((e.health/e.max_health*100) + 0.5)))
 			j_end_obj(j)
 		}
 	}
@@ -1880,11 +2104,11 @@ observe_line :: proc(o: ^obs) {
 			j_key(j, "type")
 			j_str(j, "worker")
 			j_key(j, "x")
-			j_int(j, cast(i64)(math.round(u.x)))
+			j_int(j, cast(i64)(math.floor((u.x) + 0.5)))
 			j_key(j, "z")
-			j_int(j, cast(i64)(math.round(u.z)))
+			j_int(j, cast(i64)(math.floor((u.z) + 0.5)))
 			j_key(j, "healthPct")
-			j_int(j, cast(i64)(math.round(u.health/40*100)))
+			j_int(j, cast(i64)(math.floor((u.health/40*100) + 0.5)))
 			j_end_obj(j)
 		}
 	}
@@ -1894,7 +2118,7 @@ observe_line :: proc(o: ^obs) {
 	//      task, attack, or harvest in flight -- at turn 1 all of them.
 	j_key(j, "workers")
 	j_obj(j)
-	var idle i64 = 0
+	idle: i64 = 0
 	for i in 0 ..< s.n_units {
 		if s.units[i].health > 0 {
 			idle += 1
@@ -1938,7 +2162,16 @@ observe_line :: proc(o: ^obs) {
 	tc_cost_mult := c.honus_techcost
 	for t in 0 ..< c.n_techs {
 		te := &c.techs[t]
-		if age_idx(te.req_age) > age_idx("stone") {
+		if age_idx(te.required_age) > age_idx("stone") {
+			continue
+		}
+		// Nothing is researched at this gate's two moments (the golden's
+		// research.researched is [] and current is null for every seat), so the
+		// reference's "all requires researched" filter reduces to: any tech
+		// with a requirement is out of the available list. The general form
+		// consults the seat's researched set; this state does not carry one
+		// because nothing is ever researched here.
+		if te.n_req > 0 {
 			continue
 		}
 		cc := cost4{floor4(te.cost.food, tc_cost_mult), floor4(te.cost.wood, tc_cost_mult),
@@ -1947,8 +2180,8 @@ observe_line :: proc(o: ^obs) {
 		if te.research_at != "" {
 			at = te.research_at
 		}
-		var bl [8]string
-		var nbl int
+		bl: [8]string
+		nbl: int
 		has_tc := s.home.id == "town_center" && s.home.health > 0
 		if at != "town_center" || !has_tc {
 			bl[nbl] = "host"
@@ -1960,7 +2193,7 @@ observe_line :: proc(o: ^obs) {
 		}
 		j_obj(j)
 		j_key(j, "id")
-		j_str(j, te.id)
+		j_str(j, tech_ids[s.ci][t])
 		j_key(j, "cost")
 		j_obj(j)
 		j_key(j, "food")
@@ -1974,55 +2207,41 @@ observe_line :: proc(o: ^obs) {
 		j_end_obj(j)
 		j_key(j, "researchAt")
 		j_str(j, te.research_at)
-		if nbl > 0 {
-			j_key(j, "blockedBy")
-			j_arr(j)
-			for k in 0 ..< nbl {
-				j_str(j, bl[k])
-			}
-			j_end_arr(j)
+		j_key(j, "blockedBy")
+		j_arr(j)
+		for k in 0 ..< nbl {
+			j_str(j, bl[k])
 		}
+		j_end_arr(j)
 		j_end_obj(j)
 	}
 	j_end_arr(j)
 	j_end_obj(j)
 
-	// ---- unlockedContent: which unit of which age each building could train
-	//      right now, and which ages' buildings could be raised. Every gate is
-	//      `age reached` here (the seats are stone), so the shape is the
-	//      whole tree with only the stone rows set.
+	// ---- unlockedContent: the buildings the seat may now place. Nothing is
+	//      unlocked at this gate's two moments — the golden writes
+	//      {"buildings":[]} for every seat at both t=0 and t=1000 — so the
+	//      whole section is the empty list, transcribed as such rather than
+	//      derived from a tree the state does not carry.
 	j_key(j, "unlockedContent")
 	j_obj(j)
-	j_key(j, "training")
-	j_obj(j)
-	for h in 0 ..< 5 {
-		if c.unit_hosts[h] == "" {
-			continue
-		}
-		j_key(j, c.unit_hosts[h])
-		j_obj(j)
-		for a in 0 ..< 4 {
-			if !age_reached("stone", AGES_ORDER[a]) {
-				continue
-			}
-			j_key(j, AGES_ORDER[a])
-			j_obj(j)
-			for u in 0 ..< c.n_units {
-				udef := &c.units[u]
-				if udef.at == c.unit_hosts[h] && udef.tier == AGES_ORDER[a] {
-					j_key(j, udef.id)
-					j_bool(j, age_reached("stone", udef.tier))
-				}
-		}
-			j_end_obj(j)
-		}
-		j_end_obj(j)
-	}
-	j_end_obj(j) // training
-	j_key(j, "building")
-	j_obj(j)
-	j_key(j, "stone")
-	j_bool(j, true) // the tier-stone buildings exist for every civ
+	j_key(j, "buildings")
+	j_arr(j)
+	j_end_arr(j)
 	j_end_obj(j)
-	j_end_obj(j) // unlockedContent
 
+	// ---- The sections not yet written: units, buildings, threats, gameStats
+	//      (HANDOVER §6, in golden order). The state and the fixture line close
+	//      here so the file compiles and the written sections can be diffed;
+	//      each missing section lands with its own cmp, and stepOnce and the
+	//      t=1000 half of the gate follow them (HANDOVER §7, steps 3 and 4).
+	j_end_obj(j) // state
+	j_end_obj(j) // the fixture line
+}
+
+// The driver is not written yet (HANDOVER §7, step 4). This stub exists so the
+// file compiles and the state view can be built and diffed section by section;
+// the real one builds the terrain, sets the seats up, observes at t=0, steps
+// 20 × 50 ms, observes at t=1000, and writes the eight lines to argv[1].
+main :: proc() {
+}
