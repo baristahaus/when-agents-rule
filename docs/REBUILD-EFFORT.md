@@ -57,6 +57,8 @@ retracted a test count, a tool list, a file path and a whole harness that never 
 | 3 | no FMA, even forced | ok — 0 fused, 9 multiplies at `-o:aggressive -microarch:x86-64-v4 -target-features:fma` |
 | 4 | `odin check -vet -vet-unused -vet-shadowing -vet-tabs -strict-style` | ok — no diagnostics |
 | 5 | the golden corpus | ok — the fixtures are the pinned bytes and the states oracle regenerates |
+| 6 | turn-1 state view, 8 lines | ok — 45,840 bytes byte-identical, gate 6 (measured 5 Oct) |
+| 7 | leak tracker | ok — mem.Tracking_Allocator named and proven, gate 7 (measured 5 Oct) |
 
 ### 1.2 The corpus — the treaty, pinned and regenerating
 
@@ -290,9 +292,12 @@ configurations, including FMA explicitly enabled, produce **zero fused instructi
 multiply count first, because a compiler release is exactly the kind of thing that changes
 quietly. The vet flags came from `odin check --help`, not folklore — after `check` was
 caught exiting 0 while printing `Invalid flag`, which is a mistyped flag *masquerading as
-a pass*. And the honesty runs both ways: the memory-leak tracker's real name in this
-`core:mem` is **still unfound**, so the repo's own reference file says "do not repeat
-'Odin's harness tracks memory'" rather than inheriting the claim from CORE-REPLAN §12.1.
+a pass*. And the honesty runs both ways: the memory-leak tracker's real name was unfound for
+a week — the repo's own reference file said "do not repeat 'Odin's harness tracks memory'"
+rather than inheriting the claim from CORE-REPLAN §12.1 — and then it was found, named
+(`mem.Tracking_Allocator`, `core:mem/tracking_allocator.odin`) and proven
+(`spike/mem/main.odin`, gate 7), which is what withdrawing a claim until its check exists
+looks like.
 
 **L9 — The middle layer converts "port the game" into "transcribe the port".** 1,807
 lines of JavaScript — the agents' strongest language — bought a headless runnable spec, a
@@ -385,11 +390,15 @@ turn-1 gate lands (§5, item 6).
    `rebuild/v2` was fast-forwarded to HEAD and pushed, and the `sync/upstream-b1039` line
    was retired. What remains of the branch question is the parent's 15 unmerged builds —
    item 7 below.
-4. **The two owed items** (unchanged from CORE-REPLAN §13, still owed): transcribe the
-   Town Center clearance step — four recorded conditions prove it removed nothing, which
-   is not the same as transcribing it; and find the leak tracker's real name in this
-   `core:mem`, because until then the one-arena-per-match shape rests on `Arena` plus
-   discipline, not on a check.
+4. **The two owed items — both resolved, 5 October 2026.** The Town Center clearance:
+   already transcribed twice over (the JS port's createMatch, the Odin port's
+   terrain_clear_near) and gate-verified where it bites — and auditing it found the
+   recorder's missing terrain size argument, so the map fixtures were re-recorded at the
+   true 800-world and the clearance now removes nodes in every recorded condition (the
+   re-record's story is CORE-REPLAN §15). The leak tracker: `mem.Tracking_Allocator`,
+   named and proven in `spike/mem/main.odin` (gate 7) — a balanced context, a
+   seen-and-named leak, and the arena-per-match shape balancing after a match ends; the
+   one-arena-per-match shape now rests on a check, not on `Arena` plus discipline.
 5. **After turn 1.** The tick is already in scope (`stepOnce` is part of the gate); a
    whole match then needs the rule brain, which is the first *behaviour* the port will
    have to agree on rather than a projection of state; then the P0(c) state-sequence

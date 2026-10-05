@@ -53,16 +53,18 @@ and the add stay separate, which is what the reference's two roundings require. 
 | `wrapping_mul(a, b)` | no such builtin — `a * b` on `u32` already wraps, as does `+` and `-` |
 | `a +# b`, `a +^ b` | no wrapping/saturating operators in this version; plain operators are the wrapping ones |
 | `strings.builder_free(&sb)` | gone; `strings.to_string(sb)` takes the builder **by value**. Simplest is to avoid the builder — the spike builds its key text in a stack array, so there is no allocation to free |
-| `mem.dump_allocations(mem.track)` | not present — grepped the installed tree at `<install>/core/mem/*.odin` (the tarball has `core/` and `vendor/` at the top level, **not** `base/core/`, so a doc path like `base/core/mem` sends you grepping nothing and concluding a feature is missing). The leak tracker therefore needs finding before the first long-running match test; until then the arena-per-match discipline is unverified. |
+| `mem.dump_allocations(mem.track)` | not present — the REAL tracker is `mem.Tracking_Allocator` (found 5 Oct 2026, in `<install>/core/mem/tracking_allocator.odin`): `tracking_allocator_init(&t, backing)` / `tracking_allocator(&t)` / `tracking_allocator_destroy(&t)`, counting `total_allocation_count` / `total_free_count` / `current_memory_allocated`, with a per-allocation map whose entries carry the source-code location. Proven in `spike/mem/main.odin` (gate 7): a balanced context, a leak that is seen and named, and the arena-per-match shape balancing after a match ends. |
 | `x := 1 << 32` as a constant | overflows an untyped constant and the error points at the cast nearby — write `4294967296.0` |
 
 ## Two things still unverified, stated as unverified
 
-- **The leak tracker.** Grepping `<install>/core/mem/*.odin` finds `Arena` and nothing
-  tracker-shaped, so either it moved or it is spelled unusually. Until the real symbol is found
-  and used, do not repeat "Odin's harness tracks memory" — the one-arena-per-match shape currently
-  rests on `Arena` plus discipline, not on a check. (The tarball puts `core/` at the top level, not
-  under `base/`, which is why an early grep found nothing and suggested a missing feature.)
+- **The leak tracker — found, named, proven.** It is `mem.Tracking_Allocator` (5 Oct 2026):
+  `tracking_allocator_init(&t, backing)` / `tracking_allocator(&t)` / `tracking_allocator_destroy(&t)`
+  over `core:mem/tracking_allocator.odin`, counting `total_allocation_count` / `total_free_count` /
+  `current_memory_allocated`, with a per-allocation map that carries each call's source-code
+  location. `spike/mem/main.odin` (gate 7) proves the three things the one-arena-per-match shape
+  needs: a balanced context, a leak that is seen and named, and the arena shape itself balancing
+  after a match ends. "Odin's harness tracks memory" may be repeated again — with the symbol named.
 - **The browser suite cannot be run on this machine.** `~/.cache/ms-playwright` does not exist, so
   Playwright is absent here, and CI is off the repo (removed 5 October 2026, `docs/ci-disabled/`):
   nothing automated runs the visual suites anywhere. The honest sentence about the UI

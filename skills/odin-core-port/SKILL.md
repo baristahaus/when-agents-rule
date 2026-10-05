@@ -74,4 +74,5 @@ state, costs, lessons — is `docs/REBUILD-EFFORT.md`.
 
 Two things are owed and both are listed in `docs/CORE-REPLAN.md` §13 (status in its §14): the Town Center
 clearance step (the record is taken after it, and today's four conditions prove it removed nothing but not that it
-is transcribed), and the leak tracker's real name in this `core:mem`, which nobody has found yet.
+is transcribed), and the leak tracker: `mem.Tracking_Allocator`, found and proven 5 October 2026
+(`spike/mem/main.odin`, gate 7).

@@ -175,6 +175,19 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 7 — the leak tracker, named and proven (CORE-REPLAN §13's second owed item).
+# mem.Tracking_Allocator over core:mem/tracking_allocator.odin: a balanced context, a leak
+# that is seen and named, and the one-arena-per-match shape balancing after a match ends.
+# Infrastructure, not game bytes — it is the check the daemon's arena shape will rest on.
+if "$ODIN" build spike/mem -out:spike/bin/mem-track >/tmp/odin-mem.log 2>&1 \
+   && ./spike/bin/mem-track | grep -q 'MEM TRACK GREEN'; then
+	say "gate 7  leak tracker (mem.Tracking_Allocator)" "ok — named and proven"
+else
+	say "gate 7  leak tracker (mem.Tracking_Allocator)" "FAIL"
+	tail -8 /tmp/odin-mem.log
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else

@@ -434,8 +434,10 @@ gate, not on the runner.)*
    `Invalid flag`).
 
    Two open items replace them, both smaller: the leak tracker's real name in this `core:mem`
-   (my grep used a wrong path — the tarball puts `core/` at the top level, not `base/core/`), and
-   the first real shim cost for the webview, which §14.1's decision 4 says is the revisit trigger.
+   (my grep used a wrong path — the tarball puts `core/` at the top level, not `base/core/`; the
+   tracker itself was found 5 October 2026, §14's tail: `mem.Tracking_Allocator`, proven in
+   `spike/mem/main.odin`), and the first real shim cost for the webview, which §14.1's decision 4
+   says is the revisit trigger.
 
 Everything else in §11 and §12 is verified enough to plan on. These two are the ones an
 optimistic paragraph would have hidden.
@@ -524,7 +526,15 @@ The two items §13 said were owed are resolved and open, one each, as of 5 Octob
   (golden: one wood; alpha/easy: two; alpha/hard: one; beta: four). The map port
   carries the step and reproduces all four conditions byte-identically — the step
   finally bites inside a gate, which is what §13 asked for.
-- **The leak tracker's real name in this `core:mem` — still open.**
+- **The leak tracker's real name in this `core:mem` — resolved, 5 October 2026.**
+  It is `mem.Tracking_Allocator`, in `core:mem/tracking_allocator.odin`:
+  `tracking_allocator_init(&t, backing)` / `tracking_allocator(&t)` /
+  `tracking_allocator_destroy(&t)`, counting `total_allocation_count` / `total_free_count` /
+  `current_memory_allocated`, with a per-allocation map whose entries carry each call's
+  source-code location — a leak names its own line. `spike/mem/main.odin` (gate 7) proves
+  the three things the one-arena-per-match shape needs: a balanced context, a leak that is
+  seen and named, and the arena shape itself balancing after a match ends. The withdrawn
+  claim "Odin's harness tracks memory" is hereby restated, with the symbol named.
 
 ## 15. The golden re-record of 5 October 2026 (the decision section the corpus rule asks for)
 
