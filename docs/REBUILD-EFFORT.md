@@ -51,9 +51,9 @@ retracted a test count, a tool list, a file path and a whole harness that never 
 |---|---|---|
 | 1 | the compiler, present and named | `dev-2026-09-nightly:a2fb372` |
 | 2 | keyed vectors `#a9b8bccd` / `#9fd153da` | ok — the RNG transcription is exact |
-| 2b | node counts 98/784/40/20 (= 942) | ok — nothing was dropped |
+| 2b | node counts 98/784/40/20 (the base, pre-clearance) | ok — nothing was dropped |
 | 2d | coast table, `f32` **bit patterns** | ok — the noise lattice and wobble match |
-| 2e | map lines, **four conditions** | byte-identical: `golden medium 4` 47,098 B; `alpha easy 2` 61,503 B; `alpha hard 3` 14,368 B; `beta medium 4` 47,091 B |
+| 2e | map lines, **four conditions** | byte-identical, re-measured 5 Oct 2026 after the re-record: `golden medium 4` 48,718 B (941 nodes); `alpha easy 2` 63,621 B; `alpha hard 3` 14,831 B; `beta medium 4` 48,586 B |
 | 3 | no FMA, even forced | ok — 0 fused, 9 multiplies at `-o:aggressive -microarch:x86-64-v4 -target-features:fma` |
 | 4 | `odin check -vet -vet-unused -vet-shadowing -vet-tabs -strict-style` | ok — no diagnostics |
 | 5 | the golden corpus | ok — the fixtures are the pinned bytes and the states oracle regenerates |
@@ -222,8 +222,9 @@ Each lesson is stated with its evidence; none is offered without one.
 
 **L1 — Fixtures before code, and only from the reference.** The corpus predates every
 green gate in this record, and it is what survived two language choices: the Rust port's
-map line and the Odin map lines prove the *same* 47,098 bytes, three weeks and one
-retirement apart. The oracle must be produced by the thing being copied, never by the
+map line and the Odin map lines prove the *same* bytes, three weeks and one retirement apart
+(47,098 at the first recording; 48,718 after the 5 October re-record below — the ports agree on
+whichever is current, which is the point). The oracle must be produced by the thing being copied, never by the
 thing being built — a port that generates its own fixtures is grading its own exam.
 
 **L2 — One fixture is one condition.** The map port passed its one fixture and was wrong
@@ -350,8 +351,8 @@ today:
 
 | P0 gate step | status |
 |---|---|
-| (a) map line byte-identical | **green** — four conditions, measured 4–5 October |
-| (b) turn-1 state view byte-identical | **in flight** — oracle live and regenerating; the JS port passes it byte-identical; the Odin transcription is ~70%, not compiling |
+| (a) map line byte-identical | **green** — four conditions, re-measured 5 October 2026 (the true 800-world maps, post Town Center clearance) |
+| (b) turn-1 state view byte-identical | **green** — 8 lines, 45,840 bytes, byte-identical in both the JS port and the Odin port (gate 6), measured 5 October 2026 |
 | (c) state sequence for a fixed seed set | **not started** — the first gate with real size (a 2.7 MB stream), where the method meets its scaling test (§6) |
 
 **The decisions closed** (spec §14.1): Odin for the core; no browser face for it; the

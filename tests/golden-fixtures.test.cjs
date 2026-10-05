@@ -7,7 +7,8 @@
 // hashes written down, and this test is the reason nobody can change them by accident.
 //
 // Three things are checked, weakest first: the bytes are the bytes we agreed on; the map
-// line really carries 942 nodes and the turn-1 file really holds four seats; and the two
+// line really carries 941 nodes (post Town Center clearance) and the turn-1 file
+// really holds four seats; and the two
 // keyed vectors can still be *produced* by the shipping rules, which is the property that
 // matters — a fixture nobody can regenerate is a rumor, not a gate.
 'use strict';
@@ -34,18 +35,20 @@ test('every file in the golden manifest is the byte sequence we pinned', () => {
     `  ${problems.join('\n  ')}`);
 });
 
-test('the map line is the map: 942 nodes, and it parses as the reference map record', () => {
+test('the map line is the map: 941 nodes post-clearance, and it parses as the reference map record', () => {
   const rec = JSON.parse(fs.readFileSync(G('map-line-b1040.json'), 'utf8'));
   assert.equal(rec.type, 'map');
   assert.equal(rec.seed, manifest.seed);
   assert.equal(rec.difficulty, manifest.difficulty);
   assert.equal(rec.seats, manifest.seats);
-  // The reference world at b1040: 942 nodes, coordinates in integer millimetres, all inside
-  // the coast (§3.4's "~77 units from the centre" is generous; the measured max is 60).
-  assert.equal(rec.resources.length, 942, 'the reference world at b1040 has 942 resource nodes');
+  // The reference world at b1040, re-recorded 5 Oct 2026 at the true 800-unit size (the recorder
+  // had generated a 200-unit island by omitting the terrain size argument): 941 nodes — the
+  // scatter's 942 minus one wood node the Town Center clearance removed — in integer
+  // millimetres, all inside the usable box (measured max ~354 units from the centre).
+  assert.equal(rec.resources.length, 941, 'the reference world at b1040 has 941 resource nodes, post Town Center clearance');
   for (const n of rec.resources) {
     assert.ok(Number.isInteger(n.x) && Number.isInteger(n.z), `node not in whole millimetres: ${JSON.stringify(n)}`);
-    assert.ok(Math.abs(n.x) <= 100000 && Math.abs(n.z) <= 100000, `node far outside the island: ${JSON.stringify(n)}`);
+    assert.ok(Math.abs(n.x) <= 360000 && Math.abs(n.z) <= 360000, `node far outside the map: ${JSON.stringify(n)}`);
     assert.ok(['food', 'wood', 'stone', 'gold'].includes(n.t), `node of unknown kind: ${JSON.stringify(n)}`);
   }
 });

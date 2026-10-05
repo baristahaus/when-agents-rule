@@ -149,7 +149,7 @@ said about a fixture.
 (S5 new at this merge); **D5 still open** — their b1046 fixed the replay director's ghosts,
 not `anApplyFog`'s dead-owned-units path.
 
-## The golden, and the one time we move it
+## The golden, and the two times we move it
 
 `samples/golden/initial/golden-initial.jsonl` (26,629,752 bytes, 10 min) and
 `rust/core/golden/stream-1m.jsonl` (2,722,912 bytes, 1 min, a byte-prefix of the same
@@ -298,3 +298,19 @@ Do not open this PR yet:
 4. Never renumber their builds locally. Ask them what number to use if it matters; the
    `RULES-CHANGES.md` heading and the `js/game.js?v=` stamp are the same number, in their
    convention.
+
+**The second move, 5 October 2026 — the four map lines only, and it was a recorder bug.**
+`record.cjs` constructed its `TerrainManager` without the size argument, so the constructor
+default 200 applied: every recorded map line was a 200-unit island (942 nodes crammed into
+±60 units) with the spawn ring, radius 306, outside the map — which is why the Town Center
+clearance never removed anything in a recorded condition, and why the recorded layouts
+disagreed with the states oracle’s world for the same seed (the oracle’s arena path was
+always the true 800-world). Found by auditing the clearance for transcription — the owed item
+in CORE-REPLAN §13 — and fixed with one argument. The four map fixtures are re-recorded at
+the true size; the fixed recorder’s golden/medium map and the arena path’s live terrain agree
+node for node in integer millimetres (941 nodes, two independent harnesses, one world), the
+map port carries the clearance step and reproduces all four conditions byte-identically, and
+the clearance finally bites inside a gate (golden loses one wood node, alpha/easy two,
+alpha/hard one, beta four). The stream keeps its pinned hash — it is the original b1040
+provenance, its 200-world snapshots documented as the bug’s artifact — and the states oracle
+needed nothing. The decision section the corpus rule asks for is CORE-REPLAN §15.

@@ -50,11 +50,13 @@ else
 fi
 
 # Gate 2b — the map's node counts, from js/terrain.js's difficulty table and scatter rules. Cheap,
-# and not a warm-up: the counts match the golden only if no node was dropped, so this catches a
-# wrong table or a dropped node long before a 942-line byte-diff can be localized.
+# and not a warm-up: the counts match the base only if no node was dropped, so this catches a
+# wrong table or a dropped node long before a thousand-line byte-diff can be localized. The base
+# counts are PRE-clearance: the fixtures carry the base minus what the Town Centers clear (golden
+# loses one wood node of 784; the map port's clearance step is what gate 2e verifies).
 if "$ODIN" build spike/counts -out:spike/bin/counts >/tmp/odin-counts.log 2>&1 \
   && ./spike/bin/counts | grep -q 'COUNTS GREEN'; then
-	say "gate 2b node counts 98/784/40/20 (= 942)" "ok"
+	say "gate 2b node counts 98/784/40/20 (the base, pre-clearance)" "ok"
 else
 	say "gate 2b node counts 98/784/40/20" "FAIL"
 	tail -6 /tmp/odin-counts.log
@@ -75,11 +77,12 @@ else
 	fails=$((fails + 1))
 fi
 
-# Gate 2e — the map line, the whole record, byte for byte: 942 nodes, the seeded layout as the match
-# starts. The four scatters consume one stream in call order, so this single comparison also proves
-# the RNG's draw sequence, the difficulty table, the coastline clipping and the recorder's
-# round-to-millimetres. Nothing about the map is "approximately right" here; cmp either says nothing
-# or the gate is red.
+# Gate 2e — the map line, the whole record, byte for byte: the seeded layout as the match starts,
+# post Town Center clearance (golden/medium: 941 nodes — the scatter's 942 minus one wood node the
+# clearance removed). The four scatters consume one stream in call order, so this single comparison
+# also proves the RNG's draw sequence, the difficulty table, the recorder's round-to-millimetres
+# and the clearance step itself. Nothing about the map is "approximately right" here; cmp either
+# says nothing or the gate is red.
 if "$ODIN" build spike/map -out:spike/bin/map >/tmp/odin-map.log 2>&1 && [ -x spike/bin/map ]; then
 	map_fails=0
 	for cond in "golden medium 4:map-line-b1040" "alpha easy 2:map-alpha-easy-2" \
@@ -139,7 +142,8 @@ else
 	head -8 /tmp/odin-vet.log
 fi
 
-# Gate 5 — the corpus itself: pinned hashes, the 942-node map line, the four turn-1 states, and
+# Gate 5 — the corpus itself: pinned hashes, the map line (941 nodes post-clearance), the four turn-1
+# states, and
 # the reference still producing the vectors gate 2 compares against. Language-independent on
 # purpose, so it keeps guarding the contract even with no core at all.
 if node --test tests/golden-fixtures.test.cjs >/tmp/golden-test.log 2>&1; then

@@ -31,7 +31,7 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 
-SIZE        :: 200.0
+SIZE        :: 800.0
 GRID        :: 7
 MARGIN      :: 40.0
 INSET       :: 6.0
@@ -97,10 +97,13 @@ mods_for :: proc(name: string) -> Mods {
 //   mapSize 800; halfSize = 400 - 40 = 360; radius = halfSize * 0.85 = 306
 //   angle(i) = (i / numPlayers) * 2π - π/2
 //
-// Two coordinate spaces meet here, and neither is a mistake I get to "fix": the terrain places its
-// nodes in a 200-unit world (the golden's ±59,995 mm, and `size: 200` in the record), while spawns
-// sit on a 306-unit circle in the game's 800-unit world. The record carries both, so a port that
-// unifies them produces a map that agrees with nothing.
+// One coordinate space, since 5 October 2026. The recorded lines had carried two — nodes in a
+// 200-unit world, because the recorder constructed its TerrainManager without the size argument
+// and the constructor default 200 applied, while spawns sat on the 306-unit circle of the game's
+// 800-unit world. The recorder is fixed (record.cjs now passes 800, as js/game.js and realm.cjs
+// always did) and the fixtures are re-recorded; the map is one 800-world now, and the Town Center
+// clearance — a structural no-op when the spawns sat outside the island — removes nodes in every
+// recorded condition (golden loses one wood node, alpha/easy two, alpha/hard one, beta four).
 //
 // A variable rather than a constant because Odin refuses to index a constant with a variable index
 // — a fair rule, since the thing being indexed here is exactly the kind of value a transcription
@@ -135,6 +138,20 @@ push :: proc(self: ^Nodes, t: string, x, z: f64, a: int) {
 	self.n += 1
 }
 
+// clearResourcesNear (js/game.js / terrain.js): the survivors keep their order.
+clear_near :: proc(out: ^Nodes, x: f64, z: f64, radius: f64) {
+	j := 0
+	for i in 0 ..< out.n {
+		it := out.items[i]
+		if hypot(it.x - x, it.z - z) < radius {
+			continue
+		}
+		out.items[j] = it
+		j += 1
+	}
+	out.n = j
+}
+
 // terrain.js:130 — the plentiful types. Equal per CELL, two draws per node, and the draws happen
 // tile by tile in tx-then-tz order, which fixes the stream's consumption and therefore every
 // coordinate after it.
@@ -157,9 +174,9 @@ scatter_equal :: proc(out: ^Nodes, r: ^Rand, t: string, total: int, amount: int)
 }
 
 // terrain.js:178 — the scarce types. Equal per PLAYER: draw one node in seat 0's sector, then
-// rotate that same radius and angle onto every seat. Radius is drawn uniform by AREA, and at this
-// map's size R and rMin are both 60, so the draw cancels and every stone and gold sits on the
-// 60-unit circle — which the golden confirms (its stone radii read 59.9998 after rounding to mm).
+// rotate that same radius and angle onto every seat. Radius is drawn uniform by AREA between
+// rMin 60 and the usable radius 360 — at the true 800-world size the draw spreads, and the
+// recorded stone and gold radii range over that interval.
 scatter_rotational :: proc(out: ^Nodes, r: ^Rand, t: string, total: int, amount: int) {
 	per := js_round(cast(f64)(total) / cast(f64)(n_seats))
 	if per < 1 { per = 1 }
@@ -257,6 +274,13 @@ main :: proc() {
 	scatter_rotational(&out, &r, "stone", js_round(diff_stone), 1000)
 	scatter_rotational(&out, &r, "gold", 18, 2000)
 
+	// The Town Center clearance, in seat order, before the map is dumped
+	// (js/game.js: the same step the turn-1 port transcribes; radius
+	// resourceClearance('town_center') + 3 = 12.5).
+	for p in 0 ..< seats {
+		clear_near(&out, spawns[p].x, spawns[p].z, 12.5)
+	}
+
 	buf: Buf
 	put(&buf, "{\"playerId\":\"__map__\",\"type\":\"map\",\"seed\":\"")
 	put(&buf, seed_str)
@@ -265,7 +289,7 @@ main :: proc() {
 	put(&buf, "\",\"seats\":")
 	put_int(&buf, seats)
 	put(&buf, ",\"size\":")
-	put_int(&buf, 200)
+	put_int(&buf, int(SIZE))
 	put(&buf, ",\"spawns\":[")
 	for p in 0 ..< seats {
 		if p > 0 { put(&buf, ",") }

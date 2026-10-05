@@ -287,7 +287,14 @@ renderer.removeBuilding = function (b) {
 game.renderer = renderer;
 
 game.aiManager = new AIManager(game);
-game.terrain = new TerrainManager(game);
+// The size argument is not optional here: the TerrainManager constructor defaults to 200,
+// and a recorder that omits it generates the whole match on a 200-unit island while the
+// game itself constructs its terrain at 800 (js/game.js) and the bench/replay path passes
+// 800 explicitly (realm.cjs). Found 5 October 2026: all four recorded map lines carried
+// size: 200 with their 942 nodes crammed into ±60 and the spawn ring (radius 306) outside
+// the map — which is why the Town Center clearance never removed anything in a recorded
+// condition. The states fixture (dump-states, the arena path) was always the true 800-world.
+game.terrain = new TerrainManager(game, 800);
 
 // What the finished match says, when it ends on its own.
 let arenaWinner = null;

@@ -404,8 +404,8 @@ decision and the one thing that makes the language-choice risk survivable:
       reference/build.md  pinned compiler version; the exact build and test commands; the
                           vet/strict-style flag set; the llvm-dis | grep fma check and its
                           expected zero
-      reference/golden.md the fixtures and the vectors: the map line (942 nodes, 47,097
-                          bytes), the four turn-1 states, the keyed draws
+      reference/golden.md the fixtures and the vectors: the map line (941 nodes post-clearance,
+                          48,718 bytes, re-recorded 5 Oct 2026 — see §15), the four turn-1 states, the keyed draws
                           0.6629751205909997 / 0.6242878348566592, and how to regenerate
       reference/idioms.md the four traps in §12.2, with the compiler error each produces,
                           plus allocator-context rules for a long-running match
@@ -502,12 +502,63 @@ says what became of §13, so nobody reads the estimate as the state.
    ≈1,100 lines inside a browser-entangled 44,135-line bundle: transcribing it straight
    from the game means porting it twice, once to find out what it does. The port is now
    the spec a transcription reads — its line map is `spike/turn1/HANDOVER.md` §2.
-3. **The Odin transcription of turn 1 is in flight.** `spike/turn1/main.odin`, 2,028
-   lines, ~70% of the state view, four known shape bugs, missing sections and no
-   `main()` — it does not compile yet, by design, mid-refactor. `spike/turn1/HANDOVER.md`
-   is the map (verified ground truth in its §3, the order of attack in its §7).
+3. **The Odin transcription of turn 1 is gate-green.** `spike/turn1/main.odin`, 3,034
+   lines, compiles, runs, and writes 45,840 bytes byte-identical to the golden — all
+   eight lines, both moments, verified as `spike/gates.sh` gate 6 (build, run, cmp),
+   measured 5 October 2026. `spike/turn1/HANDOVER.md` remains the reading guide (its
+   §2 line map and §3 verified facts); the completion note at its top supersedes the
+   mid-flight status.
 
-The two items §13 said were owed are still owed, unchanged: the Town Center clearance
-step (proved harmless in four conditions, not yet transcribed) and the leak tracker's
-real name in this `core:mem` (unfound; the claim "Odin's harness tracks memory" is
-withdrawn until it is).
+The two items §13 said were owed are resolved and open, one each, as of 5 October 2026:
+
+- **The Town Center clearance step — resolved, and the resolution found a bug.** The
+  step is transcribed twice over — the JS port's `createMatch` and the Odin port's
+  `terrain_clear_near` — and gate-verified where it bites: the states oracle's
+  golden/medium world carries 783 wood nodes, one fewer than the scatter's 784, and
+  both ports reproduce it byte-identically. The reason the four *map* conditions
+  showed the clearance harmless was never a property of the true layout: the recorder
+  had constructed its `TerrainManager` without the size argument, so its terrain was a
+  200-unit island with the spawn ring (radius 306) outside the map — no node was ever
+  in clearance range. The recorder is fixed, the four map lines are re-recorded at the
+  true 800-world size, and the clearance now removes nodes in every recorded condition
+  (golden: one wood; alpha/easy: two; alpha/hard: one; beta: four). The map port
+  carries the step and reproduces all four conditions byte-identically — the step
+  finally bites inside a gate, which is what §13 asked for.
+- **The leak tracker's real name in this `core:mem` — still open.**
+
+## 15. The golden re-record of 5 October 2026 (the decision section the corpus rule asks for)
+
+The corpus test's own rule: a golden that moves is a decision with a section here and a line in
+`MERGE-STATE.MD`, not a hash updated quietly. This is that section.
+
+**What moved and why.** The four map fixtures (`map-line-b1040.json`, `map-alpha-easy-2.json`,
+`map-alpha-hard-3.json`, `map-beta-medium-4.json`) were re-recorded because the recorder had a bug:
+`record.cjs` constructed its `TerrainManager` without the size argument, so the constructor default
+**200** applied while the game itself (js/game.js) and the bench/replay path (realm.cjs) both use
+**800**. Every recorded map line was a 200-unit island — 942 nodes crammed into ±60 units — with
+the spawn ring (radius 306) outside the map, which is why the Town Center clearance removed
+nothing in any recorded condition (§13's observation) and why the recorded layouts disagreed with
+the states oracle's world for the same seed (the oracle comes from the arena path, which was
+always the true 800-world).
+
+**How it was found.** Not by a gate — by the owed item itself. Auditing the clearance for
+transcription turned up the contradiction: the states oracle's golden/medium world has one wood
+node fewer than the scatter makes (783 of 784 — the clearance bites), while all four recorded map
+lines carried the un-clipped 942. Measuring which node the oracle's world was missing showed the
+recorded map line's layout was a different world entirely — its first node sat outside every tile
+of the true 800-world scatter — and the recorder's own `new TerrainManager(game)` was the missing
+argument.
+
+**The fix and its verification.** One argument (`record.cjs` now passes 800), then the re-record.
+The cross-check that matters: the fixed recorder's golden/medium map and the arena path's live
+terrain (realm.cjs → the same game) agree **node for node** in integer millimetres — 941 nodes,
+two independent harnesses, one world. The map port carries the clearance step (the same step the
+turn-1 port already had) and reproduces all four re-recorded conditions byte-identically; the
+counts gate stays green on the base table (pre-clearance, as its comment now says), and the corpus
+test's map assertions carry the post-clearance counts.
+
+**What did not move.** The one-minute stream (`stream-b1040-1m.jsonl`) keeps its pinned hash: it
+is the original b1040 recording — provenance — and its 200-world snapshots are now documented as
+the recorder-bug artifact rather than re-recorded. The states oracle needed nothing: it was always
+the true 800-world, which is why nothing about the turn-1 gate moved. The turn-1 raw capture and
+its canonical form stay pinned, as the corpus test requires.
