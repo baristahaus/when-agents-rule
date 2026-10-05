@@ -53,8 +53,11 @@ import "core:strconv"
 // A double's 64 bits, so the kernels can read the sign and exponent the way the
 // reference reads them through its shared buffer. (x | 0) in JS is ToInt32 —
 // truncation toward zero, which is the float-to-int cast here.
+// The fdlibm bit helpers. transmute, not cast: cast(u64)(pi) is the numeric
+// value 3, and every branch threshold below would compare against garbage —
+// this exact bug was found by the run (rem_pio2 returned n=0 for pi/2).
 bits64 :: proc(x: f64) -> u64 {
-	return cast(u64)(x)
+	return transmute(u64)(x)
 }
 high32 :: proc(x: f64) -> i32 {
 	return cast(i32)(bits64(x) >> 32)
@@ -63,7 +66,7 @@ low32 :: proc(x: f64) -> u32 {
 	return cast(u32)(bits64(x))
 }
 with_high :: proc(hi: i32, lo: u32) -> f64 {
-	return cast(f64)(cast(u64)(cast(u32)(hi))<<32 | u64(lo))
+	return transmute(f64)((cast(u64)(cast(u32)(hi))<<32 | u64(lo)))
 }
 
 // v < 0 ? -v : v + 0 — the +0 turns -0 into 0, as Math.abs does.
@@ -821,7 +824,7 @@ rnode :: struct {
 terrain :: struct {
 	seed: string,
 	size: f64,
-	nodes: [900]rnode,
+	nodes: [1024]rnode, // 942 pre-clearing (98+784+40+20); 1024 for headroom
 	n_nodes: int,
 }
 
@@ -1116,9 +1119,9 @@ seat :: struct {
 	res: res_state,
 	pop: int, // resources.updatePopulation(units.length) each step
 	max_pop: int, // the ResourceManager's starting cap: 10, the TC's contribution
-	known: [900]byte, // _knownResIdx: node index -> seen
-	seen_amt: [900]f64, // the seen amount the harness caches with the node
-	seen_set: [900]byte,
+	known: [1024]byte, // _knownResIdx: node index -> seen
+	seen_amt: [1024]f64, // the seen amount the harness caches with the node
+	seen_set: [1024]byte,
 	explored: [42 * 42]byte, // the exploration bitmap, one per 19-unit cell
 	k: keyed_rng,
 }
@@ -1495,12 +1498,18 @@ j_f64 :: proc(j: ^jw, v_in: f64) {
 	// Odin's — Odin's %v switches to an exponent far earlier than JS does.
 	ftoa_buf: [32]byte
 	s := strconv.generic_ftoa(ftoa_buf[:], av, 'e', -1, 64)
+	// strconv prefixes positive values with '+'; av never carries a sign
+	// here (the minus was written above), so the plus is skipped, not parsed.
+	p := 0
+	if s[0] == '+' {
+		p = 1
+	}
 	dig: [32]byte
 	nd := 1
-	dig[0] = s[0]
-	i := 1
-	if s[1] == '.' {
-		i = 2
+	dig[0] = s[p]
+	i := p + 1
+	if s[i] == '.' {
+		i += 1
 		for s[i] != 'e' {
 			dig[nd] = s[i]
 			nd += 1
@@ -1740,6 +1749,330 @@ obs :: struct {
 }
 
 // One fixture line: {"seat":i,"playerId":"seat<i>","t":T,"state":{...}}.
+// ===========================================================================
+// The tail of the state view: units, buildings, threats, gameStats (port
+// 1420-1575 and its helpers, transcribed).
+// ===========================================================================
+
+// The hosts the units section walks, in vocabulary order (port 1604).
+UNITS_HOSTS : [5]string = {"town_center", "barracks", "archery_range", "stable", "temple"}
+
+// The military-building train tiers (js/buildings.js BUILDING_TRAIN_TIERS):
+// per host, per age index, the unit ids that building trains at that age.
+TT_BARRACKS : [4][3]string = {
+	{"militia", "", ""},
+	{"militia", "", ""},
+	{"militia", "warrior", ""},
+	{"militia", "warrior", "champion"},
+}
+TT_STABLE : [4][3]string = {
+	{"", "", ""},
+	{"scout_cavalry", "", ""},
+	{"scout_cavalry", "cavalry", ""},
+	{"scout_cavalry", "cavalry", "heavy_cavalry"},
+}
+TT_ARCHERY : [4][3]string = {
+	{"", "", ""},
+	{"archer", "", ""},
+	{"archer", "", ""},
+	{"archer", "crossbowman", "elite_archer"},
+}
+
+// Does the civ tech tree contain tid? The tree is an array in tree order;
+// tech_ids[ci][t] is its id (port: the techs map lookup).
+civ_has_tech :: proc(ci: int, tid: string) -> bool {
+	c := &civs[ci]
+	for t in 0 ..< c.n_techs {
+		if tech_ids[ci][t] == tid {
+			return true
+		}
+	}
+	return false
+}
+
+// A tech definition by id from the civ tree (nil when absent).
+civ_tech_by_id :: proc(ci: int, tid: string) -> ^tech {
+	c := &civs[ci]
+	for t in 0 ..< c.n_techs {
+		if tech_ids[ci][t] == tid {
+			return &c.techs[t]
+		}
+	}
+	return nil
+}
+
+// A unit definition: the civ uniques first, then the standard table
+// (getUnitDefFor, port 403).
+unit_def_for :: proc(ci: int, id: string) -> ^unit_def {
+	c := &civs[ci]
+	for u in 0 ..< c.n_units {
+		if c.units[u].id == id {
+			return &c.units[u]
+		}
+	}
+	return std_unit_by_id(id)
+}
+
+// The units a building of host trains for civ ci at age index a: the tier
+// table, then the civ uniques that train there (tier within the age), then
+// the civ exclusions filtered out (getTrainOptionsForBuilding, port 422).
+// The building own trainOptions is NOT here — the walk falls back to it
+// when this returns nothing (the Town Center worker, the temple priest).
+train_tiers_for :: proc(ci: int, host: string, a: int, out_ids: []string) -> int {
+	n := 0
+	c := &civs[ci]
+	tiers: ^[4][3]string
+	if host == "barracks" {
+		tiers = &TT_BARRACKS
+	} else if host == "stable" {
+		tiers = &TT_STABLE
+	} else if host == "archery_range" {
+		tiers = &TT_ARCHERY
+	}
+	if tiers != nil {
+		for k in 0 ..< 3 {
+			id := tiers[a][k]
+			if id != "" {
+				out_ids[n] = id
+				n += 1
+			}
+		}
+	}
+	for u in 0 ..< c.n_units {
+		ud := &c.units[u]
+		if ud.train_at == host && cast(int)(age_idx(ud.tier)) <= a {
+			dup := false
+			for k in 0 ..< n {
+				if out_ids[k] == ud.id {
+					dup = true
+				}
+			}
+			if !dup {
+				out_ids[n] = ud.id
+				n += 1
+			}
+		}
+	}
+	for e in 0 ..< c.n_excluded {
+		ex := c.excluded[e]
+		if ex == "" {
+			continue
+		}
+		w := 0
+		for k in 0 ..< n {
+			if out_ids[k] != ex {
+				out_ids[w] = out_ids[k]
+				w += 1
+			}
+		}
+		n = w
+	}
+	return n
+}
+
+// The age a civ can actually build this at: the def requiredAge, or the
+// unlocking tech age if that comes later (effectiveBuildingAge, port 412).
+effective_building_age :: proc(ci: int, def: ^bldg_def) -> string {
+	idx := age_idx(def.req_age)
+	if idx < 0 {
+		idx = 0
+	}
+	if def.req_tech != "" {
+		t := civ_tech_by_id(ci, def.req_tech)
+		if t != nil && t.required_age != "" {
+			ti := age_idx(t.required_age)
+			if ti > idx {
+				idx = ti
+			}
+		}
+	}
+	return AGES_ORDER[idx]
+}
+
+// A unit entry is blocked when any of its blocks is structural (splitByBlock,
+// port 1618): age, tech, host, alreadyBuilt.
+unit_structural :: proc(e: ^unit_entry) -> bool {
+	for b in 0 ..< e.n_block {
+		tb := e.blocked[b]
+		if tb == "age" || tb == "tech" || tb == "host" || tb == "alreadyBuilt" {
+			return true
+		}
+	}
+	return false
+}
+
+// One unit entry: {id, cost, blockedBy?}. The trainable list strips an empty
+// blockedBy; the blocked list always writes it.
+unit_entry_write :: proc(j: ^jw, e: ^unit_entry, always_blocked: bool) {
+	j_obj(j)
+	j_key(j, "id")
+	j_str(j, e.id)
+	j_key(j, "cost")
+	j_obj(j)
+	j_key(j, "food")
+	j_int(j, i64(e.cost.food))
+	j_key(j, "wood")
+	j_int(j, i64(e.cost.wood))
+	j_key(j, "stone")
+	j_int(j, i64(e.cost.stone))
+	j_key(j, "gold")
+	j_int(j, i64(e.cost.gold))
+	j_end_obj(j)
+	if always_blocked || e.n_block > 0 {
+		j_key(j, "blockedBy")
+		j_arr(j)
+		for b in 0 ..< e.n_block {
+			j_str(j, e.blocked[b])
+		}
+		j_end_arr(j)
+	}
+	j_end_obj(j)
+}
+
+// One unit group — the trainable or the blocked half, as nested host/age
+// objects with the entries in walk order (the port splitByBlock preserves
+// the insertion order of both).
+units_write_group :: proc(j: ^jw, ents: []unit_entry, structural: bool) {
+	for h in 0 ..< 5 {
+		host_open := false
+		for a in 0 ..< 4 {
+			n_here := 0
+			for k in 0 ..< len(ents) {
+				e := &ents[k]
+				if e.at != UNITS_HOSTS[h] || e.age != AGES_ORDER[a] {
+					continue
+				}
+				if unit_structural(e) != structural {
+					continue
+				}
+				n_here += 1
+			}
+			if n_here == 0 {
+				continue
+			}
+			if !host_open {
+				j_key(j, UNITS_HOSTS[h])
+				j_obj(j)
+				host_open = true
+			}
+			j_key(j, AGES_ORDER[a])
+			j_arr(j)
+			for k in 0 ..< len(ents) {
+				e := &ents[k]
+				if e.at != UNITS_HOSTS[h] || e.age != AGES_ORDER[a] {
+					continue
+				}
+				if unit_structural(e) != structural {
+					continue
+				}
+				unit_entry_write(j, e, structural)
+			}
+			j_end_arr(j)
+		}
+		if host_open {
+			j_end_obj(j)
+		}
+	}
+}
+
+// A building entry is blocked when any of its blocks is structural — same
+// rule as the units.
+bldg_structural :: proc(be: ^bldg_entry) -> bool {
+	for b in 0 ..< be.n_block {
+		tb := be.blocked[b]
+		if tb == "age" || tb == "tech" || tb == "host" || tb == "alreadyBuilt" {
+			return true
+		}
+	}
+	return false
+}
+
+// One building entry: {type, builtAs?, requiredAge, requiresTech, isWonder?,
+// cost, blockedBy?} — the wonder carries builtAs and isWonder (port 1489-
+// 1510); the trainable list strips an empty blockedBy.
+bldg_entry_write :: proc(j: ^jw, be: ^bldg_entry, always_blocked: bool) {
+	j_obj(j)
+	j_key(j, "type")
+	j_str(j, be.btype)
+	if be.is_wonder {
+		j_key(j, "builtAs")
+		j_str(j, be.built_as)
+	}
+	j_key(j, "requiredAge")
+	j_str(j, be.req_age)
+	j_key(j, "requiresTech")
+	if be.req_tech != "" {
+		j_str(j, be.req_tech)
+	} else {
+		j_null(j)
+	}
+	if be.is_wonder {
+		j_key(j, "isWonder")
+		j_bool(j, true)
+	}
+	j_key(j, "cost")
+	j_obj(j)
+	j_key(j, "food")
+	j_int(j, i64(be.cost.food))
+	j_key(j, "wood")
+	j_int(j, i64(be.cost.wood))
+	j_key(j, "stone")
+	j_int(j, i64(be.cost.stone))
+	j_key(j, "gold")
+	j_int(j, i64(be.cost.gold))
+	j_end_obj(j)
+	if always_blocked || be.n_block > 0 {
+		j_key(j, "blockedBy")
+		j_arr(j)
+		for b in 0 ..< be.n_block {
+			j_str(j, be.blocked[b])
+		}
+		j_end_arr(j)
+	}
+	j_end_obj(j)
+}
+
+// The b1054 elimination predicate (port 764-837), reduced to the state the
+// arena carries at turn 1. Every check of the full walk is below, with the
+// vacuous ones noted; at this gate every seat leaves at the third check —
+// population room holds (cap 10 over 3 workers) and the Town Center trains
+// workers, which every seat affords.
+seat_eliminated :: proc(s: ^seat) -> bool {
+	// (1) A live fighter (non-worker, non-support) keeps the seat alive:
+	//     vacuous at turn 1 — the arena units are all workers.
+	// (2) A producing trainer: vacuous — the Town Center is idle.
+	// (3) Population room and affordable military from a standing building:
+	if s.pop < s.max_pop && has_resources(&s.res, unit_def_for(s.ci, "worker").cost) {
+		return false
+	}
+	// (4) A Town Center with worker funds:
+	if s.home.health > 0 && has_resources(&s.res, unit_def_for(s.ci, "worker").cost) {
+		return false
+	}
+	// (5) A seat with no live worker at all is eliminated — the arena units
+	//     are all workers, so this is the unit count.
+	if s.n_units == 0 {
+		return true
+	}
+	// (6) An under-construction Town Center or producer: vacuous — nothing
+	//     is ever built at turn 1.
+	// (7) A Town Center:
+	if s.home.health > 0 {
+		return false
+	}
+	// (8) Town-Center funds:
+	if has_resources(&s.res, bldg_def_by_id("town_center").cost) {
+		return false
+	}
+	// (9) With room: barracks, archery-range or stable funds.
+	if s.pop < s.max_pop {
+		if has_resources(&s.res, bldg_def_by_id("barracks").cost) { return false }
+		if has_resources(&s.res, bldg_def_by_id("archery_range").cost) { return false }
+		if has_resources(&s.res, bldg_def_by_id("stable").cost) { return false }
+	}
+	return true
+}
+
 observe_line :: proc(o: ^obs) {
 	g := o.g
 	s := o.s
@@ -2060,6 +2393,14 @@ observe_line :: proc(o: ^obs) {
 		j_int(j, cast(i64)(math.floor((b.z) + 0.5)))
 		j_key(j, "healthPct")
 		j_int(j, cast(i64)(math.floor((b.health/b.max_health*100) + 0.5)))
+		j_key(j, "state")
+		j_str(j, "complete") // the port's constructing flag: the arena's TC is finished
+		j_key(j, "busy")
+		j_bool(j, false) // nothing producing, researching or advancing at either gate
+		j_key(j, "activity")
+		j_str(j, "idle")
+		j_key(j, "producing")
+		j_null(j)
 		j_end_obj(j)
 	}
 	j_end_arr(j)
@@ -2116,27 +2457,43 @@ observe_line :: proc(o: ^obs) {
 
 	// ---- workers: the seat's units by job. An idle worker is one with no
 	//      task, attack, or harvest in flight -- at turn 1 all of them.
+	// ---- workers: the seat's units by job, in the golden's key order:
+	//      total, idle, building, farm, scouting, moving, fighting, food,
+	//      wood, stone, gold. The port's workerJobImpl walks task/building/
+	//      attack/scout/farm/carrying branches before falling to isIdleWorker;
+	//      the arena issues no orders at all (every seat is harness-controlled),
+	//      and its units are all workers, so every live unit lands in idle and
+	//      the other buckets are zero.
 	j_key(j, "workers")
 	j_obj(j)
+	wtotal := i64(s.n_units)
 	idle: i64 = 0
 	for i in 0 ..< s.n_units {
 		if s.units[i].health > 0 {
 			idle += 1
 		}
 	}
+	j_key(j, "total")
+	j_int(j, wtotal)
 	j_key(j, "idle")
 	j_int(j, idle)
-	j_key(j, "gatherFood")
+	j_key(j, "building")
 	j_int(j, 0)
-	j_key(j, "gatherWood")
+	j_key(j, "farm")
 	j_int(j, 0)
-	j_key(j, "gatherStone")
+	j_key(j, "scouting")
 	j_int(j, 0)
-	j_key(j, "gatherGold")
+	j_key(j, "moving")
 	j_int(j, 0)
-	j_key(j, "attack")
+	j_key(j, "fighting")
 	j_int(j, 0)
-	j_key(j, "attackMove")
+	j_key(j, "food")
+	j_int(j, 0)
+	j_key(j, "wood")
+	j_int(j, 0)
+	j_key(j, "stone")
+	j_int(j, 0)
+	j_key(j, "gold")
 	j_int(j, 0)
 	j_end_obj(j)
 
@@ -2230,18 +2587,243 @@ observe_line :: proc(o: ^obs) {
 	j_end_arr(j)
 	j_end_obj(j)
 
-	// ---- The sections not yet written: units, buildings, threats, gameStats
-	//      (HANDOVER §6, in golden order). The state and the fixture line close
-	//      here so the file compiles and the written sections can be diffed;
-	//      each missing section lands with its own cmp, and stepOnce and the
-	//      t=1000 half of the gate follow them (HANDOVER §7, steps 3 and 4).
+	// ---- units: trainable and blocked, split by the structural blocks
+	//      (HANDOVER §3.8). The walk: hosts in vocabulary order, each age at
+	//      or above the host building own floor, the tier table plus the civ
+	//      uniques with the building trainOptions as the empty fallback; a
+	//      unit id appears at its first (host, age) only. blockedBy in
+	//      check order: age, host, pop, cost. The arena seats are stone-age
+	//      at this gate (the epoch section writes the same constant), and the
+	//      standing buildings are the one Town Center per seat.
+	ents: [24]unit_entry
+	n_ents := 0
+	seen_ids: [24]string
+	n_seen := 0
+	for h in 0 ..< 5 {
+		host := UNITS_HOSTS[h]
+		hdef := bldg_def_by_id(host)
+		// a host whose unlocking tech the civ lacks is skipped entirely
+		if hdef.req_tech != "" && !civ_has_tech(s.ci, hdef.req_tech) {
+			continue
+		}
+		floor := age_idx(hdef.req_age)
+		if floor < 0 {
+			floor = 0
+		}
+		for a := floor; a < 4; a += 1 {
+			ids: [8]string
+			n_ids := train_tiers_for(s.ci, host, cast(int)(a), ids[:])
+			if n_ids == 0 {
+				// the building own trainOptions: the Town Center worker,
+				// the temple priest
+				for k in 0 ..< hdef.n_train {
+					ids[k] = hdef.train_opts[k]
+					n_ids += 1
+				}
+			}
+			for k in 0 ..< n_ids {
+				dup := false
+				for g in 0 ..< n_seen {
+					if seen_ids[g] == ids[k] {
+						dup = true
+					}
+				}
+				if dup {
+					continue
+				}
+				seen_ids[n_seen] = ids[k]
+				n_seen += 1
+				e := &ents[n_ents]
+				e.id = ids[k]
+				e.at = host
+				e.age = AGES_ORDER[a]
+				e.cost = unit_def_for(s.ci, ids[k]).cost
+				e.n_block = 0
+				if !age_reached("stone", e.age) {
+					e.blocked[e.n_block] = "age"
+					e.n_block += 1
+				}
+				standing := host == "town_center" && s.home.health > 0
+				if !standing {
+					e.blocked[e.n_block] = "host"
+					e.n_block += 1
+				}
+				if s.pop >= s.max_pop {
+					e.blocked[e.n_block] = "pop"
+					e.n_block += 1
+				}
+				if !has_resources(&s.res, e.cost) {
+					e.blocked[e.n_block] = "cost"
+					e.n_block += 1
+				}
+				n_ents += 1
+			}
+		}
+	}
+	j_key(j, "units")
+	j_obj(j)
+	j_key(j, "trainable")
+	j_obj(j)
+	units_write_group(j, ents[:n_ents], false)
+	j_end_obj(j)
+	j_key(j, "blocked")
+	j_obj(j)
+	units_write_group(j, ents[:n_ents], true)
+	j_end_obj(j)
+	j_end_obj(j) // units
+
+	// ---- buildings: the nine standard buildings in table order plus the
+	//      civ wonder, split by the same structural rule. blockedBy in check
+	//      order: age, tech, cost for the standards; age, alreadyBuilt, cost
+	//      for the wonder. The civ-support check (the tree carries the
+	//      unlocking tech) skips a building outright; the tech block is the
+	//      RESEARCHED check, and nothing is ever researched at this gate (the
+	//      research section writes the same fact) — so every tech-requiring
+	//      building carries it.
+	bents: [12]bldg_entry
+	n_bents := 0
+	for bi in 0 ..< 9 {
+		bdef := &std_bldg_defs[bi]
+		if bdef.req_tech != "" && !civ_has_tech(s.ci, bdef.req_tech) {
+			continue
+		}
+		be := &bents[n_bents]
+		be.btype = bdef.id
+		be.req_age = effective_building_age(s.ci, bdef)
+		be.req_tech = bdef.req_tech
+		be.cost = bdef.cost
+		be.is_wonder = false
+		be.built_as = ""
+		be.n_block = 0
+		if !age_reached("stone", be.req_age) {
+			be.blocked[be.n_block] = "age"
+			be.n_block += 1
+		}
+		if bdef.req_tech != "" {
+			be.blocked[be.n_block] = "tech"
+			be.n_block += 1
+		}
+		if !has_resources(&s.res, be.cost) {
+			be.blocked[be.n_block] = "cost"
+			be.n_block += 1
+		}
+		n_bents += 1
+	}
+	{
+		// the civ wonder: all four are iron-age (port 254-330).
+		be := &bents[n_bents]
+		be.btype = "wonder"
+		be.built_as = c.wonder_id
+		be.req_age = "iron"
+		be.req_tech = ""
+		be.cost = c.wonder_cost
+		be.is_wonder = true
+		be.n_block = 0
+		if !age_reached("stone", "iron") {
+			be.blocked[be.n_block] = "age"
+			be.n_block += 1
+		}
+		// alreadyBuilt: no wonder stands at turn 1
+		if !has_resources(&s.res, be.cost) {
+			be.blocked[be.n_block] = "cost"
+			be.n_block += 1
+		}
+		n_bents += 1
+	}
+	j_key(j, "buildings")
+	j_obj(j)
+	j_key(j, "buildable")
+	j_arr(j)
+	for k in 0 ..< n_bents {
+		if !bldg_structural(&bents[k]) {
+			bldg_entry_write(j, &bents[k], false)
+		}
+	}
+	j_end_arr(j)
+	j_key(j, "blocked")
+	j_arr(j)
+	for k in 0 ..< n_bents {
+		if bldg_structural(&bents[k]) {
+			bldg_entry_write(j, &bents[k], true)
+		}
+	}
+	j_end_arr(j)
+	j_end_obj(j) // buildings
+
+	// ---- threats: no one takes fire at one second — the under-attack scan
+	//      finds nothing; and no rival wonder exists, seen or not.
+	j_key(j, "threats")
+	j_obj(j)
+	j_key(j, "underAttack")
+	j_arr(j)
+	j_end_arr(j)
+	j_key(j, "enemyWonders")
+	j_arr(j)
+	j_end_arr(j)
+	j_end_obj(j) // threats
+
+	// ---- gameStats: the wonder threshold and the three rivals, in seat
+	//      order. No seat has met a rival at this gate (the 250 ms discovery
+	//      beat and its contact memory never fire before t=1000 — port
+	//      722-740), so discovered is false and the population/buildings keys
+	//      the discovered entries carry are absent.
+	j_key(j, "gameStats")
+	j_obj(j)
+	j_key(j, "wonderRequired")
+	j_int(j, 600)
+	j_key(j, "opponents")
+	j_arr(j)
+	for oci in 0 ..< 4 {
+		if oci == s.ci {
+			continue
+		}
+		oc := &civs[oci]
+		j_obj(j)
+		j_key(j, "id")
+		j_str(j, fmt.aprintf("%s-%d", oc.id, oci + 1))
+		j_key(j, "civilization")
+		j_str(j, oc.id)
+		j_key(j, "age")
+		j_str(j, "stone")
+		j_key(j, "discovered")
+		j_bool(j, false)
+		j_key(j, "defeated")
+		j_bool(j, seat_eliminated(&g.seats[oci]))
+		j_end_obj(j)
+	}
+	j_end_arr(j)
+	j_end_obj(j) // gameStats
+
 	j_end_obj(j) // state
 	j_end_obj(j) // the fixture line
 }
 
-// The driver is not written yet (HANDOVER §7, step 4). This stub exists so the
-// file compiles and the state view can be built and diffed section by section;
-// the real one builds the terrain, sets the seats up, observes at t=0, steps
-// 20 × 50 ms, observes at t=1000, and writes the eight lines to argv[1].
+// The driver: terrain, seats, four lines at t=0, the output file. The
+// t=1000 half (twenty 50 ms steps of stepOnce, then four more lines) is
+// not written yet — stepOnce does not exist; when it does, the loop goes
+// between the two observation blocks and the t_ms becomes 1000.
 main :: proc() {
+	if len(os.args) < 2 {
+		return
+	}
+	spawns := arena_spawns()
+	g: game_state
+	// The map size is 800 (the port's makeTerrain: size 800; TERRAIN_WORLD 1000
+	// is TexGen's noise world, which the port does not have at all — its coast
+	// tables are dead weight here). The bounds, the scatter grid and the
+	// exploration cells all derive from this number.
+	g.terrain = t_terrain(f64(800), "golden", spawns)
+	setup(&g, spawns)
+
+	j := new(jw)
+	j.n = 0
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		o := obs{g = &g, j = j, s = s, t_ms = 0}
+		observe_line(&o)
+		j.buf[j.n] = '\n'
+		j.n += 1
+		j.sep = false // the comma flag resets between lines — each line is its own object
+	}
+	_ = os.write_entire_file(os.args[1], j.buf[:j.n])
 }
