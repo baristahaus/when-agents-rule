@@ -272,9 +272,14 @@ shows two commits and nothing fork-shaped.
 5. **Still open** — a real file-list audit gate (recorder ↔ `js/manifest.js` ↔
    `index.html`), since the ledger keeps finding drift in exactly that seam.
 
-The rebuild's own next steps are ordered in `docs/REBUILD-EFFORT.md` §5 — the turn-1
-   gate landed 5 October 2026 (item 1, done); what remains there is item 4's two owed
-   items and item 6's layer-3 decision, which the passing gate has made live.
+The rebuild's own next steps are ordered in `docs/REBUILD-EFFORT.md` §5 — and
+   §5's list is now clear through item 6: the turn-1 gate (item 1), the tree and the
+   branches (items 2–3), the two owed items (item 4 — the Town Center clearance,
+   resolved via the recorder bug the audit found; the leak tracker,
+   `mem.Tracking_Allocator`, named and proven as gate 7) and layer 3's fate (item 6 —
+   the JS port stays as the line-map spec, with an end date at the whole-match gate).
+   What remains is item 5's after-turn-1 work — the rule brain, P0(c), P1 — and the
+   owner's product calls in §4 (P3/P4 scope, the mesh set, the name).
 
 ```
 $ node tools/upstream-check.cjs --branch=share/upstream-contract --claim-build=1040
