@@ -716,3 +716,49 @@ test('a priest re-plans its stand when a shuffling patient drifts out of reach',
  h.step(300);
  assert.ok(standGap()<=reach-.2,'re-planned to reach it again: '+standGap().toFixed(2));
 });
+
+// asp67, 4 Oct 2026 (b1050): a whole army stood in formation while one chariot, still on its
+// way, crept toward it at the slowest member's pace. The pace is for marching in unison; a
+// unit joining a formation that has stopped comes at its own speed.
+test('a latecomer joins a formation that has stopped at its own top speed', () => {
+    const h = setup();
+    const a = h.unit('warrior', 98, 0, 1), b = h.unit('warrior', 98, 2, 1), rider = h.unit('warrior', 0, 0, 3);
+    const priest = h.unit('priest', 97, 1, 1);
+    h.owner.units.push(a, b, priest, rider);
+    const grp = h.issue('guard', { x: 100, z: 0 });
+    assert.equal(rider.marchSpeed, 1, 'the formation marches at its slowest');
+    for (const u of [a, b, priest]) { const s = grp.slots.get(u); u.x = s.x; u.z = s.z; u.isMoving = false; u.targetX = s.x; u.targetZ = s.z; }
+    h.step(150);
+    // As in the match: a priest off healing, which slowed the whole group to 60% of its pace.
+    priest._healingFormation = {};
+    assert.equal(h.g.moveSpeedOf(rider, 50), 3, 'the army stands in its slots: the rider comes at full speed');
+    const x0 = rider.x;
+    for (let i = 0; i < 40; i++) { priest._healingFormation = {}; h.step(50); }
+    assert.ok(rider.x - x0 > 4, 'and covers ground like it: ' + (rider.x - x0).toFixed(1));
+    // Once it stands in its slot, the formation's pace is its pace again.
+    const s = grp.slots.get(rider); rider.x = s.x; rider.z = s.z; rider.isMoving = false;
+    priest._healingFormation = null;
+    h.step(150);
+    assert.equal(h.g.moveSpeedOf(rider, 50), 1);
+});
+
+// asp67, 4 Oct 2026 (b1052): workers on "hold" attacked rival workers nobody had touched,
+// and went on doing it after their seat was eliminated. A worker fights only for itself.
+test('a worker under an order never picks a fight, and answers only the one who hit it', () => {
+    for (const mode of ['hold', 'guard']) {
+        const h = setup();
+        const w = h.unit('worker', 0, 0, 1);
+        w.type = 'worker'; w.unitType = undefined; w.attack = 3;
+        h.owner.units.push(w);
+        const grp = h.issue(mode, { x: 0, z: 0 }, {});
+        const s = grp.slots.get(w); w.x = s.x; w.z = s.z; w.isMoving = false;
+        const passer = Object.assign(h.rival(w.x + 1.2, w.z), { type: 'worker', unitType: undefined });
+        h.step(450);
+        assert.equal(w.attackTarget, null, mode + ': an enemy worker beside it is left alone');
+        const raider = h.rival(w.x + 1, w.z + 1);
+        w._lastAttacker = raider; w._lastDamageTime = h.g.simNow();
+        h.step(150);
+        assert.equal(w.attackTarget, raider, mode + ': the one that hit it is answered');
+        assert.notEqual(w.attackTarget, passer);
+    }
+});

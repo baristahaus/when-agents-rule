@@ -6,6 +6,258 @@ Most entries come from the determinism work: making a match replay exactly from 
 
 Newest first. The build is the `?v=` number on `js/game.js` in `index.html`.
 
+## Build 1054: producing needs a free population slot (4 October 2026)
+
+**Rules change (elimination); `game.js` changed.**
+- **What happened:** GLM had lost every building but an archery range. It had the bank for archers and not one population slot to train one, and the elimination check kept it in the match: "a finished building that can produce such a unit and pay for one now". The check never looked at the cap.
+- **Now:** a trainer or a Town Center keeps a seat in only if it has room to train.
+- **Without room,** a seat is in only if it can climb back:
+  - a worker who can found a Town Center;
+  - a worker who can build a house the seat may build (its tech researched);
+  - a Town Center site to finish.
+- **A seat with nothing but a trainer and a full bank is out.**
+- **Unchanged:** any fighting unit, or a unit already in training, still keeps a seat in.
+
+## Build 1053: a defeated seat leaves the board (4 October 2026)
+
+**Rules change; `game.js` changed.** asp67's decision, as in Age of Empires.
+- **Before:** elimination set a flag and nothing else. In the 4 October match, Yamato was out at 85 minutes and still stood on the map at 193 with ten buildings and three units. They were listed in GLM's state and could be attacked, and the defeated seats' workers kept fighting under a standing order.
+- **Now:** at the step a seat is found eliminated, everything it still has is removed, with the usual death and collapse effects, and marked dead so whatever was targeting it lets go.
+- **Quiet:** no battle losses, no lost-building notes and no Town Center handling are written. Nothing here was destroyed by anyone.
+- **Other seats** forget the defeated seat's buildings, as they already forgot its units.
+- **Only matches with three or more seats are affected.** With two, the first elimination ends the match.
+
+## Build 1052: workers under orders, razed buildings, and a cache-friendly history (4 October 2026)
+
+**Rules and harness change; the rules hash moves.** Three issues asp67 found in a 197-minute, four-seat match (4 October, 02:12).
+
+**Workers under a standing order picked fights:**
+- **What happened:** Greek workers attacked Egyptian and Yamato workers nobody had touched, and went on doing it after Greece was eliminated at 56.7 minutes.
+- **Measured in the replay:** every one of them was under a `hold` order space-bunny had given before its elimination, still standing. Standing orders pick targets for every member with an attack, workers included, and a worker under an order was exempt from the self-defense rule that otherwise governs it.
+- **Now:** a worker under any order never picks a fight. It answers only the unit that has hit it in the last 4 s, within its usual 30, and otherwise keeps its slot. That is the 1 October rule ("a worker fights only for itself"), now under orders too.
+
+**A Town Center remembered standing after the seat's own army razed it:**
+- **What happened:** GLM razed Persia's Town Center at (-170, 310) at 179 minutes and moved on before its next turn. Its state listed that Town Center as standing, at 100%, for ten minutes. At 189 minutes GLM attacked it by id, mistaking it for the new one Persia had built at (150, 330), and was told it "died in the seconds between the state you read and this command".
+- **Now:**
+  - a building destroyed by the seat's own units is forgotten, as units already were;
+  - an attack by id on a building the seat only remembered, that has since fallen, is told so ("you remembered it, out of sight, and it has fallen since you last saw it"), not that it died while the model thought.
+
+**Turns took about 100 s instead of about 18 once the history was full:**
+- **What happened:** GLM's prompt reached the context budget (110k tokens) at minute 58. From that turn on, every turn took about 100 s, for the rest of the match.
+- **The cause:** the rolling history took the newest turns that fit, so once full it dropped the oldest on every turn. The conversation's first message changed every turn, and the server's prefix cache could reuse nothing.
+- **Now:** the window's start stays put while the history fits. When it overflows, the start jumps forward once, leaving 60% of the budget (`HISTORY_REFILL`): one full recompute per jump. For GLM's match that is about every 85 turns, instead of every turn.
+- **The cost:** the model sees on average about 80% of the budget as history instead of 100%.
+
+**Not changed here:** a defeated seat's units and buildings still stood in the world (elimination only set a flag). Build 1053 removes them.
+
+## Build 1051: two more refusals carry their code (4 October 2026)
+
+**Harness change; the rules hash moves.** In the 4 October match four refusals came back without an outcome code, so the Bench counted them as uncoded:
+- `attack_target` with neither a target id nor coordinates is now `attackNeedsCoords`;
+- `assign_workers` with neither a resource type nor coordinates is now `assignNeedsResource`.
+
+Both codes already existed for these cases on other paths. The Bench's ratchet on uncoded refusals in the harness drops from 6 to 4.
+
+## Build 1050: a latecomer joins a standing formation at full speed (4 October 2026)
+
+**Rules change (movement); `game.js` changed.** asp67 watched a whole army stand in formation while one chariot, still on its way, crept toward it as if the formation were marching.
+
+**Measured in a replay of that match (23:44, GLM's turn 252):**
+- Egypt's chariot (speed 2) closed 82 units on 68 units standing in their slots at 0.54. That is 8 units per 5 seconds, against 30 for chariots moving freely.
+- 0.54 is the march's shared pace (0.9, the slowest member's) cut again to 60% because a priest was off healing.
+
+**The cause:** the pace rules ran in the wrong order.
+- The slowdown "a priest is healing: the group regroups at 60%" stood first, before the release "a unit still finding its place runs at its own speed".
+- So it slowed exactly the units the group was waiting for.
+- And once a formation had arrived, nothing released a latecomer from the shared pace at all.
+
+**Now:**
+1. **If part of the formation stands in its slots and it is not fighting,** any member not yet in its slot moves at its own top speed.
+2. **The chase rules** are unchanged.
+3. **A unit still finding its place** runs at its own speed.
+4. **Only then the regrouping slowdowns** (a healing priest, stragglers behind the body), for the units already in place.
+
+While a formation marches, nobody stands in a final slot, so the shared pace holds as before.
+
+## Build 1049: an unknown move mode is refused with a code (3 October 2026)
+
+**Harness change; the rules hash moves.**
+- **The refusal:** `move_units` with a mode or `targets` value that does not exist (space-bunny sent `mode: "attack"` in two matches) was refused with the right text but no outcome code, so the Bench counted it as uncoded.
+- **Now:** it is `moveBadMode`, classed as a reference error: the command named something that is not there.
+
+## Build 1048: checkpoints that say where a replay leaves its recording (3 October 2026)
+
+**No rules change in play; `game.js` and the harness changed, so the rules hash moves.** Transcripts recorded before this build no longer re-simulate on it, as with any such change.
+
+**Why.** asp67's 19:53 match is the first of the day that does not re-simulate. Its world hash differs at step 15109, in the first fight of the siege on Persia, after matching at step 14838. Nothing was input between the two, and every seat's view stayed identical. A whole-world hash per input could only say that something differed somewhere in those 270 steps. These were ruled out:
+- wall-clock reads in the rules;
+- the camera, sound or panels writing to units;
+- spectator input reaching unit orders;
+- the renderer's unit-list order and measured footprints;
+- standing orders;
+- the age-up that fell in the window.
+
+The cause is still open.
+
+**What changes:**
+- **Every 200 steps (ten game seconds) a transcript records a `checkpoint`.** It carries no input: just the world hash and a digest (`Game.stateDigest`), taken at the end of the step, where a replay compares. Per seat, the digest holds:
+  - a hash of resources, age and research;
+  - its units and buildings, each as one hash.
+- **Every sixth checkpoint (the first, seventh, …) adds per-entity detail:** every unit (by handle) and building as four one-byte hashes, for position, health, orders and targets, and timers and cargo.
+- **A replay compares each checkpoint and names what differs:** the seat, the part (resources, units, buildings, nodes) and, at a detailed checkpoint, the entity and kind of field. `tools/bench/transcript-replay.cjs` also prints the replay's own values for those entities.
+- **Measured on the 18:34 match:** 469 checkpoints add 305 KB to a 6.1 MB transcript.
+
+## Build 1047: no zooming out to the island in the middle of a siege (3 October 2026)
+
+**No rules change; spectator camera only.** asp67 watched it live, in the siege on Persia's Stone Age town (3 October, 19:53 match): the camera "zoomed out in waves" to the whole island, which then sat in a third of the screen. Build 1046 fixed a real bug of the same look in the analyzer, but not this one.
+
+**The cause:** the wide calm shots cut in during the fight.
+- **A siege counts as a fight only around a blow:** within 1.5 game seconds of one landing, or while an attacker is within reach. Militia running after villagers and walking between houses are out of reach most of the time.
+- **In those gaps the calm shots won:** an age-up (GLM's, as the siege began) queued the compare sweep, every camp from above at half-height 90, and the overview, due every 75 seconds, followed it. Fight 24, compare 90, 90, 90, overview 496: each a cut, each wider.
+- **Measured in a replay of the match.** The match itself stops re-simulating at the siege's first fight, so the siege could not be replayed exactly.
+
+**The fix:**
+- **The compare sweep and the overview wait** until no blow has landed anywhere for 10 seconds (scaled by the timelapse factor). They are deferred, not dropped. The closer calm shots still fill the gaps between blows.
+- **The overview fits the island to the screen,** as the analyzer's opening shot does, instead of a fixed 62% of the map size, which on a wide monitor left the island in a third of the screen.
+
+## Build 1046: the auto camera no longer zooms out of a long fight (3 October 2026)
+
+**No rules change; spectator camera only.** asp67: in a long fight for a settlement, the auto camera zoomed out in waves, further each time, until the whole island sat in a third of the screen.
+
+**The cause, in the analyzer's re-simulated mode:**
+- **The stage handed its director copies, not entities.** Each frame's scene names a unit's target as a plain copy, and the stage passed it on as the unit's `attackTarget`. The director added each copy to the fight as a new participant: frozen where the target stood then, and never dying.
+- **A unit gone from the scene kept its last health.** Its last look still had it alive, so the director never let go of it either.
+- **The result:** a long fight collected a ghost for every frame, spread over everywhere it had been, and the camera widened to hold them all. When a fight lapsed and a new one started, the frame snapped back, then widened again.
+- **Measured:** in a fight that only walked 50, the old stage left 52 participants instead of 2 and a frame of 56 instead of 24. It keeps growing with the ground a fight covers.
+- **The live arena was not affected:** its director is handed real entities. Replaying asp67's 18:34 match through the live director, no fight framed wider than 59.
+
+**The fix:**
+- **Targets resolve to the stage's own entities,** once the whole scene is placed.
+- **Whatever leaves the scene is marked dead** for the director.
+
+**A backstop in the director, from a first diagnosis that was wrong** (participants walking away):
+- a fight is framed on who is fighting now;
+- its frame has a ceiling (half-height 90), as the other shots have;
+- the zoom eases toward a new size instead of jumping.
+
+## Build 1045: holding units defend what they stand under; "noDefenders" counts every fighter (3 October 2026)
+
+**Harness and prompt change (prompt agents-rule-v105); `game.js` changed.**
+- **Hold defends the owner's things, not only itself.** In build 1044 a holding unit answered only attacks on its own group. A swordsman hacking at the tower 5 from a holding militia was left to it: the militia's own reach is about 1.5, and nobody had hit it. Now an enemy attacking anything of the seat's (a unit, a building, a farm) is answered like an attacker: by every holding unit whose slot is within 19 of it, released the same way.
+  - What burns more than 19 from their spots stays the model's call. Holding units are not pulled out to it.
+- **`threats.underAttack[].noDefenders` counts every fighter on site** (asp67's review of build 1044). It counted only the idle soldiers the auto-defense reflex sends, so guards, patrols and holds fighting the raider right there were reported as nobody. The fault is older: build 1042 carried it over from the UNDER ATTACK line's "no defenders in range". It now uses the reflex's own on-site test: anyone of the owner's fighting near the raider.
+
+## Build 1044: a "hold" mode for defenders (3 October 2026)
+
+**Harness and prompt change (prompt agents-rule-v104).** asp67 saw defenders break formation and wander out of a Town Center's or a tower's reach into the open, after whatever shot them, ruining the defense.
+- **The cause.** Guard picks up any enemy within 48 of its post and chases an attacker up to 64 (hard cap 96). A tower shoots 18.
+
+**What `hold` does:**
+- **A new `move_units` mode.** On the way it travels as guard does. At its post, each unit keeps to its own formation slot:
+  - it attacks unprovoked only what is within its own attack range of that slot (plus 1);
+  - it answers an attacker only within **19** of that slot;
+  - it lets an attacker go the moment it backs off past that;
+  - idle members wait in their own slots while others fight.
+- **The leash is fixed at 19, one past the longest reach in the game.** Ranged units are capped at the tower's 18, so anything that can hit a holding unit from its slot is within its answer, and nothing can shoot it from where it may not go.
+- **`tests/hold-mode.test.cjs` keeps watch on future range changes.** It measures every unit of every civilization with every range bonus its civilization can research, and every building that shoots, the way combat measures reach. If any of them reaches 19, the test fails.
+- **The leash is per slot, not per group:** a unit at the end of a line answers what it can reach without the middle running out.
+- **The trade-off, told to the model:** melee units on hold will not run down archers, so hold belongs under one's own towers.
+
+**Also in this build:**
+- **`commandLimit`** (a command past the per-turn cap) is now in the Bench taxonomy as a constraint. It was emitted as a literal, so the taxonomy test never saw it, and the Bench counted it as unknown.
+- **Build 1043's one-line state is kept.** The A/B with build 1042 (same seed and seats, 3 October) found no difference in how the models read the state:
+  - no parse failures and no commands naming things that are not there;
+  - refusals were timing and cost only;
+  - memory fields were quoted more often.
+
+  Prompts at the same turn were 1.2k to 9.5k tokens smaller.
+
+## Build 1043: the game state goes to the model on one line (3 October 2026)
+
+**Harness change: what a model is sent.** An A/B asked by asp67, to decide which format becomes permanent. Build 1042's match (3 Oct, 17:05) was sent the state indented; this build sends the same JSON on one line, without whitespace.
+- **Why:** indented JSON measured 1.9 times the characters of the same state.
+- **Applies to:** the current-state message of every turn, and the final word's state.
+- **Unchanged:**
+  - earlier turns in the history were already one-line recaps;
+  - transcripts store the state as an object;
+  - the live transcript viewer and the transcript analyzer still show it indented.
+
+## Build 1042: a seat remembers the enemy units it has seen (3 October 2026)
+
+**Harness and prompt change (prompt agents-rule-v103); `game.js` changed.** Build 1041 made a lost contact always said, but a CONTACT line was still a moment, gone next turn, and what it meant was the model's to carry. asp67's design: enemy units are remembered the way nodes and buildings already are.
+
+**The state:**
+- **`enemyUnits` is the seat's memory.** `visible: true` is in sight now. `visible: false` is how and where the unit was last seen, with `secondsAgo`. Each entry carries its health, and a worker carries its cargo, as seen.
+- **`sightedAt`** is where this pass through sight began, when the unit moved from there: with the last-seen spot, a heading.
+- **Fifty are listed:** in sight first, then the most recently seen. The rest stay remembered and move up as listed ones leave.
+- **A unit leaves the list** when its last-seen spot, having been out of sight, is seen again without it.
+  - A unit walking out of a view still being watched keeps its spot.
+- **It is forgotten only for what the seat could know:**
+  - it was seen to die;
+  - the seat's own units killed it;
+  - its owner is defeated.
+  - One that died unseen stays remembered: its fate is unknown, and dropping it would say it died.
+- **`gameStats.opponents[]` adds `seenAlive`**, for rivals already met: the rival's units seen and not seen die, by type, including ones whose whereabouts were lost. **`seenSecondsAgo`** says how old those sightings are. A 30-strong army that slipped away is no longer forgotten with its last position.
+- **`recentEvents` keeps only what became of orders.** These lines went:
+  - CONTACT and CONTACT LOST: now the memory;
+  - UNDER ATTACK: already `threats.underAttack`, which gains `noDefenders: true` when nothing answers;
+  - LOSS and KILL of buildings: in `lostBuildings`, the battles and `enemyBuildings`.
+
+**Attack by id:**
+- **`attack_target` by `targetId` names only an enemy unit in sight, or a building.** A remembered unit is refused with its last-seen spot and age, and told that `targetX`/`targetZ` there sends an attack-move.
+  - New outcome code `targetOutOfSight`, classed as reference.
+  - By id, an army had followed a unit through the fog to wherever it went, which no scout had told the seat.
+  - A unit in sight in the state the model answered is honoured as before.
+- **Answering "not found" for a remembered unit that died unseen** would have told the seat it died, so that is refused the same way.
+
+**How it is fed:**
+- **The contact scan feeds it** about once a second per seat, so a scout passing between two turns is remembered.
+- **The state build refreshes it** on a copy, which the commit merges with what the scan learnt meanwhile: building a state still changes nothing.
+
+**Readers:**
+- **The analyzer** draws only `visible` units as confirmed, and dates a remembered one by `secondsAgo`.
+- **The Bench's random baseline** names only units in sight.
+- **The history recap** counts in-sight units only.
+
+**Cost, measured in two 30-minute four-seat realm matches** (rule-based seats observed through the harness, pretty-printed state as sent):
+
+| | Median | p90 | Max |
+|---|---|---|---|
+| Added tokens | +0 | +1.7k / +2.2k | +2.9k |
+
+- The median is +0 because most turns have no enemy known.
+- The maximum is the 50-entry cap.
+- A remembered entry costs about 47 tokens, 58 with `sightedAt`. An in-sight one gains about 11 (`healthPct`, `visible`).
+
+## Build 1041: what a seat sees and what it only remembers (3 October 2026)
+
+**Harness and prompt change (prompt agents-rule-v102); `game.js` changed.** asp67 asked whether models mixing up what is in sight and what is only remembered was our fault.
+
+**It largely was.** In asp67's 3 October match, space-bunny wrote "their field army is dead" on ten turns while Egypt had 9 to 17 soldiers. The trigger was ours.
+- **The cause.** A "CONTACT LOST" was left out when the unit had not moved while in sight (since build 671, 21 Aug: "one fact reported twice").
+- **What that did in a fight.** Enemies stand still. When the watcher died, the seat got a sighting followed by silence: the units were simply gone, which reads as dead.
+- **The model's part.** The same turn's battle report showed Egypt had lost nothing, and space-bunny did not read it.
+
+**Changes:**
+- **CONTACT LOST is always reported.** A unit that had not moved is reported "…last seen at (x, z), where it was sighted": the view of it ended, not the unit.
+- **Remembered enemy buildings carry what was seen** (`visible: false`): health as last seen, taken on the turn it was in sight or when it was first discovered between turns.
+  - A building destroyed out of sight stays listed until its spot is seen again, as a resource node keeps its last-seen amount.
+  - Before, a remembered building reported its live health and vanished the moment it fell, both things the seat had not seen.
+  - A Wonder stays public: its fall is known as its standing is.
+- **Battle sides always carry `lost`**, `{}` when nothing was lost. An absent key had been the only sign.
+- **The prompt says:**
+  - "enemyBuildings" lists every rival building found, and `visible: false` is remembered as last seen and may have changed;
+  - enemy units out of sight are not remembered;
+  - a CONTACT LOST "where it was sighted" says nothing about whether the unit still lives.
+- **Unchanged (asp67):** after contact, a rival's `population` and building count stay public, but not its unit or building types.
+
+## Build 1040: a fight's card no longer says "lost 3 of 0" (3 October 2026)
+
+**No rules change; `game.js` changed, so the rules hash moves.** The chronicle's fight card says what each side lost of how many took part (asp67 saw "lost x of 0").
+- **The cause.** "How many" counted only what struck or healed in the fight. A side whose buildings or unarmed units were cut down without a blow back was lost from a count of 0.
+- **The fix.** The battle record now also keeps what was struck, per owner (`hit`), beside its sides. The card counts striker and struck together.
+- **Models are told the same as before:** `battles` in their state still reports what each side struck with, and what it lost.
+
 ## Build 1039: chopping and mining share one gap, 0.5 s (3 October 2026)
 
 **No rules change.** For consistency (asp67), chopping and mining now both wait 0.5 s per map cell (b1038 had 0.55 s and 0.625 s).

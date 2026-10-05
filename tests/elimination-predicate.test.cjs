@@ -119,14 +119,20 @@ test('a seat with nowhere to stand its army is out, however rich', () => {
   // spared by its own temple, kept being offered a priest, and could never field one: three
   // answers to one question. The fixtures set population explicitly; everywhere else in this
   // file the fields are absent, which is exactly the case the gate is written to ignore.
+  //
+  // Superseded 5 October 2026, by the parent's b1054: the cap now stops the survival rule
+  // inside isPlayerEliminated itself (the `room` gate, with its climb-back clauses), and
+  // canAffordAnyMilitary answers cost alone — the parent's own test pins that ("it can pay
+  // for archers", with no slot). The OUTCOME this test exists for is unchanged: a roomless
+  // rich seat is out. See docs/FORK-DIVERGENCES.md S5.
   const withCap = (max, over) => seat(Object.assign({
     resources: Object.assign(RES({}), { population: 0, maxPopulation: max }),
   }, over));
 
   assert.equal(eliminated(withCap(0, { buildings: [building('temple')] })), true,
     'a temple, 5000 of every resource, and no population slot is not a seat that can field a unit');
-  assert.equal(game.canAffordAnyMilitary.call(game, withCap(0, { buildings: [building('barracks')] })), false,
-    'the cap has to stop the predicate, not just the executor');
+  assert.equal(game.canAffordAnyMilitary.call(game, withCap(0, { buildings: [building('barracks')] })), true,
+    'cost alone, per b1054: the cap stops the predicate in isPlayerEliminated (the `room` gate), not here');
 
   // It is the cap that decides, not the money: one house is five slots and the seat is back in.
   assert.equal(eliminated(withCap(5, { buildings: [building('temple')] })), false,
