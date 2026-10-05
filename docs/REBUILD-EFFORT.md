@@ -91,30 +91,41 @@ at the first gate with contacts in it (P0(c)); the port's header says so. Why th
 exists and what it cost is §2's layer 3; how to read it is `spike/turn1/HANDOVER.md` §2
 (a line map from a keyed draw to the canonicalizer).
 
-### 1.4 The Odin transcription — in flight, ~70%, does not compile
+### 1.4 The Odin transcription — gate green, 8 lines byte-identical
 
-`spike/turn1/main.odin`, **2,028 lines**, is the transcription of the port into
+`spike/turn1/main.odin`, **3,034 lines**, is the transcription of the port into
 Odin: one file, package `main`, byte-exact against the same 8-line fixture. Measured today,
 not inherited:
 
-- `odin build spike/turn1/main.odin -file` **fails**. The first errors are rune literals —
-  Odin reads `'cavalry'` as a character, not a string — starting at line 533 and recurring
-  through the civ tables. This is L7's predicted trap, in the file, uncorrected.
-- The tail is cut off mid-block (it ends at `j_end_obj(j) // unlockedContent`, braces
-  unbalanced) and there is **no `func main`** (grep: zero matches).
-- The four shape bugs the handover lists verify by grep: `workers` writes `gatherFood` /
-  `attackMove` keys (lines 1905, 1915) where the golden wants `total, idle, building, farm,
-  scouting, moving, fighting, food, wood, stone, gold`; `unlockedContent` writes a
-  training/building object (line 1994) where the golden is exactly `{"buildings":[]}`;
-  `busy`/`activity`/`producing` appear nowhere (the `friendlyBuildings` entries are missing
-  them); `blockedBy` appears twice in 2,028 lines (the research section drops it when empty).
-- The missing sections verify the same way: `threats`, `gameStats`, `underAttack`,
-  `enemyWonders` — zero occurrences.
-
-What is *good* in the file is verified in the handover's §3 and was left alone: the fdlibm
-kernels and keyed RNG, the terrain tables, the civ data with `tech_ids` in tree order, the
-JSON writer with `fmt.f64` shortest-round-trip, the `obs_scratch` node pass, `arena_spawns`
-and the keyed worker spread (both checked against the raw golden bytes).
+- `odin build spike/turn1/main.odin -file` compiles clean; the driver runs and writes
+  45,840 bytes; `cmp` against the golden is byte-identical — all four seats at t=0 and
+  t=1000, all 21 sections each. The verification is wired into `spike/gates.sh` as gate 6
+  (build, run, cmp), so the ledger owns it now, not a handover.
+- The road there was an error-class catalogue the compiler wrote. The handover expected one
+  syntax break (the cut-off tail) and instead found a full stratum of guessed syntax —
+  Python and JS ternaries, Go-style `type X struct`, JS array literals and named-field
+  colons, brace-grouped imports, `var`/`const` declarations, a `switch` with no `default`
+  label in this compiler, proc values that do not capture an enclosing scope (the terrain's
+  and make_eyes' closures were hoisted to file scope with their state threaded by
+  pointer), `%` on floats (`m_fmod` ports the ECMAScript remainder, Sterbenz-exact at
+  every step), `math.round` where JS rounds ties toward +inf (`floor(x+0.5)` now,
+  including for the negative node coordinates), and one load-bearing bug the run found
+  after the compile: `bits64` used `cast(u64)(x)` — the numeric conversion — so every fdlibm
+  branch threshold compared against garbage (`rem_pio2` returned n=0 for π/2,
+  `sin(-π/2)` printed 0). `transmute`, not `cast`; after it, `cos(π/2)` printed
+  6.123233995736766e-17, bit-identical to Node.
+- `j_f64` is the ECMA-262 `Number.prototype.toString` rule on top of strconv's shortest
+  digits — Odin's `%v` switches to exponents at 1e8 and pads them; JS does not
+  ("123456789.125", "1e-7").
+- What the port leaves to later gates, recorded rather than hidden: the b1041/b1042
+  enemy-unit memory and the enemy-building memory with its `id/owner/visible` entry shape
+  are invisible at this gate's two moments (no seat's sight reaches another spawn) and
+  become required at the first gate with contacts (P0(c)); the handover's own scoping,
+  repeated in the commit that landed the step.
+- What was already *good* in the file stayed alone: the fdlibm kernels and keyed RNG, the
+  terrain tables, the civ data with `tech_ids` in tree order, `arena_spawns` and the keyed
+  worker spread — and the worker positions at t=1000, after twenty steps of
+  `WarPositionRules` pushes, came out byte-exact on the first run.
 
 ### 1.5 The suite and the tree
 
@@ -357,14 +368,14 @@ turn-1 gate lands (§5, item 6).
 
 ## 5. The road ahead, in order
 
-1. **Land the turn-1 gate.** The order of attack is `spike/turn1/HANDOVER.md` §7, and it
-   is verified against the file as of today: repair the tail and stub a `func main` so the
-   file compiles; fix the four shape bugs one at a time with a `cmp` after each; add
-   `units`, `buildings`, `threats`, `gameStats` in golden order, transcribing the port's
-   functions; add `stepOnce` (the 50 ms step: population → the 250 ms discovery beat →
-   clock → `WarPositionRules` → the harness observation) and the driver; `cmp` all 8 lines.
-   When it is green, wire it into `spike/gates.sh` as a new gate (build, run, `cmp`) so
-   CI owns it — a gate that exists only in a handover is a wish with a deadline.
+1. **Land the turn-1 gate — done, 5 October 2026.** The handover's §7 order ran to the
+   end: the tail repaired and a `main` stubbed, the four shape bugs fixed, the four
+   missing sections transcribed, `stepOnce` and the driver added, all 8 lines
+   byte-identical (45,840 bytes, the four t=1000 lines on the first run after the
+   step machinery landed — the worker positions survived twenty steps of
+   `WarPositionRules` pushes bit-exactly). The gate is wired into `spike/gates.sh` as
+   gate 6 (build, run, `cmp`), per this record's own rule that a gate living only in
+   a handover is a wish with a deadline.
 2. **Commit the working tree — done, 5 October 2026.** Four commits, in the shape the
    first draft of this record proposed: the JS port ("the turn-1 spec, frozen"), the
    turn-1 WIP with its handover, the beads-skill retirement, and the docs pass itself.

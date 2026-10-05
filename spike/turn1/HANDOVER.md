@@ -1,5 +1,13 @@
 # Handover — Odin turn-1 port (state view), mid-flight
 
+> **Completion note, 5 October 2026.** The task this handover describes is done: the
+> port compiles, runs, and writes 45,840 bytes byte-identical to the golden — all
+> eight lines, both moments, verified by `spike/gates.sh` gate 6 (build, run,
+> `cmp`). The §4 loop is still the verification protocol for any future change to
+> the file; §2's line map and §3's verified facts are still the reading guide for
+> the port; §8's prohibitions still stand. The status paragraphs below are the
+> historical mid-flight state and are superseded by the gate.
+
 **Why this handover exists:** the Pi agent harness and the LiteLLM proxy in
 front of it are missdirecting traffic, so this session is being restarted.
 Everything below is verified state as of the handover; the new session should

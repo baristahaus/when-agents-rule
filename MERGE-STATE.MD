@@ -24,9 +24,9 @@ work lives on `rebuild/v2` (reconciled and pushed 5 October — see *Branch and 
 
 | Question | Command | Last measured |
 |---|---|---|
-| Do the Odin gates still pass (vectors, counts, coast, four map lines, no FMA, vet, corpus)? | `./spike/gates.sh` | 8/8 green, 5 Oct 2026 — four map conditions byte-identical |
+| Do the Odin gates still pass (vectors, counts, coast, four map lines, no FMA, vet, corpus, turn-1 state view)? | `./spike/gates.sh` | 9/9 green, 5 Oct 2026 — gate 6 is the turn-1 state view, 8 lines byte-identical |
 | Does the frozen JS port reproduce the state view? | `node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl` | GATE PASS, 8 lines byte-identical, 5 Oct 2026 |
-| Does the Odin core reproduce turn 1? | *(in flight — `spike/turn1/main.odin` ~70%, does not compile yet; the map is `spike/turn1/HANDOVER.md`)* | not green yet |
+| Does the Odin core reproduce turn 1? | `./spike/gates.sh` (gate 6) | green — 8 lines, 45,840 bytes, byte-identical, 5 Oct 2026 |
 | Do the golden files regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl golden/stream-b1040-1m.jsonl` | byte-identical, 2,722,912 bytes (run it locally — CI is off the repo since 5 Oct 2026, `docs/ci-disabled/`) |
 | Is the game green? | `npm test` | 671/671, 5 Oct 2026 (the parent's 43 new tests included) |
 | How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1054, 5 Oct 2026) |
@@ -264,16 +264,17 @@ shows two commits and nothing fork-shaped.
    the parent's replay engine, on their side of the treaty.
 3. **Resolved by the retirement** — park-and-spread and the two unwired Rust drafts: the
    drafts are deleted with the port (the tag preserves them), and the keyed worker spread
-   is transcribed and verified in the turn-1 work in flight (`spike/turn1/`, checked
-   against the golden's raw bytes).
+   is transcribed and verified in the turn-1 port (`spike/turn1/`, byte-identical
+   against the golden since 5 October 2026, gate 6).
 4. **Still open** — the replay's own build check: our line should refuse to re-simulate a
    recording whose `coreHash` it cannot reproduce, and say so, rather than replaying a
    match it cannot explain.
 5. **Still open** — a real file-list audit gate (recorder ↔ `js/manifest.js` ↔
    `index.html`), since the ledger keeps finding drift in exactly that seam.
 
-The rebuild's own next steps — the turn-1 gate, the uncommitted tree, the branch
-reconciliation — are ordered in `docs/REBUILD-EFFORT.md` §5.
+The rebuild's own next steps are ordered in `docs/REBUILD-EFFORT.md` §5 — the turn-1
+   gate landed 5 October 2026 (item 1, done); what remains there is item 4's two owed
+   items and item 6's layer-3 decision, which the passing gate has made live.
 
 ```
 $ node tools/upstream-check.cjs --branch=share/upstream-contract --claim-build=1040

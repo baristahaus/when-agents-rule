@@ -150,6 +150,27 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 6 — the turn-1 state view, the whole record, byte for byte: 8 lines (4 seats x
+# the two moments t=0 and t=1000), 45,840 bytes. The single-file port is spike/turn1/main.odin;
+# its driver takes one argument, the output path, and writes the fixture the golden holds.
+if "$ODIN" build spike/turn1/main.odin -file -out:/tmp/gate-turn1 >/dev/null 2>&1; then
+	if /tmp/gate-turn1 /tmp/gate-turn1-out.jsonl >/dev/null 2>&1 \
+	   && cmp -s /tmp/gate-turn1-out.jsonl golden/states-b1040-t0-t1.canonical.jsonl; then
+		say "gate 6  turn-1 state view (8 lines)" "ok — byte-identical"
+	else
+		say "gate 6  turn-1 state view (8 lines)" "FAIL"
+		cmp /tmp/gate-turn1-out.jsonl golden/states-b1040-t0-t1.canonical.jsonl 2>&1 | head -2
+		note "The HANDOVER §4 loop: diff the first divergent line, find the section," \
+"read that section's port function in tools/trace-states-port.cjs (the line map" \
+"is spike/turn1/HANDOVER.md §2), fix the Odin to match. The port is the spec."
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 6  turn-1 state view (8 lines)" "FAIL — the build"
+	"$ODIN" build spike/turn1/main.odin -file -out:/tmp/gate-turn1 2>&1 | head -8
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
