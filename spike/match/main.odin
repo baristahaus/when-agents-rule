@@ -576,6 +576,8 @@ unit_def :: struct {
 	cost: cost4,
 	health: f64,
 	speed: f64,
+	attack: f64, // damage per 1 s swing
+	range: f64, // 0.5 melee (game.js: melee reach is the flat 1.5)
 	u_type: string, // 'worker', 'infantry', 'ranged', 'cavalry', 'support'
 	tier: string, // the epoch that trains it
 	train_at: string, // set for uniques that need a specific building
@@ -605,9 +607,9 @@ egypt :: civ{
 	wonder_id = "pyramid", wonder_cost = {4800, 4800, 4250, 2650},
 	excluded = {"cavalry", "heavy_cavalry", "", ""}, n_excluded = 2,
 	units = {
-		{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1.2, u_type = "support", tier = "bronze"},
-		{id = "slinger", cost = {60, 20, 0, 0}, health = 45, speed = 1, u_type = "ranged", tier = "neolithic", train_at = "archery_range"},
-		{id = "horse_carriage", cost = {60, 20, 40, 40}, health = 100, speed = 2, u_type = "cavalry", tier = "bronze", train_at = "stable"},
+		{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1.2, u_type = "support", tier = "bronze", attack = 3.0, range = 10.5 },
+		{id = "slinger", cost = {60, 20, 0, 0}, health = 45, speed = 1, u_type = "ranged", tier = "neolithic", train_at = "archery_range", attack = 6.0, range = 12.0 },
+		{id = "horse_carriage", cost = {60, 20, 40, 40}, health = 100, speed = 2, u_type = "cavalry", tier = "bronze", train_at = "stable", attack = 8.0, range = 2.0 },
 	{}, {}, {}, {}, {}}, n_units = 3,
 	techs = {
 		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
@@ -615,9 +617,9 @@ egypt :: civ{
 		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
 		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"farm", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
 		{cost = {80, 40, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = ""},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = ""},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "archery_range"},
-		{cost = {50, 50, 50, 0}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = "academy"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "archery_range"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "academy"},
+		{cost = {50, 50, 50, 0}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = ""},
 		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "neolithic", research_time = 20000, unlocks_bldg = ""},
 		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
 		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "stable"},
@@ -633,8 +635,8 @@ greek :: civ{
 	wonder_id = "akropolis", wonder_cost = {4500, 4500, 4000, 2500},
 	excluded = {"cavalry", "heavy_cavalry", "", ""}, n_excluded = 2,
 	units = {
-		{id = "hoplite", cost = {80, 0, 50, 30}, health = 150, speed = 0.9, u_type = "infantry", tier = "neolithic", train_at = "barracks"},
-		{id = "phalanx", cost = {60, 0, 40, 20}, health = 100, speed = 0.8, u_type = "infantry", tier = "bronze", train_at = "barracks"},
+		{id = "hoplite", cost = {80, 0, 50, 30}, health = 150, speed = 0.9, u_type = "infantry", tier = "neolithic", train_at = "barracks", attack = 10.0, range = 1.0 },
+		{id = "phalanx", cost = {60, 0, 40, 20}, health = 100, speed = 0.8, u_type = "infantry", tier = "bronze", train_at = "barracks", attack = 8.0, range = 2.0 },
 	{}, {}, {}, {}, {}, {}}, n_units = 2,
 	techs = {
 		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
@@ -642,9 +644,9 @@ greek :: civ{
 		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
 		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "stable"},
 		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
-		{cost = {100, 50, 0, 30}, research_at = "town_center", required_age = "stone", research_time = 20000, unlocks_bldg = "archery_range"},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "academy"},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 20000, unlocks_bldg = ""},
+		{cost = {100, 50, 0, 30}, research_at = "town_center", required_age = "stone", research_time = 20000, unlocks_bldg = ""},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "archery_range"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 20000, unlocks_bldg = "academy"},
 		{cost = {200, 0, 0, 150}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = ""},
 		{cost = {300, 0, 0, 200}, research_at = "academy", required_age = "bronze", requires = {"philosophy", "", "", ""}, n_req = 1, research_time = 25000, unlocks_bldg = ""},
 		{cost = {0, 50, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
@@ -660,9 +662,9 @@ persian :: civ{
 	wonder_id = "firetemple", wonder_cost = {4500, 4500, 4000, 2500},
 	excluded = {"", "", "", ""}, n_excluded = 0,
 	units = {
-		{id = "archer", cost = {70, 30, 0, 0}, health = 50, speed = 1.1, u_type = "ranged", tier = "neolithic"},
-		{id = "cavalry", cost = {110, 0, 0, 40}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze"},
-		{id = "heavy_cavalry", cost = {160, 0, 40, 70}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
+		{id = "archer", cost = {70, 30, 0, 0}, health = 50, speed = 1.1, u_type = "ranged", tier = "neolithic", attack = 6.0, range = 12.0 },
+		{id = "cavalry", cost = {110, 0, 0, 40}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze", attack = 12.0, range = 0.5 },
+		{id = "heavy_cavalry", cost = {160, 0, 40, 70}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron", attack = 18.0, range = 0.5 },
 	{}, {}, {}, {}, {}}, n_units = 3,
 	techs = {
 		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
@@ -688,7 +690,7 @@ yamato_civ :: civ{
 	wonder_id = "shrine", wonder_cost = {4500, 4500, 4000, 2500},
 	excluded = {"", "", "", ""}, n_excluded = 0,
 	units = {
-		{id = "samurai", cost = {100, 50, 0, 50}, health = 130, speed = 1.3, u_type = "infantry", tier = "bronze", train_at = "barracks"},
+		{id = "samurai", cost = {100, 50, 0, 50}, health = 130, speed = 1.3, u_type = "infantry", tier = "bronze", train_at = "barracks", attack = 14.0, range = 1.0 },
 		{id = "archer_ship", cost = {150, 150, 0, 50}, health = 200, speed = 1.5, u_type = "ranged"},
 	{}, {}, {}, {}, {}, {}}, n_units = 2,
 	techs = {
@@ -727,17 +729,17 @@ tech_ids : [4][14]string = {
 // ===========================================================================
 
 std_unit_defs : [11]unit_def = {
-	{id = "worker", cost = {50, 0, 0, 0}, health = 40, speed = 1, u_type = "worker"},
-	{id = "militia", cost = {50, 20, 0, 0}, health = 70, speed = 1.1, u_type = "infantry", tier = "stone"},
-	{id = "warrior", cost = {80, 0, 30, 20}, health = 120, speed = 1, u_type = "infantry", tier = "bronze"},
-	{id = "champion", cost = {150, 50, 50, 100}, health = 200, speed = 1.5, u_type = "infantry", tier = "iron"},
-	{id = "archer", cost = {60, 30, 0, 0}, health = 40, speed = 1, u_type = "ranged", tier = "neolithic"},
-	{id = "crossbowman", cost = {100, 40, 20, 30}, health = 60, speed = 0.9, u_type = "ranged", tier = "iron"},
-	{id = "elite_archer", cost = {150, 60, 30, 50}, health = 80, speed = 1.1, u_type = "ranged", tier = "iron"},
-	{id = "scout_cavalry", cost = {100, 0, 0, 30}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic"},
-	{id = "cavalry", cost = {120, 0, 0, 50}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze"},
-	{id = "heavy_cavalry", cost = {180, 0, 50, 80}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
-	{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1, u_type = "support", tier = "bronze"},
+	{id = "worker", cost = {50, 0, 0, 0}, health = 40, speed = 1, u_type = "worker", attack = 3.0, range = 0.5 },
+	{id = "militia", cost = {50, 20, 0, 0}, health = 70, speed = 1.1, u_type = "infantry", tier = "stone", attack = 7.0, range = 0.5 },
+	{id = "warrior", cost = {80, 0, 30, 20}, health = 120, speed = 1, u_type = "infantry", tier = "bronze", attack = 12.0, range = 0.5 },
+	{id = "champion", cost = {150, 50, 50, 100}, health = 200, speed = 1.5, u_type = "infantry", tier = "iron", attack = 18.0, range = 0.5 },
+	{id = "archer", cost = {60, 30, 0, 0}, health = 40, speed = 1, u_type = "ranged", tier = "neolithic", attack = 6.0, range = 12.0 },
+	{id = "crossbowman", cost = {100, 40, 20, 30}, health = 60, speed = 0.9, u_type = "ranged", tier = "iron", attack = 12.0, range = 13.5 },
+	{id = "elite_archer", cost = {150, 60, 30, 50}, health = 80, speed = 1.1, u_type = "ranged", tier = "iron", attack = 16.0, range = 15.0 },
+	{id = "scout_cavalry", cost = {100, 0, 0, 30}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic", attack = 8.0, range = 0.5 },
+	{id = "cavalry", cost = {120, 0, 0, 50}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze", attack = 12.0, range = 0.5 },
+	{id = "heavy_cavalry", cost = {180, 0, 50, 80}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron", attack = 18.0, range = 0.5 },
+	{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1, u_type = "support", tier = "bronze", attack = 3.0, range = 10.5 },
 }
 
 bldg_def :: struct {
@@ -1090,6 +1092,58 @@ arena_spawns :: proc(n: int) -> [][2]f64 {
 	return sp
 }
 
+
+// The recorder's Math.random (record.cjs): mulberry32 derived from the seed
+// string. Its ONLY consumer is the entity-id mint at every createUnit and
+// createBuilding — the mints are invisible until a rival entity is seen.
+mseed_init :: proc(st: ^u32, seed: string) {
+	a: u32 = 1779033703
+	for c in 0 ..< len(seed) {
+		a = a ~ u32(seed[c])
+		a *= u32(3432918353)
+	}
+	st^ = a
+}
+
+m_rand :: proc(st: ^u32) -> f64 {
+	st^ += u32(0x6D2B79F5)
+	y := u32(1) | st^
+	t := st^
+	t = t ~ (t >> 15)
+	t *= y
+	x := t ~ (t >> 7)
+	t = (t + (x * (u32(61) | t))) ~ t
+	return f64(t ~ (t >> 14)) / 4294967296.0
+}
+
+// Math.random().toString(36).substr(2, 9): V8's radix-36 digit loop —
+// multiply the fraction by 36, take each integer digit, until the f64
+// fraction hits exactly zero.
+base36_suffix :: proc(st: ^u32, out: []u8) -> int {
+	frac := m_rand(st)
+	n := 0
+	for frac > 0 && n < len(out) {
+		frac = frac * 36
+		d := f64(math.floor(frac))
+		if d < 10 {
+			out[n] = u8('0' + u8(d))
+		} else {
+			out[n] = u8('a' + u8(d - 10))
+		}
+		n += 1
+		frac = frac - d
+	}
+	return n
+}
+
+mint_entity :: proc(g: ^game_state, prefix: string) -> string {
+	digs: [9]u8
+	n := base36_suffix(&g.mseed, digs[:])
+	s := fmt.aprintf("%s%d_%s", prefix, int(g.match_ms), string(digs[:n]))
+	return s
+}
+
+
 // ===========================================================================
 // The state — one seat at a time. A seat owns its resources, its units, its
 // Town Center, the nodes it has seen, the map it has explored, and the keyed
@@ -1105,6 +1159,26 @@ unit_state :: struct {
 	x, z: f64,
 	health: f64,
 	u_type: string, // 'worker' or the military id ('militia', 'archer', ...)
+	max_health: f64,
+	pid: string, // the minted entity id: 'unit_<ms>_<9 base-36 digits>'
+	is_attacking: bool,
+	atk_kind: int, // 0 none, 1 enemy unit, 2 enemy building
+	atk_seat, atk_idx: int,
+	attack_move: bool,
+	am_x, am_z: f64,
+	attack_timer: f64,
+	acquire_timer: f64,
+	acquire_set: bool,
+	self_defense: bool, sd_x, sd_z: f64,
+	last_dmg_time: f64,
+	ldk_kind, ldk_seat, ldk_idx: int, // _lastAttacker
+	def_at: f64, def_none: bool, // _defense: did anything answer this hit
+	dead_counted: bool, // recordBattleLoss fired once
+	// the retaliation ladder (_origTarget/_retalQueue): refs are stable
+	// because dead entities keep their slot
+	orig_kind, orig_seat, orig_idx: int,
+	rt_kind, rt_seat, rt_idx: [8]int, // _retalQueue, head first
+	n_rt: int,
 	// --- the match engine's worker fields (js/game.js updateWorkerTasks) ---
 	task: int, // TASK_*: the worker state machine's current job
 	is_moving: bool,
@@ -1144,6 +1218,11 @@ bldg_state :: struct {
 	regen_timer: f64,
 	assigned_worker: int, // this seat's unit index; -1 none
 	is_wonder: bool,
+	pid: string, // the minted entity id
+	last_dmg_time: f64,
+		def_at: f64, def_none: bool, // _defense: did anything answer this hit
+ldk_kind, ldk_seat, ldk_idx: int, // _lastAttacker
+	dead_counted: bool, // recordBattleLoss fired once
 }
 
 // The worker task vocabulary (js/game.js's task strings, as an int).
@@ -1238,8 +1317,32 @@ seat :: struct {
 	last_counts: [4]int, // _lastNodeCounts: {food,wood,stone,gold}
 	dry_told: [2048]bool, // _dryNodesTold: once per node
 	explore_timer: int, // _exploreTimer
+	army_scout_x, army_scout_z: f64, // _armyScoutTarget
+	army_scout_set: bool,
+	army_scout_ticks: int, // stuck counter
+	army_scout_best: f64, // the closest the centroid got this leg
+	army_scout_best_set: bool,
+	army_scout_angle: f64, // the golden-angle fallback
+	army_scout_radius: f64,
+	army_leg_skip: [49]bool, // tiles given up on, row-major 7x7
+	um_pid: [512]string, // _unitMemory: remembered enemy units
+	um_oseat: [512]int,
+	um_oidx: [128]int,
+	um_type: [512]string,
+	um_x, um_z, um_sx, um_sz: [512]f64,
+	um_has_sx: [512]bool,
+	um_hp: [512]int,
+	um_carry: [512]string, // "" none, else the load
+	um_at, um_t: [512]f64,
+	um_visible, um_located, um_spot_hidden: [512]bool,
+	um_sighted: [512]bool, // sighted this state build
+	n_um: int,
 	scout_angle: f64, // _scoutAngle
 	scout_radius: f64, // _scoutRadius
+	eb_known: [4][32]bool, // _knownEnemyBuildings, per enemy seat per building
+	eb_hp: [4][32]int, // _enemyBuildingSeen snapshot: healthPct at last sight
+	eb_x, eb_z: [4][32]f64, // snapshot position (rounded at write time)
+	eb_has: [4][32]bool,
 }
 
 // One timeline sample: {t, p: {aiId: {f,w,s,o,pw,al}}} (game.js sampleTimeline).
@@ -1257,6 +1360,21 @@ tl_mark :: struct {
 }
 
 game_state :: struct {
+	contact_idx: int, // detectContacts' rotating seat
+	// the battle ledger (game.js _battles): engagements opened by damage
+	b_x, b_z: [8]f64,
+	b_started, b_last: [8]f64,
+	b_nsides: [8]int,
+	b_side_seat: [8][8]int, // sides in first-damage order
+	b_inv_type: [8][8][16]string, // per side: involved attacker types
+	b_inv_n: [8][8]int,
+	b_inv_ids: [8][8][16][64]string, // the unique attacker pids
+	b_inv_nids: [8][8][16]int,
+	b_inv_du, b_inv_db, b_inv_he: [8][8][16]f64,
+	b_lost_type: [8][8][16]string, // per side: lost victims by type
+	b_lost_n: [8][8][16]int,
+	b_nlost: [8][8]int,
+	n_battles: int,
 	seats: [4]seat,
 	terrain: terrain,
 	match_ms: f64, // clock.matchMs: the MATCH clock, 25 per sim step at the recorder's 2x
@@ -1267,7 +1385,9 @@ game_state :: struct {
 	map_seed: string, // the corpus seed (header/map fields)
 	map_diff: string, // the corpus difficulty (header/map fields)
 	discovery_timer: f64, // the 4 Hz beat's own accumulator (mgr.update)
-	world_rng: keyed_rng, // the game's one rng (seed 'golden'): 'world:*' draws
+world_rng: keyed_rng, // the game's one rng (seed 'golden'): 'world:*' draws
+	mseed: u32, // the recorder's mulberry32 Math.random: entity-id mints
+	autodef_timer: f64,
 	// --- the match timeline (game.js resetTimeline/sampleTimeline) ---
 	tl_t0: f64,
 	tl_last: f64,
@@ -1280,17 +1400,28 @@ game_state :: struct {
 	// --- the position rules' global creation-ordered lists ---
 	gl_u: [4 * MAX_UNITS]gl_ref,
 	n_gl_u: int,
-	gl_b: [4 * MAX_BLDGS]gl_ref,
+	gl_b: [4 * MAX_BLDGS]gl_ref, // every building in creation order
 	n_gl_b: int,
+	cb_x, cb_z: [4][MAX_UNITS]f64, // the combat pass's start positions: the
+	// reference's visionSources cache is stamped once per sub-step, so the
+	// acquire scan's sight test reads the PRE-COMBAT positions
 }
 
 // resetTimeline: a fresh match — population 0, the match clock 0, the
 // discovery beat 0, no pending events, the exploration bitmaps blank.
-setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
+setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int, seed_for_rng: string) {
 	g.match_ms = 0
 	g.sim_ms = 0
 	g.step_no = 0
-	g.world_rng.seed = "golden"
+	g.world_rng.seed = seed_for_rng
+	mseed_init(&g.mseed, seed_for_rng)
+	// burn the reference recorder's load-time draws: its terrain preview
+	// scatters through the same mulberry32 Math.random that entity mints
+	// use, and the first entity mint lands on draw 2548 (0-based, measured
+	// against the golden corpus: TC0's suffix is that draw's)
+	for burn in 0 ..< 2548 {
+		_ = m_rand(&g.mseed)
+	}
 	g.discovery_timer = 0
 	g.total_minutes = 1
 	g.tl_t0 = 0
@@ -1328,6 +1459,7 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
 		// reference's seat owns its buildings as a list (ai.buildings); the
 		// TC is created first (startGame), then houses/farms append as built.
 		s.bldgs[0] = s.home
+		s.bldgs[0].pid = mint_entity(g, "building_")
 		s.n_bldgs = 1
 		g.gl_b[g.n_gl_b] = gl_ref{seat = i32(i), idx = 0}
 		g.n_gl_b += 1
@@ -1338,7 +1470,8 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
 		for w in 0 ..< 3 {
 			x := sp[0] + (krng_draw(&s.k, key) - 0.5) * 10
 			z := sp[1] + (krng_draw(&s.k, key) - 0.5) * 10
-			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, speed = 1.0, u_type = "worker", harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
+			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, max_health = 40, speed = 1.0, u_type = "worker", harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
+			s.units[w].pid = mint_entity(g, "unit_")
 			s.n_units += 1
 			g.gl_u[g.n_gl_u] = gl_ref{seat = i32(i), idx = i32(w)}
 			g.n_gl_u += 1
@@ -1366,7 +1499,7 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
 // A unit sees 15 (22.5 cavalry, which the arena has not fielded yet); a
 // finished Town Center sees 40 (buildingVision).
 unit_vision :: proc(u: ^unit_state) -> f64 {
-	return 15
+	return u.u_type == "cavalry" ? 22.5 : 15
 }
 building_vision :: proc(b: ^bldg_state) -> f64 {
 	// construction sites grant no vision; completed wonders are landmarks
@@ -1453,22 +1586,21 @@ eyes_file :: proc(es: ^eye_set, x: f64, z: f64, r: f64) {
 	half := f64(400)
 	CELL := f64(20)
 	G := 40
-	cx := cast(int)(math.floor((x + half) / CELL))
-	cz := cast(int)(math.floor((z + half) / CELL))
-	cx = min(G-1, max(0, cx))
-	cz = min(G-1, max(0, cz))
-	cr := cast(int)(math.ceil(r / CELL))
+	// buildVisionTest's file(): the eye lands in EVERY cell of the exact
+	// bounding square floor((pos-r-1)/CELL) .. floor((pos+r+1)/CELL) — no
+	// centre-distance filter; the query's own test decides. Cell coords
+	// here are shifted +20 into the 0..40 grid this engine indexes.
+	gx0 := cast(int)(math.floor((x - r - 1.0) / CELL)) + 20
+	gx1 := cast(int)(math.floor((x + r + 1.0) / CELL)) + 20
+	gz0 := cast(int)(math.floor((z - r - 1.0) / CELL)) + 20
+	gz1 := cast(int)(math.floor((z + r + 1.0) / CELL)) + 20
 	idx := es.n
-	for dz := -cr; dz <= cr; dz += 1 {
-		for dx := -cr; dx <= cr; dx += 1 {
-			gx := cx + dx
-			gz := cz + dz
+	for gz := gz0; gz <= gz1; gz += 1 {
+		for gx := gx0; gx <= gx1; gx += 1 {
 			if gx < 0 || gx >= G || gz < 0 || gz >= G {
 				continue
 			}
-			wx := (f64(gx) + 0.5)*CELL - half
-			wz := (f64(gz) + 0.5)*CELL - half
-			if m_hypot(wx - x, wz - z) <= r {
+			{
 				c := gz*G + gx
 				es.next[idx] = es.cells[c]
 				es.cells[c] = cast(i32)(idx)
@@ -1482,7 +1614,7 @@ eyes_file :: proc(es: ^eye_set, x: f64, z: f64, r: f64) {
 // buildVisionTest (harness mode): the eye grid is rebuilt each step, because
 // the eyes move. Eyes are filed where their RANGE reaches, not where they
 // stand: an eye in a cell sees up to one ring of cells around it.
-make_eyes :: proc(s: ^seat) -> eye_set {
+make_eyes_mode :: proc(s: ^seat, harness: bool) -> eye_set {
 	es: eye_set
 	for c in 0 ..< 1600 {
 		es.cells[c] = -1
@@ -1501,38 +1633,32 @@ make_eyes :: proc(s: ^seat) -> eye_set {
 			eyes_file(&es, u.x, u.z, unit_vision(u))
 		}
 	}
-	b := &s.home
-	if b.health > 0 {
-		eyes_file(&es, b.x, b.z, building_vision(b))
+	for i in 0 ..< s.n_bldgs {
+		b := &s.bldgs[i]
+		// buildVisionTest: harness mode skips construction plots (they see
+		// nothing), non-harness only the dead
+		if b.health > 0 && (!harness || !b.under_constr) {
+			eyes_file(&es, b.x, b.z, building_vision(b))
+		}
 	}
 	return es
+}
+
+make_eyes :: proc(s: ^seat) -> eye_set {
+	return make_eyes_mode(s, true)
 }
 
 // The test itself: the point's cell and its one-cell ring, every eye in it.
 // Harness mode: a plain sqrt against the eye's own (rounded) position.
 see_test :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
-	G := 40
-	CELL := f64(20)
-	half := f64(400)
-	cx := cast(int)(math.floor((x + half) / CELL))
-	cz := cast(int)(math.floor((z + half) / CELL))
-	cx = min(G-1, max(0, cx))
-	cz = min(G-1, max(0, cz))
-	for dz := -1; dz <= 1; dz += 1 {
-		for dx := -1; dx <= 1; dx += 1 {
-			gx := cx + dx
-			gz := cz + dz
-			if gx < 0 || gx >= G || gz < 0 || gz >= G {
-				continue
-			}
-			for idx := es.cells[gz*G + gx]; idx != -1; idx = es.next[idx] {
-				e := &es.eyes[idx]
-				dx2 := e.x - x
-				dz2 := e.z - z
-				if math.sqrt(dx2*dx2 + dz2*dz2) <= e.r {
-					return true
-				}
-			}
+	// per-eye distance, the reference's exact test (the cell grid only ever
+	// indexed candidates; the scan is small and removes the indirection)
+	for e in 0 ..< es.n {
+		ev := &es.eyes[e]
+		dx := ev.x - x
+		dz := ev.z - z
+		if math.sqrt(dx*dx + dz*dz) <= ev.r {
+			return true
 		}
 	}
 	return false
@@ -1543,26 +1669,14 @@ see_test :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
 // Math.sqrt — the two differ by an ulp at the vision boundary, and a node
 // on the line is known to the brain before the state's own pass sees it.
 see_test_brain :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
-	G := 40
-	CELL := f64(20)
-	half := f64(400)
-	cx := cast(int)(math.floor((x + half) / CELL))
-	cz := cast(int)(math.floor((z + half) / CELL))
-	cx = min(G-1, max(0, cx))
-	cz = min(G-1, max(0, cz))
-	for dz := -1; dz <= 1; dz += 1 {
-		for dx := -1; dx <= 1; dx += 1 {
-			gx := cx + dx
-			gz := cz + dz
-			if gx < 0 || gx >= G || gz < 0 || gz >= G {
-				continue
-			}
-			for idx := es.cells[gz*G + gx]; idx != -1; idx = es.next[idx] {
-				e := &es.eyes[idx]
-				if m_hypot(e.x - x, e.z - z) <= e.r {
-					return true
-				}
-			}
+	// per-eye distance, the reference's exact test (the cell grid only ever
+	// indexed candidates; the scan is small and removes the indirection)
+	for e in 0 ..< es.n {
+		ev := &es.eyes[e]
+		dx := ev.x - x
+		dz := ev.z - z
+		if m_hypot(dx, dz) <= ev.r {
+			return true
 		}
 	}
 	return false
@@ -1572,7 +1686,7 @@ see_test_brain :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
 // The enemy-building memory it also fills stays dormant — no contacts in
 // this corpus.
 brain_discovery :: proc(g: ^game_state, s: ^seat) {
-	es := make_eyes(s)
+	es := make_eyes_mode(s, false)
 	for i in 0 ..< g.terrain.n_nodes {
 		if s.known[i] != 0 {
 			continue
@@ -1581,6 +1695,22 @@ brain_discovery :: proc(g: ^game_state, s: ^seat) {
 		if see_test_brain(&es, n.x, n.z) {
 			s.known[i] = 1
 		}
+	}
+	// updateRivalContacts: first contact with a rival gates the opponents
+	// footer's army/building counts (game.js 4660)
+	for oi in 0 ..< g.n_seats {
+		if oi == s.ci || s.met[oi] { continue }
+		o := &g.seats[oi]
+		spotted := false
+		for i in 0 ..< o.n_units {
+			if o.units[i].health > 0 && see_test_brain(&es, o.units[i].x, o.units[i].z) { spotted = true; break }
+		}
+		if !spotted {
+			for i in 0 ..< o.n_bldgs {
+				if o.bldgs[i].health > 0 && see_test_brain(&es, o.bldgs[i].x, o.bldgs[i].z) { spotted = true; break }
+			}
+		}
+		if spotted { s.met[oi] = true }
 	}
 }
 
@@ -1940,13 +2070,13 @@ nearby_node :: struct {
 }
 
 obs_scratch :: struct {
-	by: [4][200]nearby_node,
+	by: [4][2048]nearby_node,
 	n_by: [4]int,
 	// the nearby map: insertion-ordered, keyed by the rounded "x,z" pair; a
 	// later set with the same key replaces the value in place (Map semantics)
 	key_x: [200]i32,
 	key_z: [200]i32,
-	val: [200]nearby_node,
+	val: [2048]nearby_node,
 	n_key: int,
 }
 
@@ -2463,6 +2593,167 @@ observe_line :: proc(o: ^obs) {
 	//      spectator path never applies the civ bonus, so the recorder's
 	//      seats carry 1.0/1.0 — the stream's bonuses are {} for every
 	//      seat, unlike the arena fixture (whose seats got the bonus).
+	// ---- battles (openai-ai.js 3200): the seat's engagements, newest
+	//      three; sides carry involved-by-type and losses; a quiet fight
+	//      reports endedSecondsAgo instead of staying "ongoing".
+	//      Omitted in peacetime: no battle with this seat, no key.
+	has_battle := false
+	start2 := g.n_battles - 3
+	if start2 < 0 { start2 = 0 }
+	for bi in start2 ..< g.n_battles {
+		for si2 := 0; si2 < g.b_nsides[bi]; si2 += 1 {
+			if g.b_side_seat[bi][si2] == s.ci { has_battle = true; break }
+		}
+	}
+	if has_battle {
+	j_key(j, "battles")
+	j_arr(j)
+	n_shown := 0
+	start := g.n_battles - 3
+	if start < 0 { start = 0 }
+	for bi in start ..< g.n_battles {
+		own := -1
+		for si2 := 0; si2 < g.b_nsides[bi]; si2 += 1 {
+			if g.b_side_seat[bi][si2] == s.ci { own = si2; break }
+		}
+		if own < 0 { continue }
+		j_obj(j)
+		j_key(j, "at")
+		j_arr(j)
+		j_int(j, cast(i64)(math.floor(g.b_x[bi] + 0.5)))
+		j_int(j, cast(i64)(math.floor(g.b_z[bi] + 0.5)))
+		j_end_arr(j)
+		ongoing := g.sim_ms - g.b_last[bi] < 10000
+		j_key(j, "ongoing")
+		j_bool(j, ongoing)
+		if !ongoing {
+			j_key(j, "endedSecondsAgo")
+			j_int(j, i64(math.max(0, math.round((g.sim_ms - g.b_last[bi]) / 2000))))
+		}
+		j_key(j, "secondsElapsed")
+		j_int(j, i64(math.max(0, math.round((g.b_last[bi] - g.b_started[bi]) / 2000))))
+		j_key(j, "you")
+		j_obj(j)
+		j_key(j, "involved")
+		j_obj(j)
+		for ii in 0 ..< g.b_inv_n[bi][own] {
+			j_key(j, g.b_inv_type[bi][own][ii])
+			j_obj(j)
+			j_key(j, "n")
+			j_int(j, i64(g.b_inv_nids[bi][own][ii]))
+			if g.b_inv_du[bi][own][ii] > 0 {
+				j_key(j, "dmgUnits")
+				j_int(j, i64(math.round(g.b_inv_du[bi][own][ii])))
+			}
+			if g.b_inv_db[bi][own][ii] > 0 {
+				j_key(j, "dmgBuildings")
+				j_int(j, i64(math.round(g.b_inv_db[bi][own][ii])))
+			}
+			if g.b_inv_he[bi][own][ii] > 0 {
+				j_key(j, "healed")
+				j_int(j, i64(math.round(g.b_inv_he[bi][own][ii])))
+			}
+			j_end_obj(j)
+		}
+		j_end_obj(j)
+		j_key(j, "lost")
+		j_obj(j)
+		for li in 0 ..< g.b_nlost[bi][own] {
+			j_key(j, g.b_lost_type[bi][own][li])
+			j_int(j, i64(g.b_lost_n[bi][own][li]))
+		}
+		j_end_obj(j)
+		j_end_obj(j) // you
+		j_key(j, "enemy")
+		j_arr(j)
+		for si2 := 0; si2 < g.b_nsides[bi]; si2 += 1 {
+			foe := g.b_side_seat[bi][si2]
+			if foe == s.ci { continue }
+			j_obj(j)
+			j_key(j, "owner")
+			j_str(j, fmt.aprintf("%s-%d", civs[foe].id, foe + 1))
+			j_key(j, "involved")
+			j_obj(j)
+			for ii in 0 ..< g.b_inv_n[bi][si2] {
+				j_key(j, g.b_inv_type[bi][si2][ii])
+				j_obj(j)
+				j_key(j, "n")
+				j_int(j, i64(g.b_inv_nids[bi][si2][ii]))
+				if g.b_inv_du[bi][si2][ii] > 0 {
+					j_key(j, "dmgUnits")
+					j_int(j, i64(math.round(g.b_inv_du[bi][si2][ii])))
+				}
+				if g.b_inv_db[bi][si2][ii] > 0 {
+					j_key(j, "dmgBuildings")
+					j_int(j, i64(math.round(g.b_inv_db[bi][si2][ii])))
+				}
+				if g.b_inv_he[bi][si2][ii] > 0 {
+					j_key(j, "healed")
+					j_int(j, i64(math.round(g.b_inv_he[bi][si2][ii])))
+				}
+				j_end_obj(j)
+			}
+			j_end_obj(j)
+			j_key(j, "lost")
+			j_obj(j)
+			for li in 0 ..< g.b_nlost[bi][si2] {
+				j_key(j, g.b_lost_type[bi][si2][li])
+				j_int(j, i64(g.b_lost_n[bi][si2][li]))
+			}
+			j_end_obj(j)
+			j_end_obj(j)
+		}
+		j_end_arr(j)
+		j_end_obj(j)
+		_ = n_shown
+	}
+	j_end_arr(j)
+	}
+
+	// ---- ordersInProgress (openai-ai.js 3120): the seat's running
+	//      marches — units with an attack-move and no live target, grouped
+	//      by order token (the rule brain mints no tokens: one group).
+	//      Omitted when nothing is marching.
+	n_rows := 0
+	row_n, row_eta := 0, 0
+	row_sx, row_sz := f64(0), f64(0)
+	for i in 0 ..< s.n_units {
+		u := &s.units[i]
+		if u.health <= 0 { continue }
+		in_contact := u.is_attacking && u.atk_kind != 0 && ref_alive(g, u.atk_kind, u.atk_seat, u.atk_idx)
+		if !u.attack_move || in_contact { continue }
+		n_rows += 1
+		row_n += 1
+		row_sx += u.am_x
+		row_sz += u.am_z
+		d := m_hypot(u.x - u.am_x, u.z - u.am_z)
+		sp := u.speed * 3
+		eta := f64(1)
+		if sp > 0 {
+			eta = math.ceil((d / sp) * 1000 / 1000 / 2)
+			if eta < 1 { eta = 1 }
+		}
+		if eta > f64(row_eta) { row_eta = int(eta) }
+	}
+	if n_rows > 0 {
+		j_key(j, "ordersInProgress")
+		j_arr(j)
+		j_obj(j)
+		j_key(j, "order")
+		j_str(j, "attack_target")
+		j_key(j, "to")
+		j_arr(j)
+		j_int(j, cast(i64)(math.floor(row_sx/f64(row_n) + 0.5)))
+		j_int(j, cast(i64)(math.floor(row_sz/f64(row_n) + 0.5)))
+		j_end_arr(j)
+		j_key(j, "units")
+		j_int(j, i64(row_n))
+		j_key(j, "secondsRemaining")
+		j_int(j, i64(row_eta))
+		j_end_obj(j)
+		j_end_arr(j)
+	}
+
 	j_key(j, "bonuses")
 	j_obj(j)
 	if s.harvest_bonus != 1.0 {
@@ -2768,11 +3059,10 @@ observe_line :: proc(o: ^obs) {
 	}
 	j_end_arr(j)
 
-	// ---- enemyBuildings: the other seats' buildings, only those in sight
-	//      under the step's batched test (the same one discovery uses).
-	//      (updateEnemyBuildingDiscovery keeps a per-seat memory of what has
-	//      ever been seen; at turn 1 no seat's vision reaches another's
-	//      306-unit spawn, so the list is the empty one.)
+	// ---- enemyBuildings (openai-ai.js 3498): every enemy building seen
+	//      now (refreshing the last-seen snapshot) or remembered from an
+	//      earlier one; a spot seen empty drops the memory, as does a
+		//      building this seat's own units razed or a defeated owner.
 	eyes := make_eyes(s)
 	j_key(j, "enemyBuildings")
 	j_arr(j)
@@ -2780,18 +3070,41 @@ observe_line :: proc(o: ^obs) {
 		if i == s.ci {
 			continue
 		}
-		e := &g.seats[i].home
-		if e.health > 0 && see_test(&eyes, e.x, e.z) {
+		e := &g.seats[i]
+		for bi in 0 ..< e.n_bldgs {
+			b := &e.bldgs[bi]
+			if b.health <= 0 {
+				s.eb_known[i][bi] = false
+				continue
+			}
+			seen_now := b.is_wonder || see_test(&eyes, b.x, b.z)
+			if seen_now {
+				s.eb_known[i][bi] = true
+				s.eb_has[i][bi] = true
+				s.eb_hp[i][bi] = int(math.round(b.health / b.max_health * 100))
+				s.eb_x[i][bi] = b.x
+				s.eb_z[i][bi] = b.z
+			}
+			if !seen_now && !s.eb_known[i][bi] {
+				continue
+			}
 			j_obj(j)
+			j_key(j, "id")
+			j_str(j, b.pid)
 			j_key(j, "type")
-			j_str(j, e.id)
+			j_str(j, b.id)
 			j_key(j, "x")
-			j_int(j, cast(i64)(math.floor((e.x) + 0.5)))
+			j_int(j, cast(i64)(math.floor((seen_now ? b.x : s.eb_x[i][bi]) + 0.5)))
 			j_key(j, "z")
-			j_int(j, cast(i64)(math.floor((e.z) + 0.5)))
+			j_int(j, cast(i64)(math.floor((seen_now ? b.z : s.eb_z[i][bi]) + 0.5)))
+			j_key(j, "owner")
+			j_str(j, fmt.aprintf("%s-%d", civs[i].id, i + 1))
 			j_key(j, "healthPct")
-			j_int(j, cast(i64)(math.floor((e.health/e.max_health*100) + 0.5)))
+			j_int(j, i64(s.eb_hp[i][bi]))
+			j_key(j, "visible")
+			j_bool(j, seen_now)
 			j_end_obj(j)
+			s.eb_known[i][bi] = true // listed: still known
 		}
 	}
 	j_end_arr(j)
@@ -2806,13 +3119,28 @@ observe_line :: proc(o: ^obs) {
 			j_key(j, "id")
 			j_int(j, i64(u.handle))
 			j_key(j, "type")
-			j_str(j, "worker")
+			j_str(j, u.u_type)
 			j_key(j, "x")
 			j_int(j, cast(i64)(math.floor((u.x) + 0.5)))
 			j_key(j, "z")
 			j_int(j, cast(i64)(math.floor((u.z) + 0.5)))
 			j_key(j, "healthPct")
-			j_int(j, cast(i64)(math.floor((u.health/40*100) + 0.5)))
+			j_int(j, i64(math.round(u.health / u.max_health * 100)))
+			// non-workers carry an action: attacking when engaged, marching
+			// on an attack-move with no target in contact, else idle
+			if u.u_type != "worker" {
+				action := "idle"
+				if u.is_attacking {
+					in_contact := false
+					if u.atk_kind == 1 && u.atk_seat >= 0 && g.seats[u.atk_seat].units[u.atk_idx].health > 0 { in_contact = true }
+					if u.atk_kind == 2 && u.atk_seat >= 0 && g.seats[u.atk_seat].bldgs[u.atk_idx].health > 0 { in_contact = true }
+					action = (!in_contact && u.attack_move) ? "marching" : "attacking"
+				} else if u.is_moving {
+					action = "moving"
+				}
+				j_key(j, "action")
+				j_str(j, action)
+			}
 			j_end_obj(j)
 		}
 	}
@@ -2838,7 +3166,7 @@ observe_line :: proc(o: ^obs) {
 	wk_pool: [4]i64
 	for i in 0 ..< s.n_units {
 		u := &s.units[i]
-		if u.health <= 0 {
+		if u.health <= 0 || u.u_type != "worker" {
 			continue
 		}
 		wk_total += 1
@@ -2906,9 +3234,69 @@ observe_line :: proc(o: ^obs) {
 	j_int(j, wk_pool[3])
 	j_end_obj(j)
 
-	// ---- enemyUnits: none in sight, as with enemyBuildings.
+	// ---- enemyUnits: in sight first, then the most recently seen, located
+	// only — the rememberedUnits projection of the seat's memory.
 	j_key(j, "enemyUnits")
 	j_arr(j)
+	// order: visible first, then the most recent `at`; cap 50
+	order: [128]int
+	n_order := 0
+	for m in 0 ..< s.n_um {
+		if !s.um_located[m] { continue }
+		j := n_order
+		for j > 0 {
+			p := order[j-1]
+			// b before a: (b.visible - a.visible) || (b.at - a.at) > 0
+			b_vis := s.um_visible[m] ? 1 : 0
+			a_vis := s.um_visible[p] ? 1 : 0
+			if b_vis > a_vis || (b_vis == a_vis && s.um_at[m] > s.um_at[p]) {
+				order[j] = order[j-1]
+				j -= 1
+				continue
+			}
+			break
+		}
+		order[j] = m
+		n_order += 1
+	}
+	shown := n_order
+	if shown > 50 { shown = 50 }
+	for k in 0 ..< shown {
+		m := order[k]
+		o := &g.seats[s.um_oseat[m]]
+		j_obj(j)
+		j_key(j, "id")
+		j_str(j, s.um_pid[m])
+		j_key(j, "type")
+		j_str(j, s.um_type[m])
+		j_key(j, "x")
+		j_int(j, i64(math.floor(s.um_x[m] + 0.5)))
+		j_key(j, "z")
+		j_int(j, i64(math.floor(s.um_z[m] + 0.5)))
+		j_key(j, "owner")
+		j_str(j, fmt.aprintf("%s-%d", civs[s.um_oseat[m]].id, s.um_oseat[m] + 1))
+		j_key(j, "healthPct")
+		j_int(j, i64(s.um_hp[m]))
+		if s.um_carry[m] != "" {
+			j_key(j, "carrying")
+			j_str(j, s.um_carry[m])
+		}
+		j_key(j, "visible")
+		j_bool(j, s.um_visible[m])
+		if !s.um_visible[m] {
+			j_key(j, "secondsAgo")
+			j_int(j, i64(math.max(0, math.round((g.sim_ms - s.um_at[m]) / 2000))))
+		}
+		moved := s.um_has_sx[m] && m_hypot(s.um_x[m] - s.um_sx[m], s.um_z[m] - s.um_sz[m]) >= 3
+		if moved {
+			j_key(j, "sightedAt")
+			j_arr(j)
+			j_int(j, i64(math.floor(s.um_sx[m] + 0.5)))
+			j_int(j, i64(math.floor(s.um_sz[m] + 0.5)))
+			j_end_arr(j)
+		}
+		j_end_obj(j)
+	}
 	j_end_arr(j)
 
 	// ---- research: the civ's tech tree as the seat may use it. The arena
@@ -3191,12 +3579,96 @@ observe_line :: proc(o: ^obs) {
 	j_end_arr(j)
 	j_end_obj(j) // buildings
 
-	// ---- threats: no one takes fire at one second — the under-attack scan
-	//      finds nothing; and no rival wonder exists, seen or not.
+	// ---- threats.underAttack (openai-ai.js 3924): the seat's buildings
+	//      then units, each hit within the last 6 s, with where the answer
+	//      came from and whether anything of ours answered
 	j_key(j, "threats")
 	j_obj(j)
 	j_key(j, "underAttack")
 	j_arr(j)
+	for pass in 0 ..< 2 {
+		count := s.n_bldgs if pass == 0 else s.n_units
+		for i in 0 ..< count {
+			last_dmg: f64
+			def_at := f64(0)
+			def_none := false
+			lseat, lidx, lkind := -1, -1, 0
+			if pass == 0 {
+				b := &s.bldgs[i]
+				last_dmg = b.last_dmg_time
+				def_at, def_none = b.def_at, b.def_none
+				lseat, lidx, lkind = b.ldk_seat, b.ldk_idx, b.ldk_kind
+			} else {
+				u := &s.units[i]
+				last_dmg = u.last_dmg_time
+				def_at, def_none = u.def_at, u.def_none
+				lseat, lidx, lkind = u.ldk_seat, u.ldk_idx, u.ldk_kind
+			}
+			if last_dmg <= 0 || g.sim_ms - last_dmg > 6000 { continue }
+			// scanHit skips the dead
+			if (pass == 0 && s.bldgs[i].health <= 0) || (pass == 1 && s.units[i].health <= 0) { continue }
+			j_obj(j)
+			j_key(j, "kind")
+			j_str(j, pass == 0 ? "building" : "unit")
+			if pass == 0 {
+				b := &s.bldgs[i]
+				j_key(j, "type")
+				j_str(j, b.id)
+				j_key(j, "x")
+				j_int(j, cast(i64)(math.floor(b.x + 0.5)))
+				j_key(j, "z")
+				j_int(j, cast(i64)(math.floor(b.z + 0.5)))
+				j_key(j, "healthPct")
+				j_int(j, i64(math.round(b.health / b.max_health * 100)))
+			} else {
+				u := &s.units[i]
+				j_key(j, "type")
+				j_str(j, u.u_type)
+				j_key(j, "x")
+				j_int(j, cast(i64)(math.floor(u.x + 0.5)))
+				j_key(j, "z")
+				j_int(j, cast(i64)(math.floor(u.z + 0.5)))
+				j_key(j, "healthPct")
+				j_int(j, i64(math.round(u.health / u.max_health * 100)))
+			}
+			j_key(j, "attackerAt")
+			// the reference logs the attacker's position whatever its health:
+			// a dead attacker still says who struck the blow
+			atk_valid := lkind != 0 && lseat >= 0
+			if atk_valid {
+				atk_seat := &g.seats[lseat]
+				if lkind == 1 {
+					atk_valid = lidx < atk_seat.n_units
+				} else {
+					atk_valid = lidx < atk_seat.n_bldgs
+				}
+			}
+			if atk_valid {
+				atk_seat := &g.seats[lseat]
+				j_obj(j)
+				j_key(j, "x")
+				if lkind == 1 {
+					j_int(j, cast(i64)(math.floor(atk_seat.units[lidx].x + 0.5)))
+					j_key(j, "z")
+					j_int(j, cast(i64)(math.floor(atk_seat.units[lidx].z + 0.5)))
+				} else {
+					j_int(j, cast(i64)(math.floor(atk_seat.bldgs[lidx].x + 0.5)))
+					j_key(j, "z")
+					j_int(j, cast(i64)(math.floor(atk_seat.bldgs[lidx].z + 0.5)))
+				}
+				j_key(j, "owner")
+				j_str(j, fmt.aprintf("%s-%d", civs[lseat].id, lseat + 1))
+				j_end_obj(j)
+			} else {
+				j_raw(j, "null")
+			}
+			if def_at > 0 && g.sim_ms - def_at <= 6000 && def_none {
+				j_key(j, "noDefenders")
+				j_bool(j, true)
+			}
+			j_end_obj(j)
+		}
+	}
 	j_end_arr(j)
 	j_key(j, "enemyWonders")
 	j_arr(j)
@@ -3227,9 +3699,58 @@ observe_line :: proc(o: ^obs) {
 		j_key(j, "age")
 		j_str(j, "stone")
 		j_key(j, "discovered")
-		j_bool(j, false)
+		j_bool(j, s.met[oci])
 		j_key(j, "defeated")
 		j_bool(j, seat_eliminated(&g.seats[oci]))
+		if s.met[oci] {
+			// the scouting reward: the rival's live counts and what this seat
+		// has seen of them and not seen die, by type, located or not
+			n_alive_opp := 0
+			for u2 in 0 ..< g.seats[oci].n_units {
+				if g.seats[oci].units[u2].health > 0 { n_alive_opp += 1 }
+			}
+			j_key(j, "population")
+			j_int(j, i64(n_alive_opp))
+			j_key(j, "buildings")
+			j_int(j, i64(g.seats[oci].n_bldgs))
+			counts: [8]string
+			cnums: [8]int
+			n_counts := 0
+			newest, oldest := -i64(1), i64(-1)
+			for m in 0 ..< s.n_um {
+				if s.um_oseat[m] != oci { continue }
+				k := -1
+				for c in 0 ..< n_counts {
+					if counts[c] == s.um_type[m] { k = c; break }
+				}
+				if k < 0 && n_counts < 8 {
+					k = n_counts
+					counts[k] = s.um_type[m]
+					cnums[k] = 0
+					n_counts += 1
+				}
+				if k >= 0 { cnums[k] += 1 }
+				a := i64(math.max(0, math.round((g.sim_ms - s.um_at[m]) / 2000)))
+				if newest < 0 || a < newest { newest = a }
+				if a > oldest { oldest = a }
+			}
+			if n_counts > 0 {
+				j_key(j, "seenAlive")
+				j_obj(j)
+				for c in 0 ..< n_counts {
+					j_key(j, counts[c])
+					j_int(j, i64(cnums[c]))
+				}
+				j_end_obj(j)
+				j_key(j, "seenSecondsAgo")
+				j_obj(j)
+				j_key(j, "newest")
+				j_int(j, newest)
+				j_key(j, "oldest")
+				j_int(j, oldest)
+				j_end_obj(j)
+			}
+		}
 		j_end_obj(j)
 	}
 	j_end_arr(j)
@@ -3318,7 +3839,7 @@ mark_exploration :: proc(s: ^seat, size: f64) -> int {
 // buildings; the harness one skips construction sites — the arena has
 // neither, so make_eyes serves both.)
 update_rival_contacts :: proc(g: ^game_state, viewer: ^seat) {
-	es := make_eyes(viewer)
+	es := make_eyes_mode(viewer, false)
 	for oi in 0 ..< 4 {
 		if oi == viewer.ci || viewer.met[oi] {
 			continue
@@ -3327,17 +3848,186 @@ update_rival_contacts :: proc(g: ^game_state, viewer: ^seat) {
 		spotted := false
 		for i in 0 ..< o.n_units {
 			u := &o.units[i]
-			if u.health > 0 && see_test(&es, u.x, u.z) {
+			if u.health > 0 && see_test_brain(&es, u.x, u.z) {
 				spotted = true
 			}
 		}
-		if o.home.health > 0 && see_test(&es, o.home.x, o.home.z) {
-			spotted = true
+		for i in 0 ..< o.n_bldgs {
+			b := &o.bldgs[i]
+			if b.health > 0 && see_test_brain(&es, b.x, b.z) {
+				spotted = true
+			}
 		}
 		if spotted {
 			viewer.met[oi] = true
 		}
 	}
+}
+
+// noteUnitSighting (game.js 4400): one record per remembered unit, on the
+// map for the seat's whole run. hypot_note: the caller's sight test decides
+// whether the call happens at all.
+note_sighting :: proc(v: ^seat, oseat: int, u: ^unit_state, now: f64, sighted: []string, n_sighted: ^int) {
+	found := -1
+	for m in 0 ..< v.n_um {
+		if v.um_pid[m] == u.pid { found = m; break }
+	}
+	if found < 0 {
+		found = v.n_um
+		v.n_um += 1
+		v.um_pid[found] = u.pid
+		v.um_oseat[found] = oseat
+		v.um_type[found] = u.u_type
+		v.um_carry[found] = ""
+		v.um_has_sx[found] = false
+		v.um_located[found] = false
+		v.um_visible[found] = false
+	}
+	m := found
+	if !v.um_visible[m] {
+		v.um_sx[m] = u.x
+		v.um_sz[m] = u.z
+		v.um_has_sx[m] = true
+	}
+	v.um_x[m] = u.x
+	v.um_z[m] = u.z
+	v.um_hp[m] = int(math.round(u.health / u.max_health * 100))
+	if u.u_type == "worker" {
+		v.um_carry[m] = (u.carrying && u.harvest_amt > 0) ? res_type_name[u.carry_type] : "empty"
+	}
+	v.um_at[m] = now
+	v.um_t[m] = now
+	v.um_visible[m] = true
+	v.um_located[m] = true
+	v.um_spot_hidden[m] = false
+	if n_sighted^ < len(sighted) {
+		sighted[n_sighted^] = u.pid
+		n_sighted^ += 1
+	}
+}
+
+// sweepUnitMemory (game.js 4414): everything not in the sighted set goes
+// dark; a record's unit is found by pid (indexes move); dead records drop
+// per the killer rule; the spot-covered rule relocates.
+sweep_memory :: proc(g: ^game_state, v: ^seat, now: f64, es: ^eye_set, sighted: []string, n_sighted: int) {
+	// sweepUnitMemory: everything not sighted goes dark; a record's unit
+	// found by pid (indexes move), dead records drop per the killer rule
+	m := 0
+	for m < v.n_um {
+		sighted_here := false
+		for k in 0 ..< n_sighted {
+			if sighted[k] == v.um_pid[m] { sighted_here = true; break }
+		}
+		if sighted_here { m += 1; continue }
+		oseat := v.um_oseat[m]
+		if seat_eliminated(&g.seats[oseat]) {
+			v.n_um -= 1
+			v.um_pid[m] = v.um_pid[v.n_um]
+			v.um_oseat[m] = v.um_oseat[v.n_um]
+			v.um_type[m] = v.um_type[v.n_um]
+			v.um_x[m] = v.um_x[v.n_um]
+			v.um_z[m] = v.um_z[v.n_um]
+			v.um_sx[m] = v.um_sx[v.n_um]
+			v.um_sz[m] = v.um_sz[v.n_um]
+			v.um_has_sx[m] = v.um_has_sx[v.n_um]
+			v.um_hp[m] = v.um_hp[v.n_um]
+			v.um_carry[m] = v.um_carry[v.n_um]
+			v.um_at[m] = v.um_at[v.n_um]
+			v.um_t[m] = v.um_t[v.n_um]
+			v.um_visible[m] = v.um_visible[v.n_um]
+			v.um_located[m] = v.um_located[v.n_um]
+			v.um_spot_hidden[m] = v.um_spot_hidden[v.n_um]
+			continue
+		}
+		u: ^unit_state = nil
+		o := &g.seats[oseat]
+		for i in 0 ..< o.n_units {
+			if o.units[i].pid == v.um_pid[m] { u = &o.units[i]; break }
+		}
+		spot_seen := u != nil && see_test(es, v.um_x[m], v.um_z[m])
+		if u != nil && u.health <= 0 {
+			killed_by_v := u.ldk_kind == 1 && u.ldk_seat == v.ci
+			if (v.um_visible[m] && spot_seen) || killed_by_v {
+				v.n_um -= 1
+				v.um_pid[m] = v.um_pid[v.n_um]
+				v.um_oseat[m] = v.um_oseat[v.n_um]
+				v.um_type[m] = v.um_type[v.n_um]
+				v.um_x[m] = v.um_x[v.n_um]
+				v.um_z[m] = v.um_z[v.n_um]
+				v.um_sx[m] = v.um_sx[v.n_um]
+				v.um_sz[m] = v.um_sz[v.n_um]
+				v.um_has_sx[m] = v.um_has_sx[v.n_um]
+				v.um_hp[m] = v.um_hp[v.n_um]
+				v.um_carry[m] = v.um_carry[v.n_um]
+				v.um_at[m] = v.um_at[v.n_um]
+				v.um_t[m] = v.um_t[v.n_um]
+				v.um_visible[m] = v.um_visible[v.n_um]
+				v.um_located[m] = v.um_located[v.n_um]
+				v.um_spot_hidden[m] = v.um_spot_hidden[v.n_um]
+				continue
+			}
+		}
+		v.um_visible[m] = false
+		v.um_t[m] = now
+		if !spot_seen {
+			v.um_spot_hidden[m] = true
+		} else if v.um_spot_hidden[m] {
+			v.um_located[m] = false
+		}
+		m += 1
+	}
+	// the 400-record cap: oldest at drops first (game.js 4462)
+	for v.n_um > 400 {
+		oldest := 0
+		for m in 1 ..< v.n_um {
+			if v.um_at[m] < v.um_at[oldest] { oldest = m }
+		}
+		v.n_um -= 1
+		v.um_pid[oldest] = v.um_pid[v.n_um]
+		v.um_oseat[oldest] = v.um_oseat[v.n_um]
+		v.um_type[oldest] = v.um_type[v.n_um]
+		v.um_x[oldest] = v.um_x[v.n_um]
+		v.um_z[oldest] = v.um_z[v.n_um]
+		v.um_sx[oldest] = v.um_sx[v.n_um]
+		v.um_sz[oldest] = v.um_sz[v.n_um]
+		v.um_has_sx[oldest] = v.um_has_sx[v.n_um]
+		v.um_hp[oldest] = v.um_hp[v.n_um]
+		v.um_carry[oldest] = v.um_carry[v.n_um]
+		v.um_at[oldest] = v.um_at[v.n_um]
+		v.um_t[oldest] = v.um_t[v.n_um]
+		v.um_visible[oldest] = v.um_visible[v.n_um]
+		v.um_located[oldest] = v.um_located[v.n_um]
+		v.um_spot_hidden[oldest] = v.um_spot_hidden[v.n_um]
+	}
+}
+
+// detectContacts (game.js 4497): one seat per beat, rotating; notes the
+// rival units its sight covers now (noteUnitSighting) and sweeps the rest
+// of the unit memory dark (sweepUnitMemory, the harness sqrt test).
+detect_contacts :: proc(g: ^game_state) {
+	g.contact_idx = (g.contact_idx + 1) % g.n_seats
+	vi := g.contact_idx
+	viewer := &g.seats[vi]
+	now := g.sim_ms
+	es := make_eyes(viewer)
+	// sighted pids this look, by mark order
+	sighted: [512]string
+	n_sighted := 0
+	for oi in 0 ..< g.n_seats {
+		if oi == vi { continue }
+		o := &g.seats[oi]
+		for i in 0 ..< o.n_units {
+			u := &o.units[i]
+			if u.health <= 0 { continue }
+			// detectContacts notes on the hypot test (d <= src.r) — the
+			// sweep's sqrt test below can still disagree at the boundary
+			if !see_test_brain(&es, u.x, u.z) { continue }
+			note_sighting(viewer, oi, u, now, sighted[:], &n_sighted)
+		}
+	}
+	// sweepUnitMemory: everything not sighted goes dark (the harness test)
+	sweep_memory(g, viewer, now, &es, sighted[:], n_sighted)
+
 }
 
 // WarPositionRules.apply (port 851): separation and building clearance at
@@ -3450,7 +4140,35 @@ war_position_rules :: proc(g: ^game_state, dt: f64) {
 // sight reaches another spawn, and no rival building exists to see); it
 // becomes required at the first gate with contacts, like the b1041/42
 // enemy-unit memory the handover already scopes there.
+// updateEnemyBuildingDiscovery (openai-ai.js 9839): every step, each seat
+// learns enemy buildings its harness vision covers; a dead one drops.
+update_enemy_building_discovery :: proc(g: ^game_state) {
+	for si in 0 ..< g.n_seats {
+		s := &g.seats[si]
+		es := make_eyes(s)
+		for oi in 0 ..< g.n_seats {
+			if oi == si { continue }
+			o := &g.seats[oi]
+			for bi in 0 ..< o.n_bldgs {
+				b := &o.bldgs[bi]
+				if b.health <= 0 {
+					s.eb_known[oi][bi] = false
+					continue
+				}
+				if b.is_wonder || see_test(&es, b.x, b.z) {
+					s.eb_known[oi][bi] = true
+					s.eb_has[oi][bi] = true
+					s.eb_hp[oi][bi] = int(math.round(b.health / b.max_health * 100))
+					s.eb_x[oi][bi] = b.x
+					s.eb_z[oi][bi] = b.z
+				}
+			}
+		}
+	}
+}
+
 observe_step :: proc(g: ^game_state) {
+	update_enemy_building_discovery(g)
 	for si in 0 ..< 4 {
 		s := &g.seats[si]
 		es := make_eyes(s)
@@ -3615,6 +4333,9 @@ assign_workers_to_harvest :: proc(g: ^game_state, s: ^seat) {
 	want := needed_resource_type(s)
 	for u in 0 ..< s.n_units {
 		w := &s.units[u]
+		if w.u_type != "worker" {
+			continue
+		}
 		if w.health <= 0 {
 			continue
 		}
@@ -3652,7 +4373,7 @@ rebalance_workers :: proc(g: ^game_state, s: ^seat) {
 	}
 	for u in 0 ..< s.n_units {
 		w := &s.units[u]
-		if w.health <= 0 || (w.task != TASK_HARVESTING && w.task != TASK_CARRYING) {
+		if w.health <= 0 || w.u_type != "worker" || (w.task != TASK_HARVESTING && w.task != TASK_CARRYING) {
 			continue
 		}
 		if w.harvest_node < 0 {
@@ -3722,6 +4443,9 @@ rebalance_workers :: proc(g: ^game_state, s: ^seat) {
 manage_workers :: proc(g: ^game_state, s: ^seat) {
 	for u in 0 ..< s.n_units {
 		w := &s.units[u]
+		if w.u_type != "worker" {
+			continue
+		}
 		if w.health <= 0 || w.task != TASK_SCOUTING {
 			continue
 		}
@@ -3776,10 +4500,10 @@ get_unit_to_train :: proc(s: ^seat, b: ^bldg_state) -> string {
 			ladder = {"champion", "warrior", "militia"}
 			n_ladder = 3
 		} else if s.cur_age == 1 {
-			ladder = {"warrior", "militia"}
+			ladder = {"warrior", "militia", ""}
 			n_ladder = 2
 		} else {
-			ladder = {"militia"}
+			ladder = {"militia", "", ""}
 			n_ladder = 1
 		}
 	} else if b.id == "archery_range" {
@@ -3787,7 +4511,7 @@ get_unit_to_train :: proc(s: ^seat, b: ^bldg_state) -> string {
 			ladder = {"elite_archer", "crossbowman", "archer"}
 			n_ladder = 3
 		} else {
-			ladder = {"archer"}
+			ladder = {"archer", "", ""}
 			n_ladder = 1
 		}
 	} else if b.id == "stable" {
@@ -3795,10 +4519,10 @@ get_unit_to_train :: proc(s: ^seat, b: ^bldg_state) -> string {
 			ladder = {"heavy_cavalry", "cavalry", "scout_cavalry"}
 			n_ladder = 3
 		} else if s.cur_age == 1 {
-			ladder = {"cavalry", "scout_cavalry"}
+			ladder = {"cavalry", "scout_cavalry", ""}
 			n_ladder = 2
 		} else {
-			ladder = {"scout_cavalry"}
+			ladder = {"scout_cavalry", "", ""}
 			n_ladder = 1
 		}
 	} else {
@@ -3963,7 +4687,7 @@ pick_builder :: proc(g: ^game_state, s: ^seat, site: ^bldg_state) -> (int, bool)
 	best_cost := m_inf
 	for u in 0 ..< s.n_units {
 		w := &s.units[u]
-		if w.health <= 0 {
+		if w.health <= 0 || w.u_type != "worker" {
 			continue
 		}
 		// workerPullRank: builders/fighters Infinity (skip); repairers 5;
@@ -4133,6 +4857,7 @@ build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
 		bd.max_food = 300
 	}
 	s.n_bldgs += 1
+	bd.pid = mint_entity(g, "building_")
 	g.gl_b[g.n_gl_b] = gl_ref{seat = i32(s.ci), idx = i32(s.n_bldgs - 1)}
 	g.n_gl_b += 1
 	pick, pulled := pick_builder(g, s, bd)
@@ -4221,6 +4946,902 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 	explore_map(g, s)
 }
 
+
+// updateUnitMovement (game.js 5504): the NON-worker mover — plain moves,
+// attack marches. Workers walk in updateWorkerTasks. No formation in this
+// corpus: the aim is the slot itself, the straight line.
+update_unit_movement :: proc(g: ^game_state, dt: f64) {
+	for gi in 0 ..< g.n_gl_u {
+		r := g.gl_u[gi]
+		s := &g.seats[r.seat]
+		u := &s.units[r.idx]
+		if u.u_type == "worker" || u.health <= 0 {
+			continue
+		}
+		if u.is_attacking {
+			continue // attacking units belong to updateCombat
+		}
+		if u.is_moving {
+			dx := u.target_x - u.x
+			dz := u.target_z - u.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			if dist > 0.5 {
+				move_speed := u.speed * dt / 1000 * 3
+				u.x += (dx / dist) * move_speed
+				u.z += (dz / dist) * move_speed
+			} else {
+				// arrived: snap onto the exact point and stop
+				u.is_moving = false
+				u.x = u.target_x
+				u.z = u.target_z
+			}
+		}
+	}
+}
+
+// threatPriority (game.js 1828): wonder 3, Town Center 2, other building 1, unit 0.
+threat_priority :: proc(kind: int, seat: ^seat, idx: int) -> int {
+	if kind == 2 {
+		bd := &seat.bldgs[idx]
+		if bd.is_wonder { return 3 }
+		if bd.id == "town_center" { return 2 }
+		return 1
+	}
+	return 0
+}
+
+// findNearestEnemyInRange (game.js 1747), requireSight mode: the nearest
+// living enemy unit or building within `rng` that the owner's sight covers.
+// Sight is the same rule everywhere: living units plus finished buildings,
+// dx*dx+dz*dz <= r*r (canOwnerSee).
+find_nearest_enemy_target :: proc(g: ^game_state, s: ^seat, ux, uz: f64, rng: f64, include_buildings: bool) -> (int, int, int) {
+	// kind 1 unit (seat, idx); kind 2 building. The scan walks the GLOBAL
+	// creation order (renderer.units, then renderer.buildings) — a tie or
+	// a near-tie resolves by creation order, not by seat.
+	best_kind, best_seat, best_idx := 0, -1, -1
+	min_d := rng
+	for gi in 0 ..< g.n_gl_u {
+		r := g.gl_u[gi]
+		e := &g.seats[r.seat].units[r.idx]
+		if r.seat == i32(s.ci) { continue }
+		if e.health <= 0 { continue }
+		if !can_owner_see(g, s, e.x, e.z) { continue }
+		d := m_hypot(e.x - ux, e.z - uz)
+		if d < min_d { min_d = d; best_kind, best_seat, best_idx = 1, int(r.seat), int(r.idx) }
+	}
+	if include_buildings {
+		for bi in 0 ..< g.n_gl_b {
+			r := g.gl_b[bi]
+			b := &g.seats[r.seat].bldgs[r.idx]
+			if r.seat == i32(s.ci) { continue }
+			if b.health <= 0 { continue }
+			if !can_owner_see(g, s, b.x, b.z) { continue }
+			d := m_hypot(b.x - ux, b.z - uz)
+			if d < min_d { min_d = d; best_kind, best_seat, best_idx = 2, int(r.seat), int(r.idx) }
+		}
+	}
+	return best_kind, best_seat, best_idx
+}
+
+can_owner_see :: proc(g: ^game_state, s: ^seat, x, z: f64) -> bool {
+	// the sight sources are the combat pass's START positions: the
+	// reference caches visionSources once per sub-step
+	for i in 0 ..< s.n_units {
+		u := &s.units[i]
+		if u.health <= 0 { continue }
+		r := unit_vision(u)
+		dx := g.cb_x[s.ci][i] - x
+		dz := g.cb_z[s.ci][i] - z
+		if dx*dx + dz*dz <= r*r { return true }
+	}
+	for i in 0 ..< s.n_bldgs {
+		b := &s.bldgs[i]
+		if b.health <= 0 { continue }
+		r := building_vision(b)
+		if r <= 0 { continue }
+		dx := b.x - x
+		dz := b.z - z
+		if dx*dx + dz*dz <= r*r { return true }
+	}
+	return false
+}
+
+// combatMultiplier (game.js 1314): the hard-counter/soft-inverse table,
+// buildings at infantry 1.5 / others 0.5.
+combat_multiplier :: proc(atk_type: string, tgt_kind: int, tgt_type: string) -> f64 {
+	if tgt_kind == 2 {
+		if atk_type == "infantry" { return 1.5 }
+		if atk_type == "cavalry" { return 1.0 }
+		return 0.5
+	}
+	if atk_type == "cavalry" && tgt_type == "ranged" { return 1.5 }
+	if atk_type == "ranged" && tgt_type == "infantry" { return 1.5 }
+	if atk_type == "infantry" && tgt_type == "cavalry" { return 1.5 }
+	if atk_type == "ranged" && tgt_type == "cavalry" { return 0.75 }
+	if atk_type == "infantry" && tgt_type == "ranged" { return 0.75 }
+	if atk_type == "cavalry" && tgt_type == "infantry" { return 0.75 }
+	return 1.0
+}
+
+// updateCombat (game.js 1448): the military state machine — target
+// acquisition on the 150 ms scan, the attack-move march, the 1 s swing,
+// the counter-multiplier damage. No kills land in this corpus; the
+// death/retaliation ladder stays unwritten beyond the target-gone drop.
+// The battle ledger (game.js 2540-2650): engagements opened by damage,
+// merged by place, kept 120 s past the last blow.
+battle_entry :: proc(g: ^game_state, bi: int, owner_seat: int, type_id: string) -> (int, int) {
+	// find or create the side, then the involved entry; returns (side, inv)
+	si := -1
+	for i in 0 ..< g.b_nsides[bi] {
+		if g.b_side_seat[bi][i] == owner_seat { si = i; break }
+	}
+	if si < 0 && g.b_nsides[bi] < 8 {
+		si = g.b_nsides[bi]
+		g.b_side_seat[bi][si] = owner_seat
+		g.b_nsides[bi] += 1
+	}
+	if si < 0 { return -1, -1 }
+	for i in 0 ..< g.b_inv_n[bi][si] {
+		if g.b_inv_type[bi][si][i] == type_id { return si, i }
+	}
+	if g.b_inv_n[bi][si] < 16 {
+		ii := g.b_inv_n[bi][si]
+		g.b_inv_type[bi][si][ii] = type_id
+		g.b_inv_nids[bi][si][ii] = 0
+		g.b_inv_du[bi][si][ii] = 0
+		g.b_inv_db[bi][si][ii] = 0
+		g.b_inv_he[bi][si][ii] = 0
+		g.b_inv_n[bi][si] += 1
+		return si, ii
+	}
+	return -1, -1
+}
+
+battle_add_id :: proc(g: ^game_state, bi, si, ii: int, pid: string) {
+	for i in 0 ..< g.b_inv_nids[bi][si][ii] {
+		if g.b_inv_ids[bi][si][ii][i] == pid { return }
+	}
+	if g.b_inv_nids[bi][si][ii] < 64 {
+		g.b_inv_ids[bi][si][ii][g.b_inv_nids[bi][si][ii]] = pid
+		g.b_inv_nids[bi][si][ii] += 1
+	}
+}
+
+battle_merge_into :: proc(g: ^game_state, dst, src: int) {
+	if dst == src { return }
+	if g.b_started[src] < g.b_started[dst] { g.b_started[dst] = g.b_started[src] }
+	if g.b_last[src] > g.b_last[dst] { g.b_last[dst] = g.b_last[src] }
+	for ss in 0 ..< g.b_nsides[src] {
+		oseat := g.b_side_seat[src][ss]
+		dsi := -1
+		for i in 0 ..< g.b_nsides[dst] {
+			if g.b_side_seat[dst][i] == oseat { dsi = i; break }
+		}
+		if dsi < 0 && g.b_nsides[dst] < 8 {
+			dsi = g.b_nsides[dst]
+			g.b_side_seat[dst][dsi] = oseat
+			g.b_nsides[dst] += 1
+		}
+		if dsi < 0 { continue }
+		for ii in 0 ..< g.b_inv_n[src][ss] {
+			ty := g.b_inv_type[src][ss][ii]
+			dii := -1
+			for i in 0 ..< g.b_inv_n[dst][dsi] {
+				if g.b_inv_type[dst][dsi][i] == ty { dii = i; break }
+			}
+			if dii < 0 && g.b_inv_n[dst][dsi] < 16 {
+				dii = g.b_inv_n[dst][dsi]
+				g.b_inv_type[dst][dsi][dii] = ty
+				g.b_inv_du[dst][dsi][dii] = 0
+				g.b_inv_db[dst][dsi][dii] = 0
+				g.b_inv_he[dst][dsi][dii] = 0
+				g.b_inv_n[dst][dsi] += 1
+			}
+			if dii < 0 { continue }
+			for k in 0 ..< g.b_inv_nids[src][ss][ii] {
+				battle_add_id(g, dst, dsi, dii, g.b_inv_ids[src][ss][ii][k])
+			}
+			g.b_inv_du[dst][dsi][dii] += g.b_inv_du[src][ss][ii]
+			g.b_inv_db[dst][dsi][dii] += g.b_inv_db[src][ss][ii]
+			g.b_inv_he[dst][dsi][dii] += g.b_inv_he[src][ss][ii]
+		}
+		for li in 0 ..< g.b_nlost[src][ss] {
+			ty := g.b_lost_type[src][ss][li]
+			dli := -1
+			for i in 0 ..< g.b_nlost[dst][dsi] {
+				if g.b_lost_type[dst][dsi][i] == ty { dli = i; break }
+			}
+			if dli < 0 && g.b_nlost[dst][dsi] < 16 {
+				dli = g.b_nlost[dst][dsi]
+				g.b_lost_type[dst][dsi][dli] = ty
+				g.b_nlost[dst][dsi] += 1
+			}
+			if dli >= 0 { g.b_lost_n[dst][dsi][dli] += g.b_lost_n[src][ss][li] }
+		}
+	}
+	g.b_nsides[src] = 0
+}
+
+battle_at :: proc(g: ^game_state, x, z: f64, open: bool) -> int {
+	now := g.sim_ms
+	// prune: keep battles touched within 120 s
+	n := 0
+	for i in 0 ..< g.n_battles {
+		if now - g.b_last[i] <= 120000 {
+			g.b_x[n] = g.b_x[i]
+			g.b_z[n] = g.b_z[i]
+			g.b_started[n] = g.b_started[i]
+			g.b_last[n] = g.b_last[i]
+			g.b_nsides[n] = g.b_nsides[i]
+			g.b_side_seat[n] = g.b_side_seat[i]
+			g.b_inv_n[n] = g.b_inv_n[i]
+			g.b_inv_type[n] = g.b_inv_type[i]
+			g.b_inv_nids[n] = g.b_inv_nids[i]
+			g.b_inv_ids[n] = g.b_inv_ids[i]
+			g.b_inv_du[n] = g.b_inv_du[i]
+			g.b_inv_db[n] = g.b_inv_db[i]
+			g.b_inv_he[n] = g.b_inv_he[i]
+			g.b_lost_type[n] = g.b_lost_type[i]
+			g.b_lost_n[n] = g.b_lost_n[i]
+			g.b_nlost[n] = g.b_nlost[i]
+			n += 1
+		}
+	}
+	g.n_battles = n
+	// the near, still-open ones
+	near: [8]int
+	n_near := 0
+	for i in 0 ..< g.n_battles {
+		if now - g.b_last[i] <= 10000 && m_hypot(g.b_x[i] - x, g.b_z[i] - z) <= 90 {
+			near[n_near] = i
+			n_near += 1
+		}
+	}
+	if n_near == 0 {
+		if !open || g.n_battles >= 8 { return -1 }
+		bi := g.n_battles
+		g.b_x[bi], g.b_z[bi] = x, z
+		g.b_started[bi], g.b_last[bi] = now, now
+		g.b_nsides[bi] = 0
+		g.b_inv_n[bi] = [8]int{}
+		g.b_nlost[bi] = [8]int{}
+		g.n_battles += 1
+		return bi
+	}
+	b := near[0]
+	for i in 1 ..< n_near {
+		battle_merge_into(g, b, near[i])
+		// remove near[i] by compacting
+		for j := near[i]; j < g.n_battles - 1; j += 1 {
+			g.b_x[j] = g.b_x[j+1]
+			g.b_z[j] = g.b_z[j+1]
+			g.b_started[j] = g.b_started[j+1]
+			g.b_last[j] = g.b_last[j+1]
+			g.b_nsides[j] = g.b_nsides[j+1]
+			g.b_side_seat[j] = g.b_side_seat[j+1]
+			g.b_inv_n[j] = g.b_inv_n[j+1]
+			g.b_inv_type[j] = g.b_inv_type[j+1]
+			g.b_inv_nids[j] = g.b_inv_nids[j+1]
+			g.b_inv_ids[j] = g.b_inv_ids[j+1]
+			g.b_inv_du[j] = g.b_inv_du[j+1]
+			g.b_inv_db[j] = g.b_inv_db[j+1]
+			g.b_inv_he[j] = g.b_inv_he[j+1]
+			g.b_lost_type[j] = g.b_lost_type[j+1]
+			g.b_lost_n[j] = g.b_lost_n[j+1]
+			g.b_nlost[j] = g.b_nlost[j+1]
+		}
+		g.n_battles -= 1
+		for k in 0 ..< n_near {
+			if near[k] > near[i] { near[k] -= 1 }
+		}
+	}
+	return b
+}
+
+record_battle_damage :: proc(g: ^game_state, aseat: int, atype: string, apid: string, tx, tz: f64, towner: int, t_is_building: bool, amount: f64) {
+	if amount <= 0 { return }
+	bi := battle_at(g, tx, tz, true)
+	if bi < 0 { return }
+	si, ii := battle_entry(g, bi, aseat, atype)
+	if si < 0 { return }
+	battle_add_id(g, bi, si, ii, apid)
+	if t_is_building {
+		g.b_inv_db[bi][si][ii] += amount
+	} else {
+		g.b_inv_du[bi][si][ii] += amount
+	}
+	g.b_last[bi] = g.sim_ms
+	g.b_x[bi] += (tx - g.b_x[bi]) * 0.05
+	g.b_z[bi] += (tz - g.b_z[bi]) * 0.05
+}
+
+record_battle_loss :: proc(g: ^game_state, towner: int, ttype: string, tx, tz: f64) {
+	bi := battle_at(g, tx, tz, false)
+	if bi < 0 { return }
+	si := -1
+	for i in 0 ..< g.b_nsides[bi] {
+		if g.b_side_seat[bi][i] == towner { si = i; break }
+	}
+	if si < 0 && g.b_nsides[bi] < 8 {
+		si = g.b_nsides[bi]
+		g.b_side_seat[bi][si] = towner
+		g.b_nsides[bi] += 1
+	}
+	if si < 0 { return }
+	for i in 0 ..< g.b_nlost[bi][si] {
+		if g.b_lost_type[bi][si][i] == ttype {
+			g.b_lost_n[bi][si][i] += 1
+			return
+		}
+	}
+	if g.b_nlost[bi][si] < 16 {
+		li := g.b_nlost[bi][si]
+		g.b_lost_type[bi][si][li] = ttype
+		g.b_lost_n[bi][si][li] = 1
+		g.b_nlost[bi][si] += 1
+	}
+}
+
+// target_ref helpers: (kind 0 none, 1 unit, 2 building)
+ref_alive :: proc(g: ^game_state, kind, seat, idx: int) -> bool {
+	if kind == 1 {
+		return seat >= 0 && g.seats[seat].units[idx].health > 0
+	}
+	if kind == 2 {
+		return seat >= 0 && g.seats[seat].bldgs[idx].health > 0
+	}
+	return false
+}
+
+ref_eq :: proc(k1, s1, i1, k2, s2, i2: int) -> bool {
+	return k1 == k2 && s1 == s2 && i1 == i2
+}
+
+// noteRetaliation (game.js 4395-ish): a fighting military unit that takes
+// damage from a third party queues the dealer; while it still pounds its
+// ORIGINAL target it switches to the first living dealer and pulls the
+// squad along. Workers resolve through self-defense instead; buildings
+// have no queue.
+note_retaliation :: proc(g: ^game_state, vseat, vidx: int, akind, aseat, aidx: int) {
+	v := &g.seats[vseat].units[vidx]
+	if v.u_type == "worker" { return } // self-defense handles workers
+	ud := unit_def_for(g.seats[vseat].ci, v.u_type)
+	if ud == nil || ud.u_type == "support" { return }
+	if !v.is_attacking || v.atk_kind == 0 { return }
+	if !ref_alive(g, akind, aseat, aidx) { return }
+	if ref_eq(v.atk_kind, v.atk_seat, v.atk_idx, akind, aseat, aidx) { return }
+	if v.orig_kind == 0 {
+		v.orig_kind, v.orig_seat, v.orig_idx = v.atk_kind, v.atk_seat, v.atk_idx
+	}
+	// push the dealer unless queued
+	q := false
+	for i in 0 ..< v.n_rt {
+		if ref_eq(v.rt_kind[i], v.rt_seat[i], v.rt_idx[i], akind, aseat, aidx) { q = true; break }
+	}
+	if !q && v.n_rt < 8 {
+		v.rt_kind[v.n_rt], v.rt_seat[v.n_rt], v.rt_idx[v.n_rt] = akind, aseat, aidx
+		v.n_rt += 1
+	}
+	if ref_eq(v.atk_kind, v.atk_seat, v.atk_idx, v.orig_kind, v.orig_seat, v.orig_idx) {
+		for i in 0 ..< v.n_rt {
+			if ref_alive(g, v.rt_kind[i], v.rt_seat[i], v.rt_idx[i]) {
+				v.atk_kind, v.atk_seat, v.atk_idx = v.rt_kind[i], v.rt_seat[i], v.rt_idx[i]
+				v.attack_timer = 0
+				spread_retaliation(g, vseat, vidx)
+				break
+			}
+		}
+	}
+}
+
+// spreadRetaliation: squadmates on the same original target (or on a DEAD
+// retaliation target from the same original) join the focus fire.
+spread_retaliation :: proc(g: ^game_state, vseat, vidx: int) {
+	v := &g.seats[vseat].units[vidx]
+	if v.orig_kind == 0 { return }
+	okind, oseat, oidx := v.orig_kind, v.orig_seat, v.orig_idx
+	for w_i in 0 ..< g.seats[vseat].n_units {
+		w := &g.seats[vseat].units[w_i]
+		if w_i == vidx { continue }
+		if w.u_type == "worker" { continue }
+		ud := unit_def_for(g.seats[vseat].ci, w.u_type)
+		if ud == nil || ud.u_type == "support" { continue }
+		if !w.is_attacking || w.atk_kind == 0 { continue }
+		if ref_eq(w.atk_kind, w.atk_seat, w.atk_idx, v.atk_kind, v.atk_seat, v.atk_idx) { continue }
+		on_orig := ref_eq(w.atk_kind, w.atk_seat, w.atk_idx, okind, oseat, oidx)
+		on_dead := ref_eq(w.orig_kind, w.orig_seat, w.orig_idx, okind, oseat, oidx) && \
+			w.atk_kind != 0 && !ref_alive(g, w.atk_kind, w.atk_seat, w.atk_idx)
+		if !on_orig && !on_dead { continue }
+		w.orig_kind, w.orig_seat, w.orig_idx = okind, oseat, oidx
+		// unshift the focus target: remove it elsewhere, put it at the head
+		qi := -1
+		for i in 0 ..< w.n_rt {
+			if ref_eq(w.rt_kind[i], w.rt_seat[i], w.rt_idx[i], v.atk_kind, v.atk_seat, v.atk_idx) { qi = i; break }
+		}
+		if qi > 0 {
+			for i in qi ..< w.n_rt - 1 {
+				w.rt_kind[i] = w.rt_kind[i+1]
+				w.rt_seat[i] = w.rt_seat[i+1]
+				w.rt_idx[i] = w.rt_idx[i+1]
+			}
+			w.n_rt -= 1
+			qi = -1
+		}
+		if qi != 0 {
+			for i in 0 ..< w.n_rt {
+				j := w.n_rt - i
+				if j >= 8 { continue }
+				w.rt_kind[j] = w.rt_kind[j-1]
+				w.rt_seat[j] = w.rt_seat[j-1]
+				w.rt_idx[j] = w.rt_idx[j-1]
+			}
+			if w.n_rt < 8 { w.n_rt += 1 }
+			w.rt_kind[0], w.rt_seat[0], w.rt_idx[0] = v.atk_kind, v.atk_seat, v.atk_idx
+		}
+		w.atk_kind, w.atk_seat, w.atk_idx = v.atk_kind, v.atk_seat, v.atk_idx
+	}
+}
+
+// nextRetaliationTarget: the head living dealer, else the original target,
+// else none (the queue empties as it is consumed).
+next_retaliation :: proc(g: ^game_state, s: ^seat, u: ^unit_state) -> (int, int, int) {
+	for u.n_rt > 0 {
+		k, si, ix := u.rt_kind[0], u.rt_seat[0], u.rt_idx[0]
+		if ref_alive(g, k, si, ix) {
+			u.atk_kind, u.atk_seat, u.atk_idx = k, si, ix
+			u.attack_timer = 0
+			vi := -1
+			for i in 0 ..< s.n_units {
+				if &s.units[i] == u { vi = i; break }
+			}
+			if vi >= 0 { spread_retaliation(g, s.ci, vi) }
+			return k, si, ix
+		}
+		for i in 0 ..< u.n_rt - 1 {
+			u.rt_kind[i] = u.rt_kind[i+1]
+			u.rt_seat[i] = u.rt_seat[i+1]
+			u.rt_idx[i] = u.rt_idx[i+1]
+		}
+		u.n_rt -= 1
+	}
+	if u.orig_kind != 0 && ref_alive(g, u.orig_kind, u.orig_seat, u.orig_idx) {
+		u.n_rt = 0
+		return u.orig_kind, u.orig_seat, u.orig_idx
+	}
+	u.n_rt = 0
+	u.orig_kind, u.orig_seat, u.orig_idx = 0, -1, -1
+	return 0, -1, -1
+}
+
+update_combat :: proc(g: ^game_state, dt: f64) {
+	for i in 0 ..< g.n_seats {
+		for u in 0 ..< g.seats[i].n_units {
+			g.cb_x[i][u] = g.seats[i].units[u].x
+			g.cb_z[i][u] = g.seats[i].units[u].z
+		}
+	}
+	for gi in 0 ..< g.n_gl_u {
+		r := g.gl_u[gi]
+		s := &g.seats[r.seat]
+		u := &s.units[r.idx]
+		if u.health <= 0 { continue }
+		if u.u_type == "worker" && !u.is_attacking { continue }
+		// self-defense: the leash ends the reflex
+		if u.self_defense {
+			alive := false
+			if u.atk_kind == 1 && u.atk_seat >= 0 {
+				te := &g.seats[u.atk_seat].units[u.atk_idx]
+				if te.health > 0 && m_hypot(te.x - u.sd_x, te.z - u.sd_z) <= 30 { alive = true }
+			}
+			if !alive {
+				u.self_defense = false
+				u.is_attacking = false
+				u.task = TASK_NONE
+				continue
+			}
+		}
+		// a dead target drops: the retaliation ladder decides what comes
+		// next (the next living dealer, then the original siege target),
+		// else the nearby re-acquire scan takes over
+		if u.is_attacking && u.atk_kind != 0 {
+			dead := false
+			if u.atk_kind == 1 && (u.atk_seat < 0 || g.seats[u.atk_seat].units[u.atk_idx].health <= 0) { dead = true }
+			if u.atk_kind == 2 && (u.atk_seat < 0 || g.seats[u.atk_seat].bldgs[u.atk_idx].health <= 0) { dead = true }
+			if dead {
+				k2, s2, i2 := next_retaliation(g, s, u)
+				if k2 != 0 {
+					u.atk_kind, u.atk_seat, u.atk_idx = k2, s2, i2
+				} else {
+					u.atk_kind = 0
+					u.acquire_timer = 150
+					u.acquire_set = true
+				}
+			}
+		}
+		if u.is_attacking && u.atk_kind == 0 {
+			// acquire on the 150 ms scan; between scans keep marching
+			if !u.acquire_set {
+				u.acquire_timer = 150
+				u.acquire_set = true
+			} else {
+				u.acquire_timer += dt
+			}
+			if u.acquire_timer >= 150 {
+				u.acquire_timer -= 150
+				aggro := f64(24)
+				if ud := unit_def_for(s.ci, u.u_type); ud != nil && ud.range > 1 {
+					aggro = ud.range + 20
+				}
+				k, os_, oi := find_nearest_enemy_target(g, s, u.x, u.z, aggro, true)
+				if k != 0 {
+					u.atk_kind, u.atk_seat, u.atk_idx = k, os_, oi
+				} else if !u.attack_move {
+					// plain attack, nothing in sight: stand down
+					u.is_attacking = false
+					u.atk_kind = 0
+					continue
+				}
+			}
+			if u.atk_kind == 0 && u.attack_move {
+				// march the attack-move leg
+				dx := u.am_x - u.x
+				dz := u.am_z - u.z
+				dist := math.sqrt(dx*dx + dz*dz)
+				if dist > 1.5 {
+					u.is_moving = true
+					move_speed := u.speed * dt / 1000 * 3
+					u.x += (dx / dist) * move_speed
+					u.z += (dz / dist) * move_speed
+				} else {
+					u.is_moving = false
+					u.attack_move = false
+					u.is_attacking = false
+				}
+				continue
+			}
+		}
+		if u.is_attacking && u.atk_kind != 0 {
+			// friendly-fire backstop (never fires from these orders)
+			tx, tz, trng_build := f64(0), f64(0), false
+			tgt_type := ""
+			if u.atk_kind == 1 {
+				te := &g.seats[u.atk_seat].units[u.atk_idx]
+				tx, tz, tgt_type = te.x, te.z, te.u_type
+			} else {
+				tb := &g.seats[u.atk_seat].bldgs[u.atk_idx]
+				tx, tz, trng_build = tb.x, tb.z, true
+				tgt_type = tb.id
+			}
+			dx := tx - u.x
+			 dz := tz - u.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			ud := unit_def_for(s.ci, u.u_type)
+			reach := f64(1.5)
+			if ud != nil && ud.range > 1 { reach = ud.range }
+			if trng_build { reach += 3.5 }
+			if ud != nil && ud.u_type == "ranged" { reach = math.min(reach, 18) }
+			if dist > reach + 1e-6 {
+				// close to the target; the formation aim is the straight line
+				u.is_moving = true
+				u.target_x = tx
+				u.target_z = tz
+				move_speed := u.speed * dt / 1000 * 3
+				if move_speed > dist - math.max(0, reach - 0.2) {
+					move_speed = dist - math.max(0, reach - 0.2)
+				}
+				u.x += (dx / dist) * move_speed
+				u.z += (dz / dist) * move_speed
+			}
+			// arrival and striking share a tick: a unit that just walked into
+			// range starts its swing clock this very step (game.js 1615)
+			if m_hypot(tx - u.x, tz - u.z) <= reach + 1e-6 {
+				// in range: the 1 s swing
+				u.is_moving = false
+				u.attack_timer += dt
+				if u.attack_timer >= 1000 {
+					u.attack_timer -= 1000
+					atk := f64(1)
+					if ud != nil { atk = ud.attack }
+					// combatMultiplier reads the attack CLASS (infantry /
+					// ranged / cavalry), not the unit id
+					a_cls := ud != nil ? ud.u_type : "worker"
+					dealt := atk * combat_multiplier(a_cls, u.atk_kind, tgt_type)
+					if u.atk_kind == 1 {
+						te := &g.seats[u.atk_seat].units[u.atk_idx]
+						te.health -= dealt
+						te.last_dmg_time = g.sim_ms
+						te.ldk_kind, te.ldk_seat, te.ldk_idx = 1, int(s.ci), int(r.idx)
+						record_battle_damage(g, int(s.ci), u.u_type, u.pid, te.x, te.z, u.atk_seat, false, dealt)
+						if te.health <= 0 && !te.dead_counted {
+							te.dead_counted = true
+							record_battle_loss(g, u.atk_seat, te.u_type, te.x, te.z)
+						} else if te.health > 0 {
+							note_retaliation(g, u.atk_seat, u.atk_idx, 1, int(s.ci), int(r.idx))
+						}
+					} else {
+						tb := &g.seats[u.atk_seat].bldgs[u.atk_idx]
+						tb.health -= dealt
+						tb.last_dmg_time = g.sim_ms
+						tb.ldk_kind, tb.ldk_seat, tb.ldk_idx = 1, int(s.ci), int(r.idx)
+						record_battle_damage(g, int(s.ci), u.u_type, u.pid, tb.x, tb.z, u.atk_seat, true, dealt)
+						if tb.health <= 0 && !tb.dead_counted {
+							tb.dead_counted = true
+							record_battle_loss(g, u.atk_seat, tb.id, tb.x, tb.z)
+						}
+					}
+					// the killer walks the same ladder as its squadmates
+					if u.atk_kind != 0 {
+						dead2 := false
+						if u.atk_kind == 1 && (u.atk_seat < 0 || g.seats[u.atk_seat].units[u.atk_idx].health <= 0) { dead2 = true }
+						if u.atk_kind == 2 && (u.atk_seat < 0 || g.seats[u.atk_seat].bldgs[u.atk_idx].health <= 0) { dead2 = true }
+						if dead2 {
+							k2, s2, i2 := next_retaliation(g, s, u)
+							if k2 != 0 {
+								u.atk_kind, u.atk_seat, u.atk_idx = k2, s2, i2
+							} else {
+								u.atk_kind = 0
+								u.acquire_timer = 150
+								u.acquire_set = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// updateAutoDefense (game.js 1839): damage-triggered, every ~600 ms. The
+// seat's idle military within the tiered reach engages the latest attacker;
+// workers are never drafted here.
+update_auto_defense :: proc(g: ^game_state, dt: f64) {
+	g.autodef_timer += dt
+	if g.autodef_timer < 600 { return }
+	g.autodef_timer -= 600
+	for si in 0 ..< g.n_seats {
+		s := &g.seats[si]
+		// recent threats: own entities hit in the last 4 s by a living enemy
+		t_kind, t_idx := 0, -1
+		t_pri := -1
+		atk_x, atk_z := f64(0), f64(0)
+		atk_seat, atk_idx, atk_kind := -1, -1, 0
+		found := false
+		for pass in 0 ..< 2 {
+			count := s.n_bldgs if pass == 0 else s.n_units
+			for i in 0 ..< count {
+				last_dmg: f64
+				lseat, lidx, lkind: int
+				ex, ez: f64
+				if pass == 0 {
+					last_dmg = s.bldgs[i].last_dmg_time
+					lseat, lidx, lkind = s.bldgs[i].ldk_seat, s.bldgs[i].ldk_idx, s.bldgs[i].ldk_kind
+					ex, ez = s.bldgs[i].x, s.bldgs[i].z
+				} else {
+					last_dmg = s.units[i].last_dmg_time
+					lseat, lidx, lkind = s.units[i].ldk_seat, s.units[i].ldk_idx, s.units[i].ldk_kind
+					ex, ez = s.units[i].x, s.units[i].z
+				}
+				if last_dmg <= 0 || g.sim_ms - last_dmg > 4000 { continue }
+				if lkind == 0 || lseat < 0 || lseat == si { continue }
+				atk := &g.seats[lseat]
+				alive := false
+				ax, az := f64(0), f64(0)
+				if lkind == 1 && lidx < atk.n_units {
+					ae := &atk.units[lidx]
+					if ae.health > 0 { alive = true; ax, az = ae.x, ae.z }
+				} else if lkind == 2 && lidx < atk.n_bldgs {
+					ab := &atk.bldgs[lidx]
+					if ab.health > 0 { alive = true; ax, az = ab.x, ab.z }
+				}
+				if !alive { continue }
+				pri := threat_priority(pass == 0 ? 2 : 1, s, i)
+				if !found || pri > t_pri {
+					found = true
+					t_kind, t_idx = pass == 0 ? 2 : 1, i
+					t_pri = pri
+					atk_x, atk_z = ax, az
+					atk_seat, atk_idx, atk_kind = lseat, lidx, lkind
+				}
+			}
+		}
+		if !found { continue }
+		// the tiered reach: wonder unlimited, TC x2, building x1.5, unit x1
+		reach := f64(90)
+		if t_kind == 2 {
+			bd := &s.bldgs[t_idx]
+			if bd.is_wonder {
+				reach = m_inf
+			} else if bd.id == "town_center" {
+				reach = 180
+			} else {
+				reach = 135
+			}
+		}
+		ex, ez := f64(0), f64(0)
+		if t_kind == 2 { ex, ez = s.bldgs[t_idx].x, s.bldgs[t_idx].z } else { ex, ez = s.units[t_idx].x, s.units[t_idx].z }
+		for i in 0 ..< s.n_units {
+			d := &s.units[i]
+			if d.u_type == "worker" || d.u_type == "support" || d.health <= 0 { continue }
+			if d.is_attacking { continue }
+			if m_hypot(d.x - ex, d.z - ez) > reach { continue }
+			d.task = TASK_NONE
+			d.is_attacking = true
+			d.atk_kind = atk_kind
+			d.atk_seat, d.atk_idx = atk_seat, atk_idx
+			d.attack_move = true
+			d.am_x, d.am_z = atk_x, atk_z
+			d.attack_timer = 0
+			d.is_moving = true
+			d.target_x, d.target_z = atk_x, atk_z
+		}
+	}
+}
+
+// commandArmy (ai.js 688): commit the army at attackAt strength. A visible
+// enemy wins the target; otherwise the army searches by exploration legs.
+command_army :: proc(g: ^game_state, s: ^seat) {
+	mil: [MAX_UNITS]int
+	n_mil := 0
+	for i in 0 ..< s.n_units {
+		u := &s.units[i]
+		if u.health > 0 && u.u_type != "worker" && u.u_type != "support" {
+			mil[n_mil] = i
+			n_mil += 1
+		}
+	}
+	if n_mil == 0 { return }
+	if n_mil < 8 { return } // attackAt, standard profile; no Wonder in this corpus
+
+	origin := &s.units[mil[0]]
+	// visibleEnemyTargets (ai.js 678): units the seat can SEE (hypot), plus
+	// every REMEMBERED enemy building (known alive) — the army marches on
+	// what scouting has learnt, not only on what is in sight right now
+	es := make_eyes_mode(s, false)
+	tk, ts, ti: [512]int
+	n_t := 0
+	for oi in 0 ..< g.n_seats {
+		if oi == s.ci { continue }
+		o := &g.seats[oi]
+		for i in 0 ..< o.n_units {
+			u := &o.units[i]
+			if u.health <= 0 { continue }
+			if !see_test_brain(&es, u.x, u.z) { continue }
+			tk[n_t], ts[n_t], ti[n_t] = 1, oi, i
+			n_t += 1
+		}
+		for i in 0 ..< o.n_bldgs {
+			b := &o.bldgs[i]
+			if b.health <= 0 || !b.is_wonder { continue }
+			if !see_test_brain(&es, b.x, b.z) { continue }
+			tk[n_t], ts[n_t], ti[n_t] = 2, oi, i
+			n_t += 1
+		}
+		for i in 0 ..< o.n_bldgs {
+			b := &o.bldgs[i]
+			if b.health <= 0 || !s.eb_known[oi][i] { continue }
+			tk[n_t], ts[n_t], ti[n_t] = 2, oi, i
+			n_t += 1
+		}
+	}
+	if n_t > 0 {
+		// the nearest target from the army's first unit (this.distance)
+		bk, bs, bi := 0, -1, -1
+		min_d := f64(m_inf)
+		for i in 0 ..< n_t {
+			ex, ez: f64
+			if tk[i] == 1 { ex, ez = g.seats[ts[i]].units[ti[i]].x, g.seats[ts[i]].units[ti[i]].z }
+			else { ex, ez = g.seats[ts[i]].bldgs[ti[i]].x, g.seats[ts[i]].bldgs[ti[i]].z }
+			d := m_hypot(ex-origin.x, ez-origin.z)
+			if d < min_d { min_d = d; bk, bs, bi = tk[i], ts[i], ti[i] }
+		}
+		for i in 0 ..< n_mil {
+			u := &s.units[mil[i]]
+			if u.is_attacking && u.atk_kind == bk && u.atk_seat == bs && u.atk_idx == bi { continue }
+			// an explicit order overrides the reflex: clear the ladder
+			u.n_rt = 0
+			u.orig_kind, u.orig_seat, u.orig_idx = 0, -1, -1
+			u.is_attacking = true
+			u.atk_kind, u.atk_seat, u.atk_idx = bk, bs, bi
+			u.attack_move = true
+			if bk == 1 { u.am_x, u.am_z = g.seats[bs].units[bi].x, g.seats[bs].units[bi].z }
+			else { u.am_x, u.am_z = g.seats[bs].bldgs[bi].x, g.seats[bs].bldgs[bi].z }
+			u.attack_timer = 0
+			u.is_moving = true
+			u.target_x, u.target_z = u.am_x, u.am_z
+		}
+		return
+	}
+	// no enemy: march by exploration legs
+	// centroid
+	cx, cz := f64(0), f64(0)
+	for i in 0 ..< n_mil { cx += s.units[mil[i]].x; cz += s.units[mil[i]].z }
+	cx /= f64(n_mil); cz /= f64(n_mil)
+	half := g.terrain.size / 2 - 60
+	left := m_inf
+	if s.army_scout_set {
+		dx := cx - s.army_scout_x
+		dz := cz - s.army_scout_z
+		left = m_hypot(dx, dz)
+	}
+	if s.army_scout_set && left < (s.army_scout_best_set ? s.army_scout_best : m_inf) - 5 {
+		s.army_scout_best = left
+		s.army_scout_best_set = true
+		s.army_scout_ticks = 0
+	} else {
+		s.army_scout_ticks += 1
+	}
+	arrived := s.army_scout_set && left < 25
+	stuck := s.army_scout_ticks > 6
+	new_leg := false
+	if !s.army_scout_set || arrived || stuck {
+		if stuck && !arrived && s.army_scout_set {
+			// the tile it gave up on: skipped (row-major 7x7 label)
+			tr := int(math.floor((s.army_scout_z + 400) / (800 / 7)))
+			tcc := int(math.floor((s.army_scout_x + 400) / (800 / 7)))
+			if tr < 0 { tr = 0 }
+			if tr > 6 { tr = 6 }
+			if tcc < 0 { tcc = 0 }
+			if tcc > 6 { tcc = 6 }
+			s.army_leg_skip[tr*7 + tcc] = true
+		}
+		// armyLeg: the least-explored tile, nearest of equals
+		T := 7
+		tile := g.terrain.size / f64(T)
+		bx, bz, bpct, bd := f64(0), f64(0), f64(0), f64(0)
+		bset := false
+		for rr in 0 ..< T {
+			for cc in 0 ..< T {
+				seen := 0
+				for z := rr*6; z < (rr+1)*6; z += 1 {
+					for x := cc*6; x < (cc+1)*6; x += 1 {
+						seen += cast(int)(s.explored[z*42 + x])
+					}
+				}
+				pct := math.round(f64(seen) / 36 * 100)
+				if pct >= 100 { continue }
+				if s.army_leg_skip[rr*7 + cc] { continue }
+				lx := math.max(-half, math.min(half, (f64(cc)+0.5)*tile - 400))
+				lz := math.max(-half, math.min(half, (f64(rr)+0.5)*tile - 400))
+				d := m_hypot(lx - cx, lz - cz)
+				if !bset || pct < bpct || (pct == bpct && d < bd) {
+					bset = true
+					bx, bz, bpct, bd = lx, lz, pct, d
+				}
+			}
+		}
+		if bset {
+			s.army_scout_x, s.army_scout_z = bx, bz
+			s.army_scout_set = true
+		} else {
+			// the golden-angle fallback
+			if s.army_scout_angle == 0 {
+				s.army_scout_angle = krng_draw(&s.k, fmt.aprintf("s%d:army-scout", s.ci)) * math.PI * 2
+			} else {
+				s.army_scout_angle += 2.399963
+			}
+			s.army_scout_radius = math.min(4*half, (s.army_scout_radius == 0 ? 90 : s.army_scout_radius) + 60)
+			s.army_scout_x = math.max(-half, math.min(half, s.bldgs[0].x + m_cos(s.army_scout_angle) * s.army_scout_radius))
+			s.army_scout_z = math.max(-half, math.min(half, s.bldgs[0].z + m_sin(s.army_scout_angle) * s.army_scout_radius))
+			s.army_scout_set = true
+		}
+		s.army_scout_ticks = 0
+		s.army_scout_best_set = false
+		new_leg = true
+	}
+	for i in 0 ..< n_mil {
+		u := &s.units[mil[i]]
+		if u.is_attacking && u.atk_kind != 0 { continue } // already engaged
+		if !new_leg && u.is_moving { continue }
+		u.is_attacking = true
+		u.atk_kind = 0
+		u.attack_move = true
+		u.am_x, u.am_z = s.army_scout_x, s.army_scout_z
+		u.is_moving = true
+		u.target_x, u.target_z = u.am_x, u.am_z
+	}
+}
+
+
 // ai.js advanceThink: each seat's think clock, 2000 ms sim.
 advance_think :: proc(g: ^game_state, s: ^seat, dt: f64) {
 	s.think_timer += dt
@@ -4244,23 +5865,42 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 	if s.explore_timer < interval {
 		return
 	}
+	// idleMilitary first, then a genuinely idle worker (ai.js exploreMap)
 	scout := -1
-	for u in 0 ..< s.n_units {
-		w := &s.units[u]
-		if w.health <= 0 {
-			continue
+	for pass in 0 ..< 2 {
+		for u in 0 ..< s.n_units {
+			w := &s.units[u]
+			if w.health <= 0 {
+				continue
+			}
+			if pass == 0 {
+				// idleMilitary: not a worker, not support, not attacking, idle
+				if w.u_type == "worker" || w.u_type == "support" {
+					continue
+				}
+				if w.is_moving || w.is_attacking {
+					continue
+				}
+			} else {
+				if w.u_type != "worker" {
+					continue
+				}
+				if w.is_moving || w.is_harvesting || w.carrying || w.is_building {
+					continue
+				}
+				if w.farm >= 0 {
+					continue
+				}
+				if w.task == TASK_BUILDING || w.task == TASK_FARM_WORK {
+					continue
+				}
+			}
+			scout = u
+			break
 		}
-		if w.is_moving || w.is_harvesting || w.carrying || w.is_building {
-			continue
+		if scout >= 0 {
+			break
 		}
-		if w.farm >= 0 {
-			continue
-		}
-		if w.task == TASK_BUILDING || w.task == TASK_FARM_WORK {
-			continue
-		}
-		scout = u
-		break
 	}
 	if scout < 0 {
 		return
@@ -4292,9 +5932,11 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 		tx = b0.x + m_cos(s.scout_angle) * s.scout_radius
 		tz = b0.z + m_sin(s.scout_angle) * s.scout_radius
 	}
-	// exploreMap: a worker scouts (task 'scouting'); military units scout with
-	// no task flag. This corpus fields workers only.
-	w.task = TASK_SCOUTING
+	// exploreMap: a worker scouts (task 'scouting'); military units scout
+	// with the task flag left alone (null)
+	if w.u_type == "worker" {
+		w.task = TASK_SCOUTING
+	}
 	w.is_moving = true
 	w.target_x = math.max(-half, math.min(half, tx))
 	w.target_z = math.max(-half, math.min(half, tz))
@@ -4432,7 +6074,7 @@ closest_tc :: proc(s: ^seat, ux: f64, uz: f64) -> ^bldg_state {
 update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
 	for ui in 0 ..< s.n_units {
 		u := &s.units[ui]
-		if u.health <= 0 {
+		if u.health <= 0 || u.u_type != "worker" {
 			continue
 		}
 		// State 1: moving (builders and repairers excluded — they walk in
@@ -4750,10 +6392,13 @@ recompute_max_population :: proc(s: ^seat) {
 
 // updateProduction: the train timers and the spawn at the building.
 update_production :: proc(g: ^game_state, dt: f64) {
-	for i in 0 ..< g.n_seats {
-		s := &g.seats[i]
-		for b in 0 ..< s.n_bldgs {
-			bd := &s.bldgs[b]
+	// getAllBuildings(): the GLOBAL creation order — the TCs first, then
+	// every built building; completions in one tick mint in that order
+	for pi in 0 ..< g.n_gl_b {
+		r := g.gl_b[pi]
+		s := &g.seats[r.seat]
+		b := int(r.idx)
+		bd := &s.bldgs[b]
 			if bd.under_constr {
 				continue
 			}
@@ -4779,7 +6424,9 @@ update_production :: proc(g: ^game_state, dt: f64) {
 						ud := unit_def_for(s.ci, bd.prod_type)
 						w.u_type = bd.prod_type
 						w.health = ud.health
+						w.max_health = ud.health
 						w.speed = ud.speed
+						w.pid = mint_entity(g, "unit_")
 						w.harvest_node = -1
 						w.build_site = -1
 						w.farm = -1
@@ -4791,10 +6438,9 @@ update_production :: proc(g: ^game_state, dt: f64) {
 						g.gl_u[g.n_gl_u] = gl_ref{seat = i32(s.ci), idx = i32(s.n_units - 1)}
 						g.n_gl_u += 1
 					}
-					bd.is_producing = false
-					bd.prod_type = ""
-					bd.prod_progress = 0
-				}
+				bd.is_producing = false
+				bd.prod_type = ""
+				bd.prod_progress = 0
 			}
 		}
 	}
@@ -4994,8 +6640,14 @@ war_rng_id :: proc(k: ^keyed_rng, prefix: string) -> string {
 step_once :: proc(g: ^game_state) {
 	dt := f64(50)
 	// Population first: the brain below and the state both read it (stepOnce).
+	// The reference splices dead units out of ai.units, so its counts are the
+	// LIVING ones; this engine keeps corpses in place and counts instead.
 	for i in 0 ..< 4 {
-		g.seats[i].pop = g.seats[i].n_units
+		n_alive := 0
+		for u in 0 ..< g.seats[i].n_units {
+			if g.seats[i].units[u].health > 0 { n_alive += 1 }
+		}
+		g.seats[i].pop = n_alive
 	}
 	// aiManager.update(dt): the 250 ms discovery beat, then the 2 s think beat.
 	// The brain's own node discovery (ai.js updateDiscovery) fills the same
@@ -5009,17 +6661,25 @@ step_once :: proc(g: ^game_state) {
 			update_rival_contacts(g, &g.seats[i])
 			brain_discovery(g, &g.seats[i])
 		}
+		detect_contacts(g)
 	}
 	for i in 0 ..< 4 {
 		advance_think(g, &g.seats[i], dt)
 	}
+	// simulateStep's clock-first rule: the step's sim time lands here, so the
+	// beat above stamped the PREVIOUS step's time (simNow at its call) and
+	// everything below carries this step's.
+	g.sim_ms += dt
 	// simulateStep(dt): the worker state machines, production, research.
 	for i in 0 ..< 4 {
 		update_worker_tasks(g, &g.seats[i], dt)
 	}
+	update_unit_movement(g, dt)
 	update_production(g, dt)
 	update_research_progress(g, dt)
 	update_farm_regen(g, dt)
+	update_combat(g, dt)
+	update_auto_defense(g, dt)
 	g.step_no += 1
 	if g.step_no >= 1850 && g.step_no <= 1870 {
 		s := &g.seats[2]
@@ -5031,6 +6691,33 @@ step_once :: proc(g: ^game_state) {
 	war_position_rules(g, dt / 1000)
 	observe_step(g)
 	keep_units_ashore(g)
+	prune_battles(g)
+}
+
+prune_battles :: proc(g: ^game_state) {
+	n := 0
+	for i in 0 ..< g.n_battles {
+		if g.sim_ms - g.b_last[i] <= 120000 {
+			g.b_x[n] = g.b_x[i]
+			g.b_z[n] = g.b_z[i]
+			g.b_started[n] = g.b_started[i]
+			g.b_last[n] = g.b_last[i]
+			g.b_nsides[n] = g.b_nsides[i]
+			g.b_side_seat[n] = g.b_side_seat[i]
+			g.b_inv_n[n] = g.b_inv_n[i]
+			g.b_inv_type[n] = g.b_inv_type[i]
+			g.b_inv_nids[n] = g.b_inv_nids[i]
+			g.b_inv_ids[n] = g.b_inv_ids[i]
+			g.b_inv_du[n] = g.b_inv_du[i]
+			g.b_inv_db[n] = g.b_inv_db[i]
+			g.b_inv_he[n] = g.b_inv_he[i]
+			g.b_lost_type[n] = g.b_lost_type[i]
+			g.b_lost_n[n] = g.b_lost_n[i]
+			g.b_nlost[n] = g.b_nlost[i]
+			n += 1
+		}
+	}
+	g.n_battles = n
 }
 
 // discoveredNodeCounts: per type, how many of THIS seat's known nodes still
@@ -5166,7 +6853,11 @@ write_snap_line :: proc(g: ^game_state, j: ^jw, wall_ms: int, seq: int) {
 		}
 		s := &g.seats[i]
 		j_raw(j, "{")
-		j_raw(j, fmt.aprintf("\"seat\":%d,\"age\":\"stone\",\"population\":%d,\"maxPopulation\":%d,\"units\":%d,\"buildings\":%d,\"eliminated\":false", i, s.pop, s.max_pop, s.n_units, s.n_bldgs))
+		n_alive := 0
+		for u in 0 ..< s.n_units {
+			if s.units[u].health > 0 { n_alive += 1 }
+		}
+		j_raw(j, fmt.aprintf("\"seat\":%d,\"age\":\"stone\",\"population\":%d,\"maxPopulation\":%d,\"units\":%d,\"buildings\":%d,\"eliminated\":false", i, s.pop, s.max_pop, n_alive, s.n_bldgs))
 		j_raw(j, "}")
 	}
 	j_raw(j, "]}}\n\n")
@@ -5175,6 +6866,24 @@ write_snap_line :: proc(g: ^game_state, j: ^jw, wall_ms: int, seq: int) {
 // One turn record: the stream's per-seat wrapper around the state view.
 write_turn_line :: proc(g: ^game_state, j: ^jw, si: int, turn: int) {
 	s := &g.seats[si]
+	// the state build's own look (openai-ai.js 3656): on a copy that is
+	// then merged back — one look changes the live memory — noted at the
+	// build's simNow with the harness sight test, then swept the same way
+	now := g.sim_ms
+	es := make_eyes(s)
+	sighted: [512]string
+	n_sighted := 0
+	for oi in 0 ..< g.n_seats {
+		if oi == si { continue }
+		o := &g.seats[oi]
+		for i in 0 ..< o.n_units {
+			u := &o.units[i]
+			if u.health <= 0 { continue }
+			if !see_test(&es, u.x, u.z) { continue }
+			note_sighting(s, oi, u, now, sighted[:], &n_sighted)
+		}
+	}
+	sweep_memory(g, s, now, &es, sighted[:], n_sighted)
 	j_raw(j, "{")
 	j_raw(j, fmt.aprintf("\"turn\":%d,\"playerId\":\"", turn))
 	j_raw(j, s.pid)
@@ -5202,14 +6911,22 @@ write_results_line :: proc(g: ^game_state, j: ^jw) {
 		j_raw(j, "},\"units\":")
 		j_raw(j, "{")
 		// units: the type-count map — count(units) reduces the unit list to
-		// {type: n}; every unit in this corpus is a worker.
-		nw := 0
+		// {type: n}, keys in first-encounter order.
+		firstu := true
 		for u in 0 ..< s.n_units {
 			if s.units[u].health <= 0 { continue }
-			nw += 1
-		}
-		if nw > 0 {
-			j_raw(j, fmt.aprintf("\"worker\":%d", nw))
+			seen_u := false
+			for p in 0 ..< u {
+				if s.units[p].health > 0 && s.units[p].u_type == s.units[u].u_type { seen_u = true; break }
+			}
+			if seen_u { continue }
+			cnt := 0
+			for q in 0 ..< s.n_units {
+				if s.units[q].health > 0 && s.units[q].u_type == s.units[u].u_type { cnt += 1 }
+			}
+			if !firstu { j_raw(j, ",") }
+			firstu = false
+			j_raw(j, fmt.aprintf("\"%s\":%d", s.units[u].u_type, cnt))
 		}
 		j_raw(j, "},\"buildings\":{")
 		// buildings: the type-count map, first-encounter order.
@@ -5333,7 +7050,7 @@ main :: proc() {
 		return
 	}
 	g.terrain = t_terrain(f64(800), seed, spawns, diff)
-	setup(&g, spawns, n_seats)
+	setup(&g, spawns, n_seats, seed)
 	if len(os.args) >= 3 {
 		g.total_minutes = strconv.atoi(os.args[2]) / 600
 	}
@@ -5347,7 +7064,6 @@ main :: proc() {
 	for tick := 1; tick <= ticks; tick += 1 {
 		g.match_ms += 100
 		for k in 0 ..< 4 {
-			g.sim_ms += 50
 			step_once(&g)
 		}
 		sample_timeline(&g, g.match_ms)
