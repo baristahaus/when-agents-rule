@@ -168,6 +168,7 @@ class AIManager {
         // latency is invisible to every consumer while cutting the cost ~15×.
         this.discoveryTimer = (this.discoveryTimer || 0) + deltaTime;
         if (this.discoveryTimer >= 250) {
+        
             this.discoveryTimer -= 250;   // carry the remainder: cadence-proof
             this.aiPlayers.forEach(ai => {
                 // Exploration bitmap for EVERY player (LLM ones too — their own
@@ -378,6 +379,7 @@ class AIManager {
     }
 
     assignWorkersToHarvest(ai) {
+        const idleWorkers0 = ai.units.filter(w => w.type === 'worker' && !w.isMoving);
         const idleWorkers = ai.units.filter(w => w.type === 'worker' &&
             !w.isMoving && !w.isHarvesting && !w.carryingResource && !w.isBuilding &&
             w.task !== 'building' && w.task !== 'farm_work' && w.task !== 'scouting');

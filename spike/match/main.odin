@@ -567,6 +567,8 @@ tech :: struct {
 	required_age: string,
 	requires: [4]string,
 	n_req: int,
+	research_time: f64, // js/civilizations.js researchTime (ms; the default 15000)
+	unlocks_bldg: string, // tech.unlocks.buildings[0], or "" for none
 }
 
 unit_def :: struct {
@@ -608,20 +610,20 @@ egypt :: civ{
 		{id = "horse_carriage", cost = {60, 20, 40, 40}, health = 100, speed = 2, u_type = "cavalry", tier = "bronze", train_at = "stable"},
 	{}, {}, {}, {}, {}}, n_units = 3,
 	techs = {
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"farm", "", "", ""}, n_req = 1},
-		{cost = {80, 40, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {50, 50, 50, 0}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1},
-		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "neolithic"},
-		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
-		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
-		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"bronze_armor", "", "", ""}, n_req = 1},
-		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "farm"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"farm", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
+		{cost = {80, 40, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = ""},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = ""},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "archery_range"},
+		{cost = {50, 50, 50, 0}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = "academy"},
+		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "neolithic", research_time = 20000, unlocks_bldg = ""},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "stable"},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze", research_time = 20000, unlocks_bldg = ""},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"bronze_armor", "", "", ""}, n_req = 1, research_time = 30000, unlocks_bldg = ""},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron", research_time = 30000, unlocks_bldg = ""},
 	}, n_techs = 14,
 }
 
@@ -635,20 +637,20 @@ greek :: civ{
 		{id = "phalanx", cost = {60, 0, 40, 20}, health = 100, speed = 0.8, u_type = "infantry", tier = "bronze", train_at = "barracks"},
 	{}, {}, {}, {}, {}, {}}, n_units = 2,
 	techs = {
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1},
-		{cost = {100, 50, 0, 30}, research_at = "town_center", required_age = "stone"},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {200, 0, 0, 150}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1},
-		{cost = {300, 0, 0, 200}, research_at = "academy", required_age = "bronze", requires = {"philosophy", "", "", ""}, n_req = 1},
-		{cost = {0, 50, 150, 100}, research_at = "academy", required_age = "bronze"},
-		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
-		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"phalanx_armor", "", "", ""}, n_req = 1},
-		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "farm"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "stable"},
+		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
+		{cost = {100, 50, 0, 30}, research_at = "town_center", required_age = "stone", research_time = 20000, unlocks_bldg = "archery_range"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "academy"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 20000, unlocks_bldg = ""},
+		{cost = {200, 0, 0, 150}, research_at = "academy", required_age = "neolithic", requires = {"academy", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = ""},
+		{cost = {300, 0, 0, 200}, research_at = "academy", required_age = "bronze", requires = {"philosophy", "", "", ""}, n_req = 1, research_time = 25000, unlocks_bldg = ""},
+		{cost = {0, 50, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze", research_time = 20000, unlocks_bldg = ""},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"phalanx_armor", "", "", ""}, n_req = 1, research_time = 30000, unlocks_bldg = ""},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron", research_time = 30000, unlocks_bldg = ""},
 	}, n_techs = 14,
 }
 
@@ -663,19 +665,19 @@ persian :: civ{
 		{id = "heavy_cavalry", cost = {160, 0, 40, 70}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
 	{}, {}, {}, {}, {}}, n_units = 3,
 	techs = {
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {150, 50, 0, 100}, research_at = "academy", required_age = "neolithic", requires = {"horseback", "", "", ""}, n_req = 1},
-		{cost = {0, 0, 200, 150}, research_at = "academy", required_age = "bronze", requires = {"cavalry_training", "", "", ""}, n_req = 1},
-		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
-		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
-		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "bronze"},
-		{cost = {0, 200, 150, 200}, research_at = "academy", required_age = "iron", requires = {"archery", "", "", ""}, n_req = 1},
-		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "farm"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = "stable"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "archery_range"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 20000, unlocks_bldg = "academy"},
+		{cost = {150, 50, 0, 100}, research_at = "academy", required_age = "neolithic", requires = {"horseback", "", "", ""}, n_req = 1, research_time = 20000, unlocks_bldg = ""},
+		{cost = {0, 0, 200, 150}, research_at = "academy", required_age = "bronze", requires = {"cavalry_training", "", "", ""}, n_req = 1, research_time = 25000, unlocks_bldg = ""},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze", research_time = 20000, unlocks_bldg = ""},
+		{cost = {100, 100, 0, 50}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
+		{cost = {0, 200, 150, 200}, research_at = "academy", required_age = "iron", requires = {"archery", "", "", ""}, n_req = 1, research_time = 30000, unlocks_bldg = ""},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron", research_time = 30000, unlocks_bldg = ""},
 		{},
 	}, n_techs = 13,
 }
@@ -690,19 +692,19 @@ yamato_civ :: civ{
 		{id = "archer_ship", cost = {150, 150, 0, 50}, health = 200, speed = 1.5, u_type = "ranged"},
 	{}, {}, {}, {}, {}, {}}, n_units = 2,
 	techs = {
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {150, 0, 0, 100}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1},
-		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze"},
-		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone"},
-		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic"},
-		{cost = {0, 100, 150, 150}, research_at = "academy", required_age = "bronze", requires = {"bushido", "", "", ""}, n_req = 1},
-		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze"},
-		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"armor", "", "", ""}, n_req = 1},
-		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "house"},
+		{cost = {100, 50, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "farm"},
+		{cost = {100, 150, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "barracks"},
+		{cost = {150, 0, 0, 100}, research_at = "town_center", required_age = "stone", requires = {"barracks", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
+		{cost = {150, 0, 0, 100}, research_at = "temple", required_age = "bronze", research_time = 20000, unlocks_bldg = ""},
+		{cost = {100, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "archery_range"},
+		{cost = {50, 100, 0, 0}, research_at = "town_center", required_age = "stone", research_time = 15000, unlocks_bldg = "academy"},
+		{cost = {200, 150, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 20000, unlocks_bldg = "stable"},
+		{cost = {150, 100, 0, 0}, research_at = "town_center", required_age = "neolithic", research_time = 15000, unlocks_bldg = ""},
+		{cost = {0, 100, 150, 150}, research_at = "academy", required_age = "bronze", requires = {"bushido", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
+		{cost = {0, 0, 150, 100}, research_at = "academy", required_age = "bronze", research_time = 25000, unlocks_bldg = ""},
+		{cost = {0, 0, 200, 200}, research_at = "academy", required_age = "iron", requires = {"armor", "", "", ""}, n_req = 1, research_time = 15000, unlocks_bldg = ""},
+		{cost = {50, 100, 80, 100}, research_at = "academy", required_age = "iron", research_time = 30000, unlocks_bldg = ""},
 		{},
 	}, n_techs = 13,
 }
@@ -747,18 +749,20 @@ bldg_def :: struct {
 	train_opts: [2]string,
 	n_train: int,
 	can_train: bool,
+	build_time: f64, // js/buildings.js buildTime (ms; BASE_BUILD_TIME = 10000)
+	pop_bonus: int, // popBonus: TC 10, house 5, the rest 0
 }
 
 std_bldg_defs : [9]bldg_def = {
-	{id = "town_center", cost = {100, 100, 100, 100}, base_health = 1000, req_age = "stone", train_opts = {"worker", ""}, n_train = 1, can_train = true},
-	{id = "house", cost = {30, 20, 0, 0}, base_health = 300, req_age = "stone", req_tech = "house"},
-	{id = "farm", cost = {50, 50, 0, 0}, base_health = 400, req_age = "stone", req_tech = "farm"},
-	{id = "barracks", cost = {50, 150, 0, 0}, base_health = 800, req_age = "stone", req_tech = "barracks", can_train = true},
-	{id = "archery_range", cost = {50, 100, 50, 0}, base_health = 600, req_age = "neolithic", req_tech = "longbow", can_train = true},
-	{id = "stable", cost = {100, 100, 0, 50}, base_health = 700, req_age = "neolithic", req_tech = "horseback", can_train = true},
-	{id = "academy", cost = {100, 100, 100, 50}, base_health = 700, req_age = "neolithic", req_tech = "academy"},
-	{id = "tower", cost = {50, 50, 100, 0}, base_health = 600, req_age = "stone"},
-	{id = "temple", cost = {100, 100, 150, 100}, base_health = 800, req_age = "bronze", train_opts = {"priest", ""}, n_train = 1, can_train = true},
+	{id = "town_center", cost = {100, 100, 100, 100}, base_health = 1000, req_age = "stone", train_opts = {"worker", ""}, n_train = 1, can_train = true, build_time = 15000, pop_bonus = 10},
+	{id = "house", cost = {30, 20, 0, 0}, base_health = 300, req_age = "stone", req_tech = "house", build_time = 5000, pop_bonus = 5},
+	{id = "farm", cost = {50, 50, 0, 0}, base_health = 400, req_age = "stone", req_tech = "farm", build_time = 8000, pop_bonus = 0},
+	{id = "barracks", cost = {50, 150, 0, 0}, base_health = 800, req_age = "stone", req_tech = "barracks", can_train = true, build_time = 15000, pop_bonus = 0},
+	{id = "archery_range", cost = {50, 100, 50, 0}, base_health = 600, req_age = "neolithic", req_tech = "longbow", can_train = true, build_time = 12000, pop_bonus = 0},
+	{id = "stable", cost = {100, 100, 0, 50}, base_health = 700, req_age = "neolithic", req_tech = "horseback", can_train = true, build_time = 15000, pop_bonus = 0},
+	{id = "academy", cost = {100, 100, 100, 50}, base_health = 700, req_age = "neolithic", req_tech = "academy", build_time = 15000, pop_bonus = 0},
+	{id = "tower", cost = {50, 50, 100, 0}, base_health = 600, req_age = "stone", build_time = 8000, pop_bonus = 0},
+	{id = "temple", cost = {100, 100, 150, 100}, base_health = 800, req_age = "bronze", train_opts = {"priest", ""}, n_train = 1, can_train = true, build_time = 20000, pop_bonus = 0},
 }
 
 bldg_def_by_id :: proc(id: string) -> ^bldg_def {
@@ -1103,6 +1107,10 @@ unit_state :: struct {
 	speed: f64, // unit.speed: workers 1.0 (moveSpeedOf's own pace)
 	scout_ticks: int, // the scouting leg's _scoutTicks
 	farm: int, // this seat's bldgs index (farmRef); -1 none
+	former_task: int, // _formerTask.task (-1 none): the pulled worker's restore
+	former_node: int, // _formerTask.harvestTarget
+	former_farm: int, // _formerTask.farmRef
+	repair_site: int, // repairTarget; -1 none (no repairs fire in this corpus)
 }
 
 bldg_state :: struct {
@@ -1122,6 +1130,7 @@ bldg_state :: struct {
 	max_food: f64,
 	regen_timer: f64,
 	assigned_worker: int, // this seat's unit index; -1 none
+	is_wonder: bool,
 }
 
 // The worker task vocabulary (js/game.js's task strings, as an int).
@@ -1135,6 +1144,17 @@ TASK_SCOUTING :: 6
 
 MAX_UNITS :: 24 // this minute peaks at 14; headroom for longer matches
 MAX_BLDGS :: 8 // TC + houses + farms
+
+// The reference's position rules walk TWO GLOBAL lists in CREATION order:
+// renderer.units and renderer.buildings (game.js getAllUnits/getAllBuildings).
+// Pair indices and the dead-centre spoke come from those global positions,
+// and the clearance pass accumulates pushes in building creation order
+// (which interleaves seats as rival builds land between ours), so both
+// lists are kept here explicitly.
+gl_ref :: struct {
+	seat: i32,
+	idx: i32,
+}
 MAX_EVTS :: 32 // the live ring holds 14; shift semantics, no wrap math
 
 // One recentEvents entry (game.js logPlayerEvent): {at, seq, text, ttl}.
@@ -1185,6 +1205,7 @@ seat :: struct {
 	met: [4]bool, // first-contact memory: has this seat ever seen rival <i>?
 	harvest_bonus: f64, // workerHarvestBonus: 1.0 — the spectator path applies NO civ bonus
 	techcost_mult: f64, // techCostMultiplier: 1.0 likewise (ai.js addAIPlayer's defaults)
+	handle_next: int, // the per-owner handle counter (nextUnitHandle): 4 after the start
 	k: keyed_rng,
 	// --- the match engine's brain fields (js/ai.js AIManager + the seat) ---
 	think_timer: f64, // advanceThink's accumulator (sim ms)
@@ -1193,6 +1214,7 @@ seat :: struct {
 	res_progress: f64,
 	res_duration: f64,
 	cur_age_upgrade: bool, // ai.currentAgeUpgrade != null (dormant in this minute)
+	cur_age: int, // age index 0..3 (stone..iron); no age-up fires in this corpus
 	researched: [16]string, // researchedTechs (the set, in completion order)
 	n_researched: int,
 	unlocked_bldgs: [16]string, // owner.unlockedBuildings (tech unlocks)
@@ -1238,6 +1260,11 @@ game_state :: struct {
 	tl_n_marks: int,
 	tl_age: [4]int, // the last age index per seat (-1 = unset)
 	tl_dry: [4][4]bool, // ran-dry flags per seat per type (start true)
+	// --- the position rules' global creation-ordered lists ---
+	gl_u: [4 * MAX_UNITS]gl_ref,
+	n_gl_u: int,
+	gl_b: [4 * MAX_BLDGS]gl_ref,
+	n_gl_b: int,
 }
 
 // resetTimeline: a fresh match — population 0, the match clock 0, the
@@ -1252,6 +1279,8 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 	g.tl_last = 0
 	g.tl_n_samples = 0
 	g.tl_n_marks = 0
+	g.n_gl_u = 0
+	g.n_gl_b = 0
 	for i in 0 ..< 4 {
 		g.tl_age[i] = -1
 		for k in 0 ..< 4 {
@@ -1270,6 +1299,7 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 		s.pid = war_rng_id(&g.world_rng, "ai_")
 		s.harvest_bonus = 1.0
 		s.techcost_mult = 1.0
+		s.handle_next = 4
 		sp := spawns[i]
 
 		// The Town Center, at the spawn, finished (createBuilding, age 'stone').
@@ -1281,6 +1311,8 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 		// TC is created first (startGame), then houses/farms append as built.
 		s.bldgs[0] = s.home
 		s.n_bldgs = 1
+		g.gl_b[g.n_gl_b] = gl_ref{seat = i32(i), idx = 0}
+		g.n_gl_b += 1
 
 		// The three workers: each axis one keyed draw of the seat's own stream,
 		// 's<i>:start-workers', n = 0..5 (x then z, worker by worker).
@@ -1288,8 +1320,10 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 		for w in 0 ..< 3 {
 			x := sp[0] + (krng_draw(&s.k, key) - 0.5) * 10
 			z := sp[1] + (krng_draw(&s.k, key) - 0.5) * 10
-			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, speed = 1.0}
+			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, speed = 1.0, harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
 			s.n_units += 1
+			g.gl_u[g.n_gl_u] = gl_ref{seat = i32(i), idx = i32(w)}
+			g.n_gl_u += 1
 		}
 
 		// The ResourceManager's opening balances (resources.js's constructor).
@@ -1326,6 +1360,15 @@ building_vision :: proc(b: ^bldg_state) -> f64 {
 	return 20
 }
 
+// isIdleWorker (game.js 3594): the worker-side freedom test workerJob's
+// idle bucket shares with the builder pick.
+is_idle_worker :: proc(u: ^unit_state) -> bool {
+	return u.health > 0 &&
+		!u.is_building && u.task != TASK_BUILDING &&
+		u.task != TASK_HARVESTING && u.task != TASK_CARRYING && u.task != TASK_FARM_WORK &&
+		!u.is_harvesting && !u.carrying && u.farm < 0
+}
+
 // isPositionVisibleToAI: the first eye that reaches the point wins.
 immediate_visible :: proc(s: ^seat, x: f64, z: f64) -> bool {
 	for i in 0 ..< s.n_units {
@@ -1337,6 +1380,18 @@ immediate_visible :: proc(s: ^seat, x: f64, z: f64) -> bool {
 			if math.sqrt(dx*dx + dz*dz) <= range {
 				return true
 			}
+		}
+	}
+	for bi in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[bi]
+		if bd.under_constr {
+			continue
+		}
+		range := building_vision(bd)
+		dx := bd.x - x
+		dz := bd.z - z
+		if math.sqrt(dx*dx + dz*dz) <= range {
+			return true
 		}
 	}
 	b := &s.home
@@ -1456,6 +1511,52 @@ see_test :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
 		}
 	}
 	return false
+}
+
+// The brain's own discovery test (buildVisionTest's non-harness mode): the
+// same eye set, but the comparison is WarMath.hypot where the harness's is
+// Math.sqrt — the two differ by an ulp at the vision boundary, and a node
+// on the line is known to the brain before the state's own pass sees it.
+see_test_brain :: proc(es: ^eye_set, x: f64, z: f64) -> bool {
+	G := 40
+	CELL := f64(20)
+	half := f64(400)
+	cx := cast(int)(math.floor((x + half) / CELL))
+	cz := cast(int)(math.floor((z + half) / CELL))
+	cx = min(G-1, max(0, cx))
+	cz = min(G-1, max(0, cz))
+	for dz := -1; dz <= 1; dz += 1 {
+		for dx := -1; dx <= 1; dx += 1 {
+			gx := cx + dx
+			gz := cz + dz
+			if gx < 0 || gx >= G || gz < 0 || gz >= G {
+				continue
+			}
+			for idx := es.cells[gz*G + gx]; idx != -1; idx = es.next[idx] {
+				e := &es.eyes[idx]
+				if m_hypot(e.x - x, e.z - z) <= e.r {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// ai.js updateDiscovery (the 250 ms beat): the brain's own node discovery.
+// The enemy-building memory it also fills stays dormant — no contacts in
+// this corpus.
+brain_discovery :: proc(g: ^game_state, s: ^seat) {
+	es := make_eyes(s)
+	for i in 0 ..< g.terrain.n_nodes {
+		if s.known[i] != 0 {
+			continue
+		}
+		n := &g.terrain.nodes[i]
+		if see_test_brain(&es, n.x, n.z) {
+			s.known[i] = 1
+		}
+	}
 }
 
 // markExploration: the seat's 42-cell bitmap, a cell set when an eye of
@@ -1877,6 +1978,10 @@ obs :: struct {
 	s: ^seat,
 	scratch: obs_scratch,
 	t_ms: i64,
+	// The state build's own found events (the "last node emptied" notice),
+	// displayed now and logged on the commit at the end of observe_line.
+	pend: [8]evt,
+	n_pend: int,
 }
 
 // One fixture line: {"seat":i,"playerId":"seat<i>","t":T,"state":{...}}.
@@ -2283,10 +2388,49 @@ observe_line :: proc(o: ^obs) {
 	j_int(j, 100) // MAX_POPULATION_CAP
 	j_end_obj(j)
 
-	// ---- recentEvents: the arena's seats have no scripted orders, so the
-	//      graph's pending list is empty and the view's is.
+	// ---- the node pass, hoisted above the sections that read it: the live
+	//      amounts (the scratch buckets nearestNodes and nodes write from),
+	//      the discovered tally, and this look's own found events (the
+	//      "last node emptied" notice — the transition from the previous
+	//      look's counts to this one's, said out loud here).
+	sc := &o.scratch
+	sc.n_by = [4]int{}
+	sc.n_key = 0
+	o.n_pend = 0
+	disc: [4]i64 = [4]i64{}
+	total: [4]i64 = [4]i64{}
+	for i in 0 ..< g.terrain.n_nodes {
+		n := &g.terrain.nodes[i]
+		if n.amount > 0 {
+			total[n.n_type] += 1
+		}
+		amt, _ := known_amount(s, i, n.x, n.z, n.amount, true)
+		if amt > 0 {
+			disc[n.n_type] += 1
+			bucket := &sc.by[n.n_type]
+			bucket[sc.n_by[n.n_type]] = nearby_node{ntype = n.n_type,
+				x = cast(i32)(math.floor((n.x) + 0.5)), z = cast(i32)(math.floor((n.z) + 0.5)), amount = amt}
+			sc.n_by[n.n_type] += 1
+		}
+	}
+	// the transition notice (openai-ai.js 3365): a type the PREVIOUS look
+	// counted above zero and this look counts at zero.
+	for k in 0 ..< 4 {
+		if s.last_counts[k] > 0 && disc[k] == 0 {
+			if o.n_pend < len(o.pend) {
+				o.pend[o.n_pend] = evt{kind = EVT_LAST_EMPTY, p_type = k}
+				o.n_pend += 1
+			}
+		}
+	}
+
+	// ---- recentEvents: the seat's notice ring plus this look's own found
+	//      events, expired by the seat's own turns (two), the last eight,
+	//      each stamped with its age on the MATCH clock (o.pend is filled by
+	//      the node pass below — hoisted ahead of this section).
 	j_key(j, "recentEvents")
 	j_arr(j)
+	build_recent_events(o)
 	j_end_arr(j)
 
 	// ---- bonuses: the seat's own multipliers as the state reports them
@@ -2324,23 +2468,39 @@ observe_line :: proc(o: ^obs) {
 	j_end_obj(j)
 
 	// yourSpawnArea: the centroid of the seat's buildings, whole units
-	// (getAIBuildingCenter) -- the one building is the spawn itself.
+	// (getAIBuildingCenter) — live: houses and farms shift it off the spawn.
+	sx, sz := f64(0), f64(0)
+	for b in 0 ..< s.n_bldgs {
+		sx += s.bldgs[b].x
+		sz += s.bldgs[b].z
+	}
 	j_key(j, "yourSpawnArea")
 	j_obj(j)
 	j_key(j, "x")
-	j_int(j, cast(i64)(math.floor((s.home.x) + 0.5)))
+	j_int(j, cast(i64)(math.floor(sx / f64(s.n_bldgs) + 0.5)))
 	j_key(j, "z")
-	j_int(j, cast(i64)(math.floor((s.home.z) + 0.5)))
+	j_int(j, cast(i64)(math.floor(sz / f64(s.n_bldgs) + 0.5)))
 	j_end_obj(j)
 
-	// yourBaseTiles: one tile per standing building, by the A1..G7 label.
+	// yourBaseTiles: one entry per occupied tile, the count of buildings in
+	// it, keyed by the A1..G7 label in first-encounter order (the
+	// reference's object insertion order over ai.buildings).
 	tiles := map[string]i32{}
-	tiles[tile_at(s.home.x, s.home.z, size)] = 1
+	tile_order: [16]string
+	n_tiles := 0
+	for b in 0 ..< s.n_bldgs {
+		k := tile_at(s.bldgs[b].x, s.bldgs[b].z, size)
+		if tiles[k] == 0 {
+			tile_order[n_tiles] = k
+			n_tiles += 1
+		}
+		tiles[k] += 1
+	}
 	j_key(j, "yourBaseTiles")
 	j_obj(j)
-	for k, v in tiles {
-		j_key(j, k)
-		j_int(j, i64(v))
+	for t in 0 ..< n_tiles {
+		j_key(j, tile_order[t])
+		j_int(j, i64(tiles[tile_order[t]]))
 	}
 	j_end_obj(j)
 
@@ -2358,30 +2518,6 @@ observe_line :: proc(o: ^obs) {
 	j_end_obj(j)
 
 	j_end_obj(j) // map
-
-	// ---- nodes: what the seat has seen, and what is on the map at all.
-	sc := &o.scratch
-	sc.n_by = [4]int{}
-	sc.n_key = 0
-
-	// The live amounts, in the survivor list's order. The discovered tally is
-	// the seat's own: a node counts when the seat knows it and it holds amount.
-	disc: [4]i64 = [4]i64{}
-	total: [4]i64 = [4]i64{}
-	for i in 0 ..< g.terrain.n_nodes {
-		n := &g.terrain.nodes[i]
-		if n.amount > 0 {
-			total[n.n_type] += 1
-		}
-		amt, _ := known_amount(s, i, n.x, n.z, n.amount, true)
-		if amt > 0 {
-			disc[n.n_type] += 1
-			bucket := &sc.by[n.n_type]
-			bucket[sc.n_by[n.n_type]] = nearby_node{ntype = n.n_type,
-				x = cast(i32)(math.floor((n.x) + 0.5)), z = cast(i32)(math.floor((n.z) + 0.5)), amount = amt}
-			sc.n_by[n.n_type] += 1
-		}
-	}
 
 	j_key(j, "nodes")
 	j_obj(j)
@@ -2510,25 +2646,98 @@ observe_line :: proc(o: ^obs) {
 	//      seat's own order (the single Town Center first), whole coordinates.
 	j_key(j, "friendlyBuildings")
 	j_arr(j)
-	b := &s.home
-	if b.health > 0 {
+	// The research/age hosts: each task is attributed to ONE finished host
+	// building of its researchAt type (openai-ai.js 3396-3424). No age
+	// upgrade runs in this corpus.
+	research_host := -1
+	if s.cur_research {
+		host_type := "town_center"
+		for t in 0 ..< c.n_techs {
+			if tech_ids[s.ci][t] == s.res_tech {
+				if civs[s.ci].techs[t].research_at != "" {
+					host_type = civs[s.ci].techs[t].research_at
+				}
+				break
+			}
+		}
+		for b in 0 ..< s.n_bldgs {
+			bd := &s.bldgs[b]
+			if bd.id == host_type && !bd.under_constr {
+				research_host = b
+				break
+			}
+		}
+	}
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		if bd.health <= 0 {
+			continue
+		}
+		constructing := bd.under_constr
+		producing := bd.is_producing && !constructing
+		researching := research_host == b && !constructing
+		busy := constructing || producing || researching
 		j_obj(j)
 		j_key(j, "type")
-		j_str(j, b.id)
+		j_str(j, bd.id)
 		j_key(j, "x")
-		j_int(j, cast(i64)(math.floor((b.x) + 0.5)))
+		j_int(j, cast(i64)(math.floor((bd.x) + 0.5)))
 		j_key(j, "z")
-		j_int(j, cast(i64)(math.floor((b.z) + 0.5)))
+		j_int(j, cast(i64)(math.floor((bd.z) + 0.5)))
 		j_key(j, "healthPct")
-		j_int(j, cast(i64)(math.floor((b.health/b.max_health*100) + 0.5)))
+		j_int(j, cast(i64)(math.floor((bd.health/bd.max_health*100) + 0.5)))
 		j_key(j, "state")
-		j_str(j, "complete") // the port's constructing flag: the arena's TC is finished
+		if constructing {
+			j_str(j, "under_construction")
+		} else {
+			j_str(j, "complete")
+		}
 		j_key(j, "busy")
-		j_bool(j, false) // nothing producing, researching or advancing at either gate
+		j_bool(j, busy)
 		j_key(j, "activity")
-		j_str(j, "idle")
+		if constructing {
+			j_str(j, "under_construction")
+		} else if producing {
+			j_str(j, "producing")
+		} else if researching {
+			j_str(j, "researching")
+		} else {
+			j_str(j, "idle")
+		}
 		j_key(j, "producing")
-		j_null(j)
+		if producing {
+			j_str(j, bd.prod_type)
+		} else {
+			j_null(j)
+		}
+		if producing {
+			j_key(j, "producingSecondsRemaining")
+			j_int(j, secs_left(bd.prod_progress, bd.prod_duration))
+		}
+		if constructing {
+			j_key(j, "buildPct")
+			j_int(j, cast(i64)(math.floor(math.min(1, bd.build_progress / bd.build_time) * 100 + 0.5)))
+			j_key(j, "buildSecondsRemaining")
+			j_int(j, secs_left(bd.build_progress, bd.build_time))
+		}
+		if researching {
+			j_key(j, "researchingTech")
+			j_str(j, s.res_tech)
+			j_key(j, "researchSecondsRemaining")
+			j_int(j, secs_left(s.res_progress, s.res_duration))
+		}
+		if bd.id == "farm" {
+			j_key(j, "food")
+			j_int(j, cast(i64)(math.floor(bd.food_amount)))
+			j_key(j, "farmed")
+			// the farm's real status, from the same predicate regrowth gates on
+			farmed := false
+			if bd.assigned_worker >= 0 && bd.assigned_worker < s.n_units {
+				w := &s.units[bd.assigned_worker]
+				farmed = w.health > 0 && w.farm == b
+			}
+			j_bool(j, farmed)
+		}
 		j_end_obj(j)
 	}
 	j_end_arr(j)
@@ -2594,35 +2803,81 @@ observe_line :: proc(o: ^obs) {
 	//      the other buckets are zero.
 	j_key(j, "workers")
 	j_obj(j)
-	wtotal := i64(s.n_units)
-	idle: i64 = 0
+	// The live tally (openai-ai.js 3621): every worker counted under
+	// workerJob's job name — building, scouting, farm, the four resource
+	// pools (a job at any point of the gather cycle), moving, fighting, idle.
+	// No fighter and no death exists in this corpus; the buckets still
+	// follow the classifier's order exactly.
+	wk_total, wk_idle, wk_building, wk_farm, wk_scouting, wk_moving, wk_fighting: i64
+	wk_pool: [4]i64
 	for i in 0 ..< s.n_units {
-		if s.units[i].health > 0 {
-			idle += 1
+		u := &s.units[i]
+		if u.health <= 0 {
+			continue
+		}
+		wk_total += 1
+		job := 8 // 8 moving, 9 idle (the tail buckets)
+		if u.task == TASK_BUILDING || u.is_building {
+			job = 0
+		} else if u.task == TASK_SCOUTING {
+			job = 1
+		} else if u.task == TASK_FARM_WORK || u.farm >= 0 {
+			job = 2
+		} else if u.carrying || u.task == TASK_CARRYING || u.task == TASK_HARVESTING || u.is_harvesting || u.harvest_node >= 0 {
+			// the resource the job points at, or moving while unresolvable
+			if u.harvest_node >= 0 {
+				nt := int(g.terrain.nodes[u.harvest_node].n_type)
+				job = 3 + nt
+			} else if u.carrying && (u.carry_type >= 0 && u.carry_type < 4) {
+				job = 3 + u.carry_type
+			} else {
+				job = 8
+			}
+		} else if is_idle_worker(u) {
+			job = 9
+		}
+		if job == 0 {
+			wk_building += 1
+		} else if job == 1 {
+			wk_scouting += 1
+		} else if job == 2 {
+			wk_farm += 1
+		} else if job == 3 {
+			wk_pool[0] += 1
+		} else if job == 4 {
+			wk_pool[1] += 1
+		} else if job == 5 {
+			wk_pool[2] += 1
+		} else if job == 6 {
+			wk_pool[3] += 1
+		} else if job == 8 {
+			wk_moving += 1
+		} else if job == 9 {
+			wk_idle += 1
 		}
 	}
 	j_key(j, "total")
-	j_int(j, wtotal)
+	j_int(j, wk_total)
 	j_key(j, "idle")
-	j_int(j, idle)
+	j_int(j, wk_idle)
 	j_key(j, "building")
-	j_int(j, 0)
+	j_int(j, wk_building)
 	j_key(j, "farm")
-	j_int(j, 0)
+	j_int(j, wk_farm)
 	j_key(j, "scouting")
-	j_int(j, 0)
+	j_int(j, wk_scouting)
 	j_key(j, "moving")
-	j_int(j, 0)
+	j_int(j, wk_moving)
 	j_key(j, "fighting")
-	j_int(j, 0)
+	j_int(j, wk_fighting)
 	j_key(j, "food")
-	j_int(j, 0)
+	j_int(j, wk_pool[0])
 	j_key(j, "wood")
-	j_int(j, 0)
+	j_int(j, wk_pool[1])
 	j_key(j, "stone")
-	j_int(j, 0)
+	j_int(j, wk_pool[2])
 	j_key(j, "gold")
-	j_int(j, 0)
+	j_int(j, wk_pool[3])
 	j_end_obj(j)
 
 	// ---- enemyUnits: none in sight, as with enemyBuildings.
@@ -2639,24 +2894,47 @@ observe_line :: proc(o: ^obs) {
 	j_obj(j)
 	j_key(j, "researched")
 	j_arr(j)
+	for t in 0 ..< c.n_techs {
+		if seat_has_tech(s, tech_ids[s.ci][t]) {
+			j_str(j, tech_ids[s.ci][t])
+		}
+	}
 	j_end_arr(j)
 	j_key(j, "current")
-	j_null(j)
+	if s.cur_research {
+		j_obj(j)
+		j_key(j, "techId")
+		j_str(j, s.res_tech)
+		j_key(j, "progressPercent")
+		j_int(j, cast(i64)(math.floor(s.res_progress / s.res_duration * 100 + 0.5)))
+		j_key(j, "secondsRemaining")
+		j_int(j, secs_left(s.res_progress, s.res_duration))
+		j_end_obj(j)
+	} else {
+		j_null(j)
+	}
 	j_key(j, "available")
 	j_arr(j)
 	tc_cost_mult := s.techcost_mult
 	for t in 0 ..< c.n_techs {
 		te := &c.techs[t]
+		tid := tech_ids[s.ci][t]
+		// the live filters (openai-ai.js 3696): researched is out; the age
+		// gate; every requires researched; the host check is general.
+		if seat_has_tech(s, tid) {
+			continue
+		}
 		if age_idx(te.required_age) > age_idx("stone") {
 			continue
 		}
-		// Nothing is researched at this gate's two moments (the golden's
-		// research.researched is [] and current is null for every seat), so the
-		// reference's "all requires researched" filter reduces to: any tech
-		// with a requirement is out of the available list. The general form
-		// consults the seat's researched set; this state does not carry one
-		// because nothing is ever researched here.
-		if te.n_req > 0 {
+		reqs_ok := true
+		for r in 0 ..< te.n_req {
+			if !seat_has_tech(s, te.requires[r]) {
+				reqs_ok = false
+				break
+			}
+		}
+		if !reqs_ok {
 			continue
 		}
 		cc := cost4{floor4(te.cost.food, tc_cost_mult), floor4(te.cost.wood, tc_cost_mult),
@@ -2667,8 +2945,7 @@ observe_line :: proc(o: ^obs) {
 		}
 		bl: [8]string
 		nbl: int
-		has_tc := s.home.id == "town_center" && s.home.health > 0
-		if at != "town_center" || !has_tc {
+		if !seat_has_finished_bldg(s, at) {
 			bl[nbl] = "host"
 			nbl += 1
 		}
@@ -2712,6 +2989,9 @@ observe_line :: proc(o: ^obs) {
 	j_obj(j)
 	j_key(j, "buildings")
 	j_arr(j)
+	for b in 0 ..< s.n_unlocked_bldgs {
+		j_str(j, s.unlocked_bldgs[b])
+	}
 	j_end_arr(j)
 	j_end_obj(j)
 
@@ -2827,7 +3107,8 @@ observe_line :: proc(o: ^obs) {
 			be.blocked[be.n_block] = "age"
 			be.n_block += 1
 		}
-		if bdef.req_tech != "" {
+		// the live tech check: the block is the RESEARCHED test
+		if bdef.req_tech != "" && !seat_has_tech(s, bdef.req_tech) {
 			be.blocked[be.n_block] = "tech"
 			be.n_block += 1
 		}
@@ -2851,7 +3132,13 @@ observe_line :: proc(o: ^obs) {
 			be.blocked[be.n_block] = "age"
 			be.n_block += 1
 		}
-		// alreadyBuilt: no wonder stands at turn 1
+		// alreadyBuilt: a wonder standing (none in this corpus)
+		for wb in 0 ..< s.n_bldgs {
+			if s.bldgs[wb].health > 0 && false { // is_wonder flag: dormant this minute
+				be.blocked[be.n_block] = "alreadyBuilt"
+				be.n_block += 1
+			}
+		}
 		if !has_resources(&s.res, be.cost) {
 			be.blocked[be.n_block] = "cost"
 			be.n_block += 1
@@ -2923,6 +3210,25 @@ observe_line :: proc(o: ^obs) {
 	j_end_obj(j) // gameStats
 
 	j_end_obj(j) // state
+
+	// commitObservation: events first (they carry the turn counter as it
+	// stood when they happened); then every node this look SAW joins the
+	// known set (openai-ai.js commitObservation: for (const [idx, amount]
+	// of p.nodes.seen) { ai._knownResIdx.add(idx); ... }) — the state build's
+	// own linear test discovers too, and what it saw stays known; then the
+	// counter, then the counts snapshot.
+	for p in 0 ..< o.n_pend {
+		log_player_event(g, s, o.pend[p])
+	}
+	for i in 0 ..< g.terrain.n_nodes {
+		if s.seen_set[i] != 0 {
+			s.known[i] = 1
+		}
+	}
+	s.turn_seq += 1
+	for k in 0 ..< 4 {
+		s.last_counts[k] = int(disc[k])
+	}
 }
 
 // ===========================================================================
@@ -3006,58 +3312,100 @@ update_rival_contacts :: proc(g: ^game_state, viewer: ^seat) {
 // the end of every simulation step. The pairs are same-owner (units from
 // different seats never interact — nothing crosses the 306-unit spawn
 // gap); the clearance pushes a unit away from its own finished buildings.
+
+// updateFarmRegeneration (game.js 5608+): a manned, finished farm grows back
+// its stock — +10 food per 3s in stone age, scaled by age — but only while its
+// assigned hand still holds the post (farmFarmer's task/farm/health check);
+// a deserted post drops the claim and grows nothing.
+update_farm_regen :: proc(g: ^game_state, dt: f64) {
+	age_rate := [4]f64{10, 15, 20, 25}
+	for si in 0 ..< 4 {
+		s := &g.seats[si]
+		for b in 0 ..< s.n_bldgs {
+			farm := &s.bldgs[b]
+			if farm.id != "farm" || farm.under_constr { continue }
+			manned := false
+			if farm.assigned_worker >= 0 {
+				w := &s.units[farm.assigned_worker]
+				if w.health > 0 && (w.task == TASK_FARM_WORK || w.task == TASK_CARRYING) && w.farm == b {
+					manned = true
+				}
+			}
+			if !manned {
+				farm.assigned_worker = -1
+				continue
+			}
+			farm.regen_timer += dt
+			for farm.regen_timer >= 3000 {
+				farm.regen_timer -= 3000
+				if farm.food_amount < farm.max_food {
+					farm.food_amount = math.min(farm.max_food, farm.food_amount + age_rate[s.cur_age])
+				}
+			}
+		}
+	}
+}
+
 war_position_rules :: proc(g: ^game_state, dt: f64) {
+	// js/simulation/position-rules.js WarPositionRules.apply, verbatim: two
+	// passes over the GLOBAL creation-ordered lists, deltaTime in seconds.
 	SEPARATION_DIST := f64(1.2)
 	SEPARATION_FORCE := f64(0.03)
 	sepK := math.min(f64(3), math.max(f64(0), dt) * 60)
-	// the port walks the global unit list; the degenerate-pair fallback
-	// direction uses the global index parity — gi tracks it
-	gi := 0
-	for si in 0 ..< 4 {
-		s := &g.seats[si]
-		for i in 0 ..< s.n_units {
-			for k := i + 1; k < s.n_units; k += 1 {
-				a := &s.units[i]
-				b := &s.units[k]
-				dx := b.x - a.x
-				dz := b.z - a.z
-				dist := math.sqrt(dx*dx + dz*dz)
-				if dist < SEPARATION_DIST {
-					nx := f64(0)
-					nz := f64(0)
-					if dist > 0.01 {
-						nx = dx / dist
-						nz = dz / dist
-					} else {
-						if gi % 2 == 0 { nx = 1 } else { nx = -1 }
-						nz = 0
-					}
-					push := (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK
-					a.x -= nx * push
-					a.z -= nz * push
-					b.x += nx * push
-					b.z += nz * push
+	for gi in 0 ..< g.n_gl_u {
+		for gj in gi + 1 ..< g.n_gl_u {
+			a_r := g.gl_u[gi]
+			b_r := g.gl_u[gj]
+			if a_r.seat != b_r.seat { continue } // an enemy is not a wall
+			a := &g.seats[a_r.seat].units[a_r.idx]
+			b := &g.seats[b_r.seat].units[b_r.idx]
+			dx := b.x - a.x
+			dz := b.z - a.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			if dist < SEPARATION_DIST {
+				nx := f64(0)
+				nz := f64(0)
+				if dist > 0.01 {
+					nx = dx / dist
+					nz = dz / dist
+				} else {
+					// the index-derived eight-spoke fallback (FAN(i + j*5))
+					ang := f64((gi + gj * 5) % 8) * 0.7853981633974483
+					nx = m_cos(ang)
+					nz = m_sin(ang)
 				}
+				push := (SEPARATION_DIST - dist) * SEPARATION_FORCE * sepK
+				a.x -= nx * push
+				a.z -= nz * push
+				b.x += nx * push
+				b.z += nz * push
 			}
-			gi += 1
 		}
 	}
-	CLEAR_DIST := f64(4.5)
-	CLEAR_FORCE := f64(0.05)
-	clearK := math.min(f64(3), math.max(f64(0), dt) * 60)
-	for si in 0 ..< 4 {
-		s := &g.seats[si]
-		for i in 0 ..< s.n_units {
-			u := &s.units[i]
-			if s.home.health > 0 {
-				dx := u.x - s.home.x
-				dz := u.z - s.home.z
-				dist := math.sqrt(dx*dx + dz*dz)
-				if dist > 0.01 && dist < CLEAR_DIST {
-					push := (CLEAR_DIST - dist) * CLEAR_FORCE * clearK
-					u.x += (dx / dist) * push
-					u.z += (dz / dist) * push
-				}
+	UNIT_BUILDING_CLEARANCE := f64(4.5)
+	WONDER_CLEARANCE := f64(10.5)
+	for ui in 0 ..< g.n_gl_u {
+		u_r := g.gl_u[ui]
+		u := &g.seats[u_r.seat].units[u_r.idx]
+		for bi in 0 ..< g.n_gl_b {
+			b_r := g.gl_b[bi]
+			bd := &g.seats[b_r.seat].bldgs[b_r.idx]
+			if bd.id == "farm" { continue }
+			if u.task == TASK_BUILDING && u.build_site >= 0 && u_r.seat == b_r.seat && i32(u.build_site) == b_r.idx { continue }
+			if u.task == TASK_REPAIRING && u.repair_site >= 0 && u_r.seat == b_r.seat && i32(u.repair_site) == b_r.idx { continue }
+			clr := UNIT_BUILDING_CLEARANCE
+			if bd.is_wonder { clr = WONDER_CLEARANCE }
+			dx := u.x - bd.x
+			dz := u.z - bd.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			if dist <= 0.01 {
+				ang := f64(ui % 8) * 0.7853981633974483
+				u.x = bd.x + m_cos(ang) * clr
+				u.z = bd.z + m_sin(ang) * clr
+			} else if dist < clr {
+				push := (clr - dist) * 0.05 * sepK
+				u.x += (dx / dist) * push
+				u.z += (dz / dist) * push
 			}
 		}
 	}
@@ -3093,6 +3441,1306 @@ observe_step :: proc(g: ^game_state) {
 // production, research and combat all run inside the reference's
 // simulation step and none can fire on a seat that has issued no order —
 // omitted on purpose rather than ported as theatre.
+
+// ===========================================================================
+// The rule brain (js/ai.js AIManager) and the mechanics it drives. The
+// whole-block transcription: think cadence, worker assignment, training,
+// research, building placement, exploration, and the worker state machine
+// (js/game.js updateWorkerTasks), production, research progress, the notice
+// ring, and the shore clamp.
+// ===========================================================================
+
+can_afford :: proc(s: ^seat, c: cost4) -> bool {
+	return s.res.food >= c.food && s.res.wood >= c.wood && s.res.stone >= c.stone && s.res.gold >= c.gold
+}
+
+spend :: proc(s: ^seat, c: cost4) {
+	s.res.food -= c.food
+	s.res.wood -= c.wood
+	s.res.stone -= c.stone
+	s.res.gold -= c.gold
+}
+
+seat_has_tech :: proc(s: ^seat, tid: string) -> bool {
+	for r in 0 ..< s.n_researched {
+		if s.researched[r] == tid {
+			return true
+		}
+	}
+	return false
+}
+
+seat_has_finished_bldg :: proc(s: ^seat, btype: string) -> bool {
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		if bd.id == btype && !bd.under_constr {
+			return true
+		}
+	}
+	return false
+}
+
+// The resource the seat needs (ai.js neededResourceType): food gates
+// everything below 200; otherwise the leanest stock, first of equals in the
+// reference's check order (food, wood, gold, stone).
+needed_resource_type :: proc(s: ^seat) -> int {
+	if s.res.food < 200 {
+		return 0
+	}
+	best := 1
+	best_val := m_inf
+	if s.res.food < best_val {
+		best_val = s.res.food
+		best = 0
+	}
+	if s.res.wood < best_val {
+		best_val = s.res.wood
+		best = 1
+	}
+	if s.res.gold < best_val {
+		best_val = s.res.gold
+		best = 3
+	}
+	if s.res.stone < best_val {
+		best_val = s.res.stone
+		best = 2
+	}
+	return best
+}
+
+// Nearest DISCOVERED node (of a type, or any with want < 0) with anything
+// left (ai.js findKnownResource).
+find_known_resource :: proc(g: ^game_state, s: ^seat, ux: f64, uz: f64, want: int) -> int {
+	nearest := -1
+	min_d := m_inf
+	for i in 0 ..< g.terrain.n_nodes {
+		if s.known[i] == 0 {
+			continue
+		}
+		n := &g.terrain.nodes[i]
+		if n.amount <= 0 {
+			continue
+		}
+		if want >= 0 && int(n.n_type) != want {
+			continue
+		}
+		d := m_hypot(n.x - ux, n.z - uz)
+		if d < min_d {
+			min_d = d
+			nearest = i
+		}
+	}
+	return nearest
+}
+
+// ai.js sendWorkerToResource: the move-then-harvest cycle restarts.
+send_worker_to_resource :: proc(g: ^game_state, s: ^seat, u: ^unit_state, ni: int) {
+	u.task = TASK_HARVESTING
+	u.harvest_node = ni
+	u.is_harvesting = false
+	u.carrying = false
+	u.harvest_amt = 0
+	u.is_moving = true
+	key := fmt.aprintf("s%d:node-spot", s.ci)
+	n := &g.terrain.nodes[ni]
+	u.target_x = n.x + (krng_draw(&s.k, key) - 0.5) * 2
+	u.target_z = n.z + (krng_draw(&s.k, key) - 0.5) * 2
+}
+
+// ai.js assignWorkersToHarvest: genuinely idle workers onto the most-needed
+// discovered resource; the nearest known node of any type as the fallback.
+assign_workers_to_harvest :: proc(g: ^game_state, s: ^seat) {
+	want := needed_resource_type(s)
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 {
+			continue
+		}
+		if w.is_moving || w.is_harvesting || w.carrying || w.is_building {
+			continue
+		}
+		if w.task == TASK_BUILDING || w.task == TASK_FARM_WORK || w.task == TASK_SCOUTING {
+			continue
+		}
+		ni := find_known_resource(g, s, w.x, w.z, want)
+		if ni < 0 {
+			ni = find_known_resource(g, s, w.x, w.z, -1)
+		}
+		if ni < 0 {
+			continue
+		}
+		send_worker_to_resource(g, s, w, ni)
+	}
+}
+
+// ai.js rebalanceWorkers: one pull per think toward a critically short type.
+rebalance_workers :: proc(g: ^game_state, s: ^seat) {
+	r := &s.res
+	threshold := [4]f64{150, 120, 60, 60} // food, wood, stone, gold
+	min_when_short := [4]int{2, 2, 1, 1}
+	// The reference's types order: food, wood, stone, gold (indices 0,1,2,3).
+	types := [4]int{0, 1, 2, 3}
+	// Group active harvesters by the resource they are gathering.
+	by_type: [4][MAX_UNITS]int
+	by_n: [4]int
+	for i in 0 ..< 4 {
+		by_n[i] = 0
+	}
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || (w.task != TASK_HARVESTING && w.task != TASK_CARRYING) {
+			continue
+		}
+		if w.harvest_node < 0 {
+			continue
+		}
+		t := int(g.terrain.nodes[w.harvest_node].n_type)
+		by_type[t][by_n[t]] = u
+		by_n[t] += 1
+	}
+	for ti in 0 ..< 4 {
+		t := types[ti]
+		if r.food >= threshold[0] && t == 0 { continue }
+		// The reference checks r[t] per type:
+		rt := [4]f64{r.food, r.wood, r.stone, r.gold}
+		if rt[t] >= threshold[t] {
+			continue
+		}
+		if by_n[t] >= min_when_short[t] {
+			continue
+		}
+		// center = ai.buildings[0]
+		if s.n_bldgs == 0 {
+			continue
+		}
+		b0 := &s.bldgs[0]
+		if find_known_resource(g, s, b0.x, b0.z, t) < 0 {
+			continue
+		}
+		// Donor: the most-staffed type that is itself not short.
+		donor_type := -1
+		donor_count := 0
+		for dt in 0 ..< 4 {
+			if dt == t || rt[dt] < threshold[dt] {
+				continue
+			}
+			if by_n[dt] > donor_count && by_n[dt] > min_when_short[dt] {
+				donor_count = by_n[dt]
+				donor_type = dt
+			}
+		}
+		if donor_type < 0 {
+			continue
+		}
+		// Prefer a donor not hauling goods.
+		pool := by_type[donor_type]
+		donor := pool[by_n[donor_type]-1]
+		for p in 0 ..< by_n[donor_type] {
+			if !s.units[pool[p]].carrying {
+				donor = pool[p]
+				break
+			}
+		}
+		d := &s.units[donor]
+		ni := find_known_resource(g, s, d.x, d.z, t)
+		if ni < 0 {
+			continue
+		}
+		send_worker_to_resource(g, s, d, ni)
+		return // one reassignment per think
+	}
+}
+
+// ai.js manageWorkers: free finished scouts, assign idles, break starvation.
+manage_workers :: proc(g: ^game_state, s: ^seat) {
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.task != TASK_SCOUTING {
+			continue
+		}
+		w.scout_ticks += 1
+		if !w.is_moving || w.scout_ticks > 6 {
+			w.task = TASK_NONE
+			w.scout_ticks = 0
+		}
+	}
+	assign_workers_to_harvest(g, s)
+	rebalance_workers(g, s)
+}
+
+// ai.js trainUnit (the worker path; military buildings arrive later).
+train_unit :: proc(s: ^seat, b: ^bldg_state) -> bool {
+	if b.under_constr || b.is_producing {
+		return false
+	}
+	ud := unit_def_for(s.ci, "worker")
+	if ud == nil {
+		return false
+	}
+	if s.pop >= s.max_pop {
+		return false
+	}
+	if !can_afford(s, ud.cost) {
+		return false
+	}
+	spend(s, ud.cost)
+	b.is_producing = true
+	b.prod_duration = 5000
+	b.prod_progress = 0
+	b.prod_type = "worker"
+	return true
+}
+
+// ai.js maybeStartResearch: one affordable tech, unlock techs first (the
+// reference's stable sort keeps tree order within each group).
+maybe_start_research :: proc(s: ^seat) -> bool {
+	if s.cur_research {
+		return false
+	}
+	c := &civs[s.ci]
+	for pass in 0 ..< 2 {
+		for t in 0 ..< c.n_techs {
+			te := &c.techs[t]
+			if ((pass == 0) != (te.unlocks_bldg != "")) {
+				continue
+			}
+			tid := tech_ids[s.ci][t]
+			if seat_has_tech(s, tid) {
+				continue
+			}
+			if age_idx(te.required_age) > age_idx("stone") {
+				continue
+			}
+			ok := true
+			for r in 0 ..< te.n_req {
+				if !seat_has_tech(s, te.requires[r]) {
+					ok = false
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+			if !seat_has_finished_bldg(s, te.research_at) {
+				continue
+			}
+			cf := math.floor(te.cost.food * s.techcost_mult)
+			cw := math.floor(te.cost.wood * s.techcost_mult)
+			cs := math.floor(te.cost.stone * s.techcost_mult)
+			cg := math.floor(te.cost.gold * s.techcost_mult)
+			if s.res.food >= cf && s.res.wood >= cw && s.res.stone >= cs && s.res.gold >= cg {
+				s.res.food -= cf
+				s.res.wood -= cw
+				s.res.stone -= cs
+				s.res.gold -= cg
+				s.cur_research = true
+				s.res_tech = tid
+				s.res_progress = 0
+				s.res_duration = te.research_time
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ---- building placement (js/game.js + ai.js findBuildPosition) ----
+
+clamp_to_map :: proc(g: ^game_state, x: f64, z: f64) -> (f64, f64) {
+	half := g.terrain.size / 2 - 30
+	return math.clamp(x, -half, half), math.clamp(z, -half, half)
+}
+
+resource_clearance :: proc(btype: string) -> f64 {
+	half := f64(3.5)
+	if btype == "town_center" {
+		half = 5
+	}
+	return half + 4.5
+}
+
+is_too_close_to_resource :: proc(g: ^game_state, x: f64, z: f64, btype: string) -> bool {
+	clr := resource_clearance(btype)
+	for i in 0 ..< g.terrain.n_nodes {
+		n := &g.terrain.nodes[i]
+		if n.amount <= 0 {
+			continue
+		}
+		if m_hypot(n.x - x, n.z - z) < clr {
+			return true
+		}
+	}
+	return false
+}
+
+// buildingGap: 9 base (12 for a wonder); tower spacing is dormant here.
+building_gap :: proc(a: f64) -> f64 {
+	return a
+}
+
+is_clear_build_spot :: proc(g: ^game_state, s: ^seat, btype: string, x: f64, z: f64) -> bool {
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		if m_hypot(bd.x - x, bd.z - z) < building_gap(9) {
+			return false
+		}
+	}
+	if is_too_close_to_resource(g, x, z, btype) {
+		return false
+	}
+	cx, cz := clamp_to_map(g, x, z)
+	if math.abs(cx - x) > 0.5 || math.abs(cz - z) > 0.5 {
+		return false
+	}
+	return true
+}
+
+find_build_position :: proc(g: ^game_state, s: ^seat, tc: ^bldg_state, btype: string) -> (f64, f64, bool) {
+	key := fmt.aprintf("s%d:build-site", s.ci)
+	for attempts in 0 ..< 24 {
+		x := tc.x + (krng_draw(&s.k, key) - 0.5) * 60
+		z := tc.z + (krng_draw(&s.k, key) - 0.5) * 60
+		if is_clear_build_spot(g, s, btype, x, z) {
+			return x, z, true
+		}
+	}
+	return 0, 0, false
+}
+
+// workerPullRank + PULL_SECS (js/game.js pickBuilder): the cheapest worker
+// in seconds of destroyed value. Builders and fighters never pulled.
+pick_builder :: proc(g: ^game_state, s: ^seat, site: ^bldg_state) -> (int, bool) {
+	best := -1
+	best_pulled := false
+	best_cost := m_inf
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 {
+			continue
+		}
+		// workerPullRank: builders/fighters Infinity (skip); repairers 5;
+		// farmers 6; scouts 7; harvesters 1-4 by stock; else 0 idle.
+		if w.task == TASK_BUILDING || w.is_building {
+			continue
+		}
+		rank := 0
+		if w.task == TASK_REPAIRING {
+			rank = 5
+		} else if w.farm >= 0 || w.task == TASK_FARM_WORK {
+			rank = 6
+		} else if w.task == TASK_SCOUTING {
+			rank = 7
+		} else if (w.task == TASK_HARVESTING || w.task == TASK_CARRYING) && w.harvest_node >= 0 {
+			// 1 + the harvest target's type position in the stock order
+			// (fattest first: food, wood, stone, gold sorted by the owner's
+			// stock, descending).
+			order := [4]int{0, 1, 2, 3}
+			// sort food, wood, stone, gold by stock descending (stable)
+			st := [4]f64{s.res.food, s.res.wood, s.res.stone, s.res.gold}
+			// selection sort, stable: pick the max each pass
+			for a in 0 ..< 4 {
+				ai := a
+				for b in a + 1 ..< 4 {
+					if st[order[b]] > st[order[ai]] {
+						ai = b
+					}
+				}
+				tmp := order[a]
+				order[a] = order[ai]
+				order[ai] = tmp
+			}
+			ht := int(g.terrain.nodes[w.harvest_node].n_type)
+			pos := 0
+			for k in 0 ..< 4 {
+				if order[k] == ht {
+					pos = k
+					break
+				}
+			}
+			rank = 1 + pos
+		}
+		pull_secs := [8]f64{0, 4, 6, 8, 10, 14, 18, 45}
+		walk := m_hypot(w.x - site.x, w.z - site.z) / (w.speed * 3)
+		cost := walk + pull_secs[rank]
+		if cost < best_cost {
+			best_cost = cost
+			best = u
+			best_pulled = rank > 0
+		}
+	}
+	return best, best_pulled
+}
+
+apply_builder :: proc(g: ^game_state, s: ^seat, pick: int, site: int, was_pulled: bool) {
+	w := &s.units[pick]
+	// _formerTask: remembered only when the worker was pulled off a task
+	// (pickBuilder's restore flag); an idle worker builds outright.
+	if was_pulled {
+		w.former_task = w.task
+		w.former_node = w.harvest_node
+		w.former_farm = w.farm
+	} else {
+		w.former_task = -1
+		w.former_node = -1
+		w.former_farm = -1
+	}
+	if w.farm >= 0 && s.bldgs[w.farm].assigned_worker == pick {
+		s.bldgs[w.farm].assigned_worker = -1
+	}
+	w.farm = -1
+	w.task = TASK_BUILDING
+	w.build_site = site
+	w.is_moving = false
+	w.is_harvesting = false
+	w.carrying = false
+}
+
+release_builder :: proc(g: ^game_state, s: ^seat, w: ^unit_state, ui: int) {
+	w.is_building = false
+	w.is_moving = false
+	w.task = TASK_NONE
+	w.build_site = -1
+	// applyQueuedAssign: no model orders in this corpus — dormant.
+	if w.former_task >= 0 {
+		ft := w.former_task
+		fn := w.former_node
+		ff := w.former_farm
+		w.former_task = -1
+		w.former_node = -1
+		w.former_farm = -1
+		if ft == TASK_FARM_WORK && ff >= 0 && ff < s.n_bldgs && s.bldgs[ff].health > 0 {
+			s.bldgs[ff].assigned_worker = ui
+			w.task = TASK_FARM_WORK
+			w.farm = ff
+			w.is_moving = true
+			key := fmt.aprintf("s%d:farm-spot", s.ci)
+			w.target_x = s.bldgs[ff].x + (krng_draw(&s.k, key) - 0.5) * 3
+			w.target_z = s.bldgs[ff].z + (krng_draw(&s.k, key) - 0.5) * 3
+		} else if fn >= 0 && fn < g.terrain.n_nodes && g.terrain.nodes[fn].amount > 0 {
+			// the restore resumes the FORMER TARGET directly — the node's
+			// center, no fresh node-spot draws (game.js releaseBuilder's
+			// harvesting branch)
+			w.task = TASK_HARVESTING
+			w.harvest_node = fn
+			w.is_moving = true
+			w.target_x = g.terrain.nodes[fn].x
+			w.target_z = g.terrain.nodes[fn].z
+			w.carrying = false
+		}
+	}
+}
+
+// The brain's buildStructure (ai.js): the def, the duplicate check, the
+// afford check, the spot, the spend, the site, the builder.
+build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
+	def := bldg_def_by_id(btype)
+	if def == nil {
+		return
+	}
+	for b in 0 ..< s.n_bldgs {
+		if s.bldgs[b].id == btype && s.bldgs[b].under_constr {
+			return
+		}
+	}
+	if !can_afford(s, def.cost) {
+		return
+	}
+	tc := &s.bldgs[0]
+	x, z, ok := find_build_position(g, s, tc, btype)
+	if !ok {
+		return
+	}
+	spend(s, def.cost)
+	bd := &s.bldgs[s.n_bldgs]
+	bd.id = btype
+	bd.x = x
+	bd.z = z
+	bd.max_health = building_max_health(def, s.ci, "stone")
+	bd.health = bd.max_health * 0.2 // a site starts at 20%?
+	bd.under_constr = true
+	bd.build_progress = 0
+	bd.build_time = def.build_time
+	bd.assigned_worker = -1
+	if btype == "farm" {
+		// createBuilding (units.js) gives farms their stock at CREATION,
+		// not at completion — the state's food field reads it during
+		// construction too
+		bd.food_amount = 300
+		bd.max_food = 300
+	}
+	s.n_bldgs += 1
+	g.gl_b[g.n_gl_b] = gl_ref{seat = i32(s.ci), idx = i32(s.n_bldgs - 1)}
+	g.n_gl_b += 1
+	pick, pulled := pick_builder(g, s, bd)
+	if pick >= 0 {
+		apply_builder(g, s, pick, s.n_bldgs - 1, pulled)
+	}
+}
+
+// ai.js runTurn, in the reference's order.
+run_turn :: proc(g: ^game_state, s: ^seat) {
+	workers := 0
+	for u in 0 ..< s.n_units {
+		if s.units[u].health > 0 {
+			workers += 1 // every unit this corpus fields is a worker
+		}
+	}
+	pop_free := s.max_pop - s.pop
+	if pop_free < 0 {
+		pop_free = 0
+	}
+	manage_workers(g, s)
+	// 1) population: a house when nearly capped
+	if pop_free <= 2 && s.max_pop < 100 {
+		houses := 0
+		for b in 0 ..< s.n_bldgs {
+			if s.bldgs[b].id == "house" {
+				houses += 1
+			}
+		}
+		if houses < 6 {
+			build_structure(g, s, "house")
+		}
+	}
+	// 2) economy: grow the worker base
+	if workers < 14 && pop_free > 0 {
+		for b in 0 ..< s.n_bldgs {
+			bd := &s.bldgs[b]
+			if bd.id == "town_center" && !bd.under_constr && !bd.is_producing {
+				if train_unit(s, bd) {
+					break
+				}
+			}
+		}
+	}
+	// 3) farms at 5+ workers
+	if workers >= 5 {
+		farms := 0
+		for b in 0 ..< s.n_bldgs {
+			if s.bldgs[b].id == "farm" {
+				farms += 1
+			}
+		}
+		if farms < 4 {
+			build_structure(g, s, "farm")
+		}
+	}
+	// 4) research hosts: academy/temple are age-gated — dormant at stone.
+	// 5) research
+	maybe_start_research(s)
+	// 6) age advancement needs 6+ workers (dormant this minute).
+	// 7) military buildings: a barracks first.
+	if !seat_has_finished_bldg(s, "barracks") {
+		build_structure(g, s, "barracks")
+	}
+	// 8) train military: workers < 8 — dormant this minute.
+	// 9) commandArmy: no military — dormant.
+	// 10) keep revealing the map.
+	explore_map(g, s)
+}
+
+// ai.js advanceThink: each seat's think clock, 2000 ms sim.
+advance_think :: proc(g: ^game_state, s: ^seat, dt: f64) {
+	s.think_timer += dt
+	if s.think_timer < 2000 {
+		return
+	}
+	s.think_timer -= 2000
+	run_turn(g, s)
+}
+
+// ai.js exploreMap: one spare worker to the least-explored tile.
+explore_map :: proc(g: ^game_state, s: ^seat) {
+	want := needed_resource_type(s)
+	b0 := &s.bldgs[0]
+	have_wanted := find_known_resource(g, s, b0.x, b0.z, want) >= 0
+	interval := 8
+	if !have_wanted {
+		interval = 2
+	}
+	s.explore_timer += 1
+	if s.explore_timer < interval {
+		return
+	}
+	s.explore_timer = 0
+	scout := -1
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 {
+			continue
+		}
+		if w.is_moving || w.is_harvesting || w.carrying || w.is_building {
+			continue
+		}
+		if w.farm >= 0 {
+			continue
+		}
+		if w.task == TASK_BUILDING || w.task == TASK_FARM_WORK {
+			continue
+		}
+		scout = u
+		break
+	}
+	if scout < 0 {
+		return
+	}
+	w := &s.units[scout]
+	// leastExploredSection: the 7x7 summary's minimum tile (row order).
+	sec_x, sec_z, sec_pct := least_explored_section(g, s)
+	half := g.terrain.size / 2 - 40
+	key := fmt.aprintf("s%d:scout", s.ci)
+	tx, tz: f64
+	if sec_pct < 100 {
+		tx = sec_x + (krng_draw(&s.k, key) - 0.5) * 100
+		tz = sec_z + (krng_draw(&s.k, key) - 0.5) * 100
+	} else {
+		// the golden-angle fallback (dormant while the map is unknown)
+		if s.scout_angle == 0 {
+			s.scout_angle = krng_draw(&s.k, key) * math.PI * 2
+		} else {
+			s.scout_angle += 2.399963
+		}
+		r0 := s.scout_radius
+		if r0 == 0 {
+			r0 = 60
+		}
+		s.scout_radius = math.min(half, r0 + 40)
+		tx = b0.x + m_cos(s.scout_angle) * s.scout_radius
+		tz = b0.z + m_sin(s.scout_angle) * s.scout_radius
+	}
+	// exploreMap: a worker scouts (task 'scouting'); military units scout with
+	// no task flag. This corpus fields workers only.
+	w.task = TASK_SCOUTING
+	w.is_moving = true
+	w.target_x = math.max(-half, math.min(half, tx))
+	w.target_z = math.max(-half, math.min(half, tz))
+}
+
+
+// The coast limit table and landLimit are the port's own (the coast section
+// above): 1025 f32 entries, built once at terrain construction (line 1039).
+
+// keepUnitsAshore: the chebyshev clamp onto the land (game.js 3784).
+keep_units_ashore :: proc(g: ^game_state) {
+	for i in 0 ..< 4 {
+		s := &g.seats[i]
+		for u in 0 ..< s.n_units {
+			w := &s.units[u]
+			cheb := math.max(math.abs(w.x), math.abs(w.z))
+			lim := land_limit(w.x, w.z)
+			if cheb <= lim {
+				continue
+			}
+			k := lim / cheb
+			w.x *= k
+			w.z *= k
+		}
+	}
+}
+
+// ---- the notices (game.js logPlayerEvent) --------------------------------
+log_player_event :: proc(g: ^game_state, s: ^seat, e: evt) {
+	if s.n_events >= MAX_EVTS {
+		// shift: drop the oldest, keep insertion order
+		for i in 1 ..< s.n_events {
+			s.events[i-1] = s.events[i]
+		}
+		s.n_events -= 1
+	}
+	ee := e
+	ee.at = g.sim_ms
+	ee.seq = s.turn_seq
+	ee.ttl = 2
+	s.events[s.n_events] = ee
+	s.n_events += 1
+	if s.n_events > 14 {
+		for i in 1 ..< s.n_events {
+			s.events[i-1] = s.events[i]
+		}
+		s.n_events -= 1
+	}
+}
+
+// The dry-node retarget (game.js retargetDepletedWorker): the once-per-node
+// notice, then the nearest known node of the same type FROM THE DEPLETED
+// NODE, fresh node-spot draws, or idle.
+retarget_depleted_worker :: proc(g: ^game_state, s: ^seat, u: ^unit_state) {
+	want := -1
+	nx, nz: f64
+	if u.harvest_node >= 0 {
+		want = int(g.terrain.nodes[u.harvest_node].n_type)
+		nx = g.terrain.nodes[u.harvest_node].x
+		nz = g.terrain.nodes[u.harvest_node].z
+		// the notice, once per node
+		if !s.dry_told[u.harvest_node] {
+			s.dry_told[u.harvest_node] = true
+			log_player_event(g, s, evt{kind = EVT_DRY_NODE, p_type = want, p_x = int(math.floor(nx + 0.5)), p_z = int(math.floor(nz + 0.5))})
+		}
+	}
+	from_x := nx
+	from_z := nz
+	u.task = TASK_NONE
+	u.harvest_node = -1
+	u.is_harvesting = false
+	u.harvest_timer = 0
+	if want < 0 {
+		return
+	}
+	best := -1
+	best_d := m_inf
+	for i in 0 ..< g.terrain.n_nodes {
+		n := &g.terrain.nodes[i]
+		if int(n.n_type) != want || n.amount <= 0 {
+			continue
+		}
+		if s.known[i] == 0 {
+			continue
+		}
+		d := m_hypot(n.x - from_x, n.z - from_z)
+		if d < best_d {
+			best_d = d
+			best = i
+		}
+	}
+	if best < 0 {
+		return
+	}
+	send_worker_to_resource(g, s, u, best)
+}
+
+// addResource (resources.js): the stockpile plus the lifetime delivered tally.
+add_resource :: proc(s: ^seat, t: int, amount: f64) {
+	if t == 0 {
+		s.res.food += amount
+		s.gathered.food += amount
+	} else if t == 1 {
+		s.res.wood += amount
+		s.gathered.wood += amount
+	} else if t == 2 {
+		s.res.stone += amount
+		s.gathered.stone += amount
+	} else if t == 3 {
+		s.res.gold += amount
+		s.gathered.gold += amount
+	}
+}
+
+// ---- the worker state machine (game.js updateWorkerTasks) ----------------
+
+// The closest FINISHED town center (State 2's drop-off search).
+closest_tc :: proc(s: ^seat, ux: f64, uz: f64) -> ^bldg_state {
+	best: ^bldg_state
+	best_d := m_inf
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		if bd.id != "town_center" || bd.under_constr {
+			continue
+		}
+		d := math.sqrt((bd.x-ux)*(bd.x-ux) + (bd.z-uz)*(bd.z-uz))
+		if d < best_d {
+			best_d = d
+			best = bd
+		}
+	}
+	return best
+}
+
+update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
+	for ui in 0 ..< s.n_units {
+		u := &s.units[ui]
+		if u.health <= 0 {
+			continue
+		}
+		// State 1: moving (builders and repairers excluded — they walk in
+		// their own states; fighters belong to updateCombat, dormant here).
+		if u.is_moving && u.task != TASK_BUILDING && u.task != TASK_REPAIRING {
+			// a node can run dry while we walk to it
+			if u.task == TASK_HARVESTING && !u.carrying && u.harvest_node >= 0 && g.terrain.nodes[u.harvest_node].amount <= 0 {
+				retarget_depleted_worker(g, s, u)
+				continue
+			}
+			dx := u.target_x - u.x
+			dz := u.target_z - u.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			threshold := 0.5
+			if u.task == TASK_CARRYING {
+				threshold = 5.5
+			} else if u.task == TASK_HARVESTING {
+				threshold = 2.0
+			}
+			if dist > threshold {
+				u.is_moving = true // the mover owns the flag
+				move_speed := u.speed * dt / 1000 * 3
+				u.x += (dx / dist) * move_speed
+				u.z += (dz / dist) * move_speed
+			} else {
+				// arrived: only plain moves snap onto the exact point
+				u.is_moving = false
+				if threshold <= 0.5 {
+					u.x = u.target_x
+					u.z = u.target_z
+				}
+				// harvesting and at the resource: start from the node's rim
+				if u.task == TASK_HARVESTING && u.harvest_node >= 0 && !u.carrying {
+					n := &g.terrain.nodes[u.harvest_node]
+					rim := f64(1.2)
+					if n.n_type == 0 {
+						rim = 1.45
+					} else if n.n_type == 1 {
+						rim = 0.9
+					} else if n.n_type == 2 {
+					rim = 2.1
+					} else if n.n_type == 3 {
+						rim = 1.9
+					}
+					rx := u.x - n.x
+					rz := u.z - n.z
+					rd := m_hypot(rx, rz)
+					if rd < rim {
+						if rd < 0.01 {
+							// dead-center: spread by a stable per-unit angle
+							// (never reached in this corpus: the node-spot
+							// spread keeps arrivals off the exact center)
+							a := m_fmod((f64(u.handle) * 2.4 + n.x * 0.13 + n.z * 0.17), 6.283)
+							rx = m_cos(a)
+							rz = m_sin(a)
+							rd = 1
+						}
+						u.x = n.x + (rx / rd) * rim
+						u.z = n.z + (rz / rd) * rim
+					}
+					u.is_harvesting = true
+					u.harvest_timer = 0
+				}
+				// a scout that has arrived has finished scouting
+				if u.task == TASK_SCOUTING {
+					u.task = TASK_NONE
+				}
+			}
+			continue
+		}
+		// State 2: harvesting at the resource (not moving)
+		if u.task == TASK_HARVESTING && u.is_harvesting && u.harvest_node >= 0 {
+			n := &g.terrain.nodes[u.harvest_node]
+			if n.amount <= 0 {
+				retarget_depleted_worker(g, s, u)
+				continue
+			}
+			u.harvest_timer += dt
+			if u.harvest_timer >= 2000 {
+				amount := 10 * s.harvest_bonus
+				n.amount = math.max(0, n.amount - amount)
+				if n.amount <= 0 {
+					// the crew that emptied it knows: correct the owner's belief
+					s.seen_amt[u.harvest_node] = 0
+				}
+				u.carrying = true
+				u.carry_type = int(n.n_type)
+				u.harvest_amt = amount
+				u.is_harvesting = false
+				u.harvest_timer = 0
+				tc := closest_tc(s, u.x, u.z)
+				if tc != nil {
+					u.target_x = tc.x
+					u.target_z = tc.z
+					u.is_moving = true
+					u.task = TASK_CARRYING
+				} else {
+					u.carrying = false
+					u.carry_type = 0
+					u.harvest_amt = 0
+					u.task = TASK_NONE
+					u.harvest_node = -1
+				}
+			}
+			continue
+		}
+		// State 3: carrying — arrived at the drop point
+		if u.task == TASK_CARRYING && u.carrying && !u.is_moving {
+			if u.harvest_amt > 0 {
+				add_resource(s, u.carry_type, u.harvest_amt)
+			}
+			u.carrying = false
+			u.carry_type = 0
+			u.harvest_amt = 0
+			// resume the harvest (fresh node-spot draws), or retarget
+			if u.harvest_node >= 0 {
+				n := &g.terrain.nodes[u.harvest_node]
+				if n.amount > 0 {
+					key := fmt.aprintf("s%d:node-spot", s.ci)
+					u.target_x = n.x + (krng_draw(&s.k, key) - 0.5) * 2
+					u.target_z = n.z + (krng_draw(&s.k, key) - 0.5) * 2
+					u.is_moving = true
+					u.task = TASK_HARVESTING
+				} else {
+					retarget_depleted_worker(g, s, u)
+				}
+			}
+			// the farm assignment resumes the field instead
+			if u.farm >= 0 && s.bldgs[u.farm].assigned_worker == ui && s.bldgs[u.farm].health > 0 {
+				u.task = TASK_FARM_WORK
+				u.is_moving = true
+				key := fmt.aprintf("s%d:farm-spot", s.ci)
+				u.target_x = s.bldgs[u.farm].x + (krng_draw(&s.k, key) - 0.5) * 3
+				u.target_z = s.bldgs[u.farm].z + (krng_draw(&s.k, key) - 0.5) * 3
+			}
+			if u.task == TASK_CARRYING {
+				u.task = TASK_NONE
+				u.harvest_node = -1
+			}
+			continue
+		}
+		// State 4: building construction
+		if u.task == TASK_BUILDING && u.build_site >= 0 {
+			site := &s.bldgs[u.build_site]
+			if site.health <= 0 || !site.under_constr {
+				release_builder(g, s, u, ui)
+				continue
+			}
+			dx := site.x - u.x
+			dz := site.z - u.z
+			dist := math.sqrt(dx*dx + dz*dz)
+			if dist > 3.5 {
+				u.is_building = false
+				u.is_moving = true
+				move_speed := u.speed * dt / 1000 * 3
+				u.x += (dx / dist) * move_speed
+				u.z += (dz / dist) * move_speed
+				continue
+			}
+			u.is_building = true
+			u.is_moving = false
+			rate := 1.0 * 1.0 // buildSpeed × workerBuildSpeedBonus (1.0 here)
+			site.build_progress += dt * rate
+			pct := math.min(1, site.build_progress / site.build_time)
+			site.health = math.max(site.health, site.max_health * (0.2 + 0.8 * pct))
+			if site.build_progress >= site.build_time {
+				complete_construction(g, s, site)
+				release_builder(g, s, u, ui)
+			}
+			continue
+		}
+		// State 5: farm_work
+		if u.task == TASK_FARM_WORK && u.farm >= 0 {
+			farm := &s.bldgs[u.farm]
+			if farm.health <= 0 {
+				farm.assigned_worker = -1
+				u.task = TASK_NONE
+				u.farm = -1
+				continue
+			}
+			if farm.under_constr {
+				u.is_moving = false
+				continue
+			}
+			if farm.assigned_worker < 0 {
+				farm.assigned_worker = ui
+			}
+			if !seat_has_finished_bldg(s, "town_center") {
+				farm.assigned_worker = -1
+				u.farm = -1
+				u.task = TASK_NONE
+				u.is_moving = false
+				u.is_harvesting = false
+				u.harvest_timer = 0
+				u.carrying = false
+				u.harvest_amt = 0
+				continue
+			}
+			if farm.food_amount >= 10 && !u.carrying && !u.is_moving {
+				u.harvest_timer += dt
+				if u.harvest_timer >= 2000 {
+					amount := 10 * s.harvest_bonus
+					farm.food_amount = math.max(0, farm.food_amount - amount)
+					u.carrying = true
+					u.carry_type = 0
+					u.harvest_amt = amount
+					u.harvest_timer = 0
+					tc := closest_tc(s, u.x, u.z)
+					if tc != nil {
+						u.target_x = tc.x
+						u.target_z = tc.z
+						u.is_moving = true
+						u.task = TASK_CARRYING
+					} else {
+						u.carrying = false
+						u.carry_type = 0
+						u.harvest_amt = 0
+						farm.assigned_worker = -1
+						u.farm = -1
+						u.task = TASK_NONE
+						u.is_moving = false
+					}
+				}
+				continue
+			}
+			if u.task == TASK_CARRYING && u.carrying && !u.is_moving {
+				add_resource(s, u.carry_type, u.harvest_amt)
+				u.carrying = false
+				u.carry_type = 0
+				u.harvest_amt = 0
+				u.task = TASK_FARM_WORK
+				u.is_moving = true
+				key := fmt.aprintf("s%d:farm-spot", s.ci)
+				u.target_x = farm.x + (krng_draw(&s.k, key) - 0.5) * 3
+				u.target_z = farm.z + (krng_draw(&s.k, key) - 0.5) * 3
+				continue
+			}
+			// idle at the farm: stay near it
+			if !u.is_moving {
+				dx := farm.x - u.x
+				dz := farm.z - u.z
+				if math.sqrt(dx*dx + dz*dz) > 3 {
+					u.is_moving = true
+					key := fmt.aprintf("s%d:farm-spot", s.ci)
+					u.target_x = farm.x + (krng_draw(&s.k, key) - 0.5) * 2
+					u.target_z = farm.z + (krng_draw(&s.k, key) - 0.5) * 2
+				}
+			}
+			continue
+		}
+		// State 6: idle — orphaned sites (none: builders never die here), then
+		// the nearest unassigned FINISHED farm.
+		if u.task == TASK_NONE && !u.is_moving && u.farm < 0 {
+			if !seat_has_finished_bldg(s, "town_center") {
+				continue
+			}
+			near_farm := -1
+			near_d := m_inf
+			for b in 0 ..< s.n_bldgs {
+				fb := &s.bldgs[b]
+				if fb.id != "farm" || fb.assigned_worker >= 0 || fb.under_constr {
+					continue
+				}
+				d := math.sqrt((fb.x-u.x)*(fb.x-u.x) + (fb.z-u.z)*(fb.z-u.z))
+				if d < near_d {
+					near_d = d
+					near_farm = b
+				}
+			}
+			if near_farm >= 0 {
+				fb := &s.bldgs[near_farm]
+				fb.assigned_worker = ui
+				u.task = TASK_FARM_WORK
+				u.farm = near_farm
+				u.is_moving = true
+				key := fmt.aprintf("s%d:farm-spot", s.ci)
+				u.target_x = fb.x + (krng_draw(&s.k, key) - 0.5) * 2
+				u.target_z = fb.z + (krng_draw(&s.k, key) - 0.5) * 2
+			}
+		}
+	}
+}
+
+// completeConstruction: full HP, functional, the population cap re-derived.
+complete_construction :: proc(g: ^game_state, s: ^seat, b: ^bldg_state) {
+	if !b.under_constr {
+		return
+	}
+	b.under_constr = false
+	b.build_progress = b.build_time
+	b.health = b.max_health
+	recompute_max_population(s)
+	// the farm's stock (createBuilding gave it at creation; keep in step here)
+	if b.id == "farm" && b.max_food == 0 {
+		b.food_amount = 300
+		b.max_food = 300
+	}
+	// onTownCenterBuilt: idle hands back to work — dormant (the TC never falls).
+}
+
+recompute_max_population :: proc(s: ^seat) {
+	slots := 0
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		if bd.under_constr || bd.health <= 0 {
+			continue
+		}
+		def := bldg_def_by_id(bd.id)
+		if def != nil {
+			slots += def.pop_bonus
+		}
+	}
+	s.max_pop = math.min(100, slots)
+}
+
+// updateProduction: the train timers and the spawn at the building.
+update_production :: proc(g: ^game_state, dt: f64) {
+	for i in 0 ..< 4 {
+		s := &g.seats[i]
+		for b in 0 ..< s.n_bldgs {
+			bd := &s.bldgs[b]
+			if bd.under_constr {
+				continue
+			}
+			if bd.is_producing && len(bd.prod_type) > 0 {
+				bd.prod_progress += dt
+				if bd.prod_progress >= bd.prod_duration {
+					// the spawn, clearly outside the footprint
+					key := fmt.aprintf("s%d:train-exit", s.ci)
+					spawn_angle := krng_draw(&s.k, key) * math.PI * 2
+					foot := f64(3.5)
+					if bd.id == "town_center" {
+						foot = 5
+					}
+					spawn_dist := foot + 3 + krng_draw(&s.k, key) * 1.5
+					spawn_x := bd.x + m_cos(spawn_angle) * spawn_dist
+					spawn_z := bd.z + m_sin(spawn_angle) * spawn_dist
+					if s.n_units < MAX_UNITS {
+						w := &s.units[s.n_units]
+						w.handle = s.handle_next
+						s.handle_next += 1
+						w.x = spawn_x
+						w.z = spawn_z
+						w.health = 40
+						w.speed = 1.0
+						w.harvest_node = -1
+						w.build_site = -1
+						w.farm = -1
+						w.former_node = -1
+						w.former_farm = -1
+						w.repair_site = -1
+						s.n_units += 1
+						s.pop = s.n_units
+						g.gl_u[g.n_gl_u] = gl_ref{seat = i32(s.ci), idx = i32(s.n_units - 1)}
+						g.n_gl_u += 1
+					}
+					bd.is_producing = false
+					bd.prod_type = ""
+					bd.prod_progress = 0
+				}
+			}
+		}
+	}
+}
+
+// updateResearchProgress: the timers, then the completion.
+update_research_progress :: proc(g: ^game_state, dt: f64) {
+	for i in 0 ..< 4 {
+		s := &g.seats[i]
+		if !s.cur_research {
+			continue
+		}
+		s.res_progress += dt
+		if s.res_progress >= s.res_duration {
+			complete_research(s, s.res_tech)
+		}
+	}
+}
+
+// completeResearch: researched, unlocks applied, the slot freed.
+complete_research :: proc(s: ^seat, tid: string) {
+	if s.n_researched < len(s.researched) {
+		s.researched[s.n_researched] = tid
+		s.n_researched += 1
+	}
+	c := &civs[s.ci]
+	for t in 0 ..< c.n_techs {
+		if tech_ids[s.ci][t] == tid {
+			te := &c.techs[t]
+			if te.unlocks_bldg != "" && s.n_unlocked_bldgs < len(s.unlocked_bldgs) {
+				s.unlocked_bldgs[s.n_unlocked_bldgs] = te.unlocks_bldg
+				s.n_unlocked_bldgs += 1
+			}
+			break
+		}
+	}
+	s.cur_research = false
+	s.res_tech = ""
+}
+
+// leastExploredSection: the 7x7 summary's minimum tile (row order).
+least_explored_section :: proc(g: ^game_state, s: ^seat) -> (f64, f64, f64) {
+	T := 7
+	size := g.terrain.size
+	tile := size / f64(T)
+	sum := exploration_summary(s)
+	best_r, best_c := 0, 0
+	for r in 0 ..< T {
+		for c in 0 ..< T {
+			if sum[r][c] < sum[best_r][best_c] {
+				best_r, best_c = r, c
+			}
+		}
+	}
+	x := math.floor((f64(best_c) + 0.5) * tile - size / 2 + 0.5)
+	z := math.floor((f64(best_r) + 0.5) * tile - size / 2 + 0.5)
+	return x, z, f64(sum[best_r][best_c])
+}
+
+
+// realSecs (openai-ai.js 926): max(0, ceil(gameMs / 1000 / sp)) — the sim
+// clock's remainder in MATCH seconds at the recorder's 2x rate.
+secs_left :: proc(progress: f64, duration: f64) -> i64 {
+	rem := duration - progress
+	if rem < 0 {
+		rem = 0
+	}
+	v := rem / 1000 / 2
+	return cast(i64)(-math.floor(-v))
+}
+
+// The two notice templates (game.js 4921, openai-ai.js 3369).
+evt_text :: proc(j: ^jw, e: ^evt) {
+	ty := res_type_name[e.p_type]
+	if e.kind == EVT_DRY_NODE {
+		j_str(j, fmt.aprintf("The %s at (%d, %d) was already exhausted when your workers reached it — they are moving on to the nearest %s you have discovered, or going idle if you have none left.", ty, e.p_x, e.p_z, ty))
+	} else if e.kind == EVT_LAST_EMPTY {
+		j_str(j, fmt.aprintf("Your last discovered %s node has been emptied — nodes.discovered.%s is now 0.", ty, ty))
+	}
+}
+
+// buildRecentEvents (openai-ai.js 3085): the seat's ring plus this look's own
+// found events, expired by the seat's own turns (two), the last eight, each
+// stamped with its age on the match clock. The found events carry the seq as
+// it stood BEFORE this look bumped it — that is what makes them news now.
+build_recent_events :: proc(o: ^obs) {
+	g := o.g
+	s := o.s
+	j := o.j
+	seq := s.turn_seq + 1
+	merged: [MAX_EVTS + 8]evt
+	n := 0
+	for i in 0 ..< s.n_events {
+		merged[n] = s.events[i]
+		n += 1
+	}
+	for p in 0 ..< o.n_pend {
+		e := o.pend[p]
+		e.at = g.sim_ms
+		e.seq = s.turn_seq
+		e.ttl = 2
+		merged[n] = e
+		n += 1
+	}
+	kept: [MAX_EVTS + 8]evt
+	kn := 0
+	for i in 0 ..< n {
+		if merged[i].seq >= seq - merged[i].ttl {
+			kept[kn] = merged[i]
+			kn += 1
+		}
+	}
+	start := 0
+	if kn > 8 {
+		start = kn - 8
+	}
+	for i in start ..< kn {
+		age := (g.match_ms - kept[i].at / 2) / 1000
+		age_n := int(math.floor(age + 0.5))
+		if age_n < 0 {
+			age_n = 0
+		}
+		ty := res_type_name[kept[i].p_type]
+		if kept[i].kind == EVT_DRY_NODE {
+			j_str(j, fmt.aprintf("%ds ago: The %s at (%d, %d) was already exhausted when your workers reached it — they are moving on to the nearest %s you have discovered, or going idle if you have none left.", age_n, ty, kept[i].p_x, kept[i].p_z, ty))
+		} else if kept[i].kind == EVT_LAST_EMPTY {
+			j_str(j, fmt.aprintf("%ds ago: Your last discovered %s node has been emptied — nodes.discovered.%s is now 0.", age_n, ty, ty))
+		}
+	}
+}
+
+
 // ===========================================================================
 // The match engine's tail: the mint, the stream writers, the tick, the driver.
 // This file is the P0(c) target — one minute of the golden stream, byte for
@@ -3159,20 +4807,37 @@ war_rng_id :: proc(k: ^keyed_rng, prefix: string) -> string {
 // stages of the P0(c) transcription.
 step_once :: proc(g: ^game_state) {
 	dt := f64(50)
+	// Population first: the brain below and the state both read it (stepOnce).
 	for i in 0 ..< 4 {
 		g.seats[i].pop = g.seats[i].n_units
 	}
+	// aiManager.update(dt): the 250 ms discovery beat, then the 2 s think beat.
+	// The brain's own node discovery (ai.js updateDiscovery) fills the same
+	// known set with the same batched vision test the harness's per-step
+	// observeStep uses below, so one pass covers both.
 	g.discovery_timer += dt
 	if g.discovery_timer >= 250 {
 		g.discovery_timer -= 250
 		for i in 0 ..< 4 {
 			mark_exploration(&g.seats[i], g.terrain.size)
 			update_rival_contacts(g, &g.seats[i])
+			brain_discovery(g, &g.seats[i])
 		}
 	}
+	for i in 0 ..< 4 {
+		advance_think(g, &g.seats[i], dt)
+	}
+	// simulateStep(dt): the worker state machines, production, research.
+	for i in 0 ..< 4 {
+		update_worker_tasks(g, &g.seats[i], dt)
+	}
+	update_production(g, dt)
+	update_research_progress(g, dt)
+	update_farm_regen(g, dt)
 	g.step_no += 1
 	war_position_rules(g, dt / 1000)
 	observe_step(g)
+	keep_units_ashore(g)
 }
 
 // discoveredNodeCounts: per type, how many of THIS seat's known nodes still
@@ -3339,32 +5004,19 @@ write_results_line :: proc(g: ^game_state, j: ^jw) {
 			int(math.floor(s.res.food)), int(math.floor(s.res.wood)), int(math.floor(s.res.stone)), int(math.floor(s.res.gold))))
 		j_raw(j, "},\"units\":")
 		j_raw(j, "{")
-		// units: the type-count map, first-encounter order.
-		first := true
+		// units: the type-count map — count(units) reduces the unit list to
+		// {type: n}; every unit in this corpus is a worker.
+		nw := 0
 		for u in 0 ..< s.n_units {
-			if s.units[u].health <= 0 {
-				continue
-			}
-			ty := "worker"
-			seen := false
-			for p in 0 ..< u {
-				if s.units[p].health > 0 && "worker" == ty {
-					seen = true
-					break
-				}
-			}
-			if seen {
-				continue
-			}
-			if !first {
-				j_raw(j, ",")
-			}
-			first = false
-			j_raw(j, fmt.aprintf("\"%s\":1", ty))
+			if s.units[u].health <= 0 { continue }
+			nw += 1
+		}
+		if nw > 0 {
+			j_raw(j, fmt.aprintf("\"worker\":%d", nw))
 		}
 		j_raw(j, "},\"buildings\":{")
 		// buildings: the type-count map, first-encounter order.
-		first = true
+		first := true
 		for b in 0 ..< s.n_bldgs {
 			seen := false
 			for p in 0 ..< b {
@@ -3395,7 +5047,29 @@ write_results_line :: proc(g: ^game_state, j: ^jw) {
 
 // The timeline line: the recorder's second tail record.
 write_timeline_line :: proc(g: ^game_state, j: ^jw) {
-	j_raw(j, "{\"type\":\"timeline\",\"timeline\":{\"t0\":0,\"ages\":[")
+	j_raw(j, "{\"type\":\"timeline\",\"timeline\":{\"t0\":0,\"samples\":[")
+	for i in 0 ..< g.tl_n_samples {
+		if i > 0 {
+			j_raw(j, ",")
+		}
+		row := &g.tl_samples[i]
+		j_raw(j, "{")
+		j_raw(j, fmt.aprintf("\"t\":%d,\"p\":", row.t))
+		j_raw(j, "{")
+		for si in 0 ..< 4 {
+			if si > 0 {
+				j_raw(j, ",")
+			}
+			j_raw(j, "\"")
+			j_raw(j, g.seats[si].pid)
+			j_raw(j, "\":")
+			j_raw(j, "{")
+			j_raw(j, fmt.aprintf("\"f\":%d,\"w\":%d,\"s\":%d,\"o\":%d,\"pw\":0,\"al\":%d", int(row.f[si]), int(row.w[si]), int(row.s[si]), int(row.o[si]), row.al[si] ? 1 : 0))
+			j_raw(j, "}")
+		}
+		j_raw(j, "}}")
+	}
+	j_raw(j, "],\"ages\":[")
 	for m in 0 ..< g.tl_n_marks {
 		if g.tl_marks[m].kind != 0 {
 			continue
@@ -3421,25 +5095,7 @@ write_timeline_line :: proc(g: ^game_state, j: ^jw) {
 		j_raw(j, fmt.aprintf("\"t\":%d,\"id\":\"%s\",\"type\":\"%s\"", g.tl_marks[m].t, g.seats[g.tl_marks[m].id].pid, res_type_name[g.tl_marks[m].p_type]))
 		j_raw(j, "}")
 	}
-	j_raw(j, "],\"wonders\":[],\"samples\":[")
-	for i in 0 ..< g.tl_n_samples {
-		if i > 0 {
-			j_raw(j, ",")
-		}
-		row := &g.tl_samples[i]
-		j_raw(j, "{")
-		j_raw(j, fmt.aprintf("\"t\":%d,\"p\":", row.t))
-		j_raw(j, "{")
-		for si in 0 ..< 4 {
-			if si > 0 {
-				j_raw(j, ",")
-			}
-			j_raw(j, "\"")
-			j_raw(j, g.seats[si].pid)
-			j_raw(j, fmt.aprintf("\":{\"f\":%d,\"w\":%d,\"s\":%d,\"o\":%d,\"pw\":0,\"al\":%d}", int(row.f[si]), int(row.w[si]), int(row.s[si]), int(row.o[si]), row.al[si] ? 1 : 0))
-		}
-		j_raw(j, "}}")
-	}
+	j_raw(j, "],\"wonders\":[")
 	j_raw(j, "]}}\n\n")
 }
 

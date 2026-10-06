@@ -1144,7 +1144,7 @@ class Game {
                 unit.carryingResource = false;
             } else if (unit.type === 'worker' && resourceNode) {
                 // Send worker to harvest this specific resource
-                unit.task = 'harvesting';
+                unit.task = 'harvesting'; 
                 unit.harvestTarget = resourceNode;
                 unit.isMoving = true;
                 unit.targetX = resourceNode.x;
@@ -2023,7 +2023,7 @@ class Game {
         if (unit.farmRef && unit.farmRef.assignedWorker === unit) unit.farmRef.assignedWorker = null;
         unit.farmRef = null;
         unit._formerTask = null;
-        unit.task = 'harvesting';
+        unit.task = 'harvesting'; 
         unit.harvestTarget = q.node;
         unit.buildTarget = null;
         unit.repairTarget = null;
@@ -2081,7 +2081,7 @@ class Game {
             return;
         }
         if (r.harvestTarget && r.harvestTarget.amount > 0) {
-            unit.task = 'harvesting';
+            unit.task = 'harvesting'; 
             unit.harvestTarget = r.harvestTarget;
             unit.isHarvesting = false;
             unit.harvestTimer = 0;
@@ -4780,7 +4780,7 @@ class Game {
                 return;
             }
             if ((f.task === 'harvesting' || f.task === 'carrying') && f.harvestTarget) {
-                unit.task = 'harvesting';
+                unit.task = 'harvesting'; 
                 unit.harvestTarget = f.harvestTarget;
                 unit.isMoving = true;
                 unit.targetX = f.harvestTarget.x;
@@ -4948,7 +4948,7 @@ class Game {
         });
         if (!best) return; // nothing of this type discovered & left → idle
 
-        unit.task = 'harvesting';
+        unit.task = 'harvesting'; 
         unit.harvestTarget = best;
         unit.isMoving = true;
         unit.targetX = best.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
@@ -5200,7 +5200,7 @@ class Game {
                         unit.targetX = unit.harvestTarget.x + (this.rand(unit, 'node-spot') - 0.5) * 2;
                         unit.targetZ = unit.harvestTarget.z + (this.rand(unit, 'node-spot') - 0.5) * 2;
                         unit.isMoving = true;
-                        unit.task = 'harvesting';
+                        unit.task = 'harvesting'; 
                     } else if (!unit.harvestTarget.isFarm) {
                         // Node ran dry while we were delivering: continue on the
                         // nearest discovered node of the same type (idle if none).
