@@ -1,5 +1,5 @@
 {
-  "note": "Byte-exact reference corpus of the rules at parent build 1040. Map lines re-recorded twice: 2026-10-04 (four conditions) and again 2026-10-05, when the recorder's missing terrain size argument was found and fixed — the first re-recording had generated 200-unit islands with the spawn ring outside the map. The contract of the RULES, not of any port.",
+  "note": "Byte-exact reference corpus of the rules at parent build 1040. Map lines re-recorded twice: 2026-10-04 (four conditions) and again 2026-10-05, when the recorder's missing terrain size argument was found and fixed \u2014 the first re-recording had generated 200-unit islands with the spawn ring outside the map. The contract of the RULES, not of any port.",
   "seed": "golden",
   "difficulty": "medium",
   "seats": 4,
@@ -12,7 +12,7 @@
     "golden/turn1-b1040.jsonl": {
       "sha256": "4e015ba9f314609d3f889bed812cb3fd196b3aa23c629f9c2cc8bd62c16872fd",
       "bytes": 21147,
-      "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step — clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
+      "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step \u2014 clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
     },
     "golden/map-line-b1040.json": {
       "sha256": "eeec4de9f14e18dc4ab1d826a475f53a338619b3bbe6a60cab155fd950dc02a9",
@@ -51,6 +51,11 @@
     "golden/stream-1m.jsonl": {
       "bytes": 3106064,
       "sha256": "0044b2d7fda3d405e078cb5d6418f1164c53a35a56888bdf31998a39519ee6ab"
+    },
+    "golden/stream-5m.jsonl": {
+      "sha256": "065a006f493e9b95d6dc20b830e0b6645da5402fad163d0dba381882467fd650",
+      "bytes": 15908261,
+      "note": "5 minutes, re-recorded 6 Oct 2026 with the cleaned recorder; the second whole-match oracle \u2014 exercises farm depletion/rebuild, farms regen, barracks, an archery_range site, exploration marking and scouts"
     }
   },
   "keyedVectors": {
