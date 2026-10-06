@@ -1104,6 +1104,7 @@ unit_state :: struct {
 	handle: int,
 	x, z: f64,
 	health: f64,
+	u_type: string, // 'worker' or the military id ('militia', 'archer', ...)
 	// --- the match engine's worker fields (js/game.js updateWorkerTasks) ---
 	task: int, // TASK_*: the worker state machine's current job
 	is_moving: bool,
@@ -1270,9 +1271,9 @@ game_state :: struct {
 	// --- the match timeline (game.js resetTimeline/sampleTimeline) ---
 	tl_t0: f64,
 	tl_last: f64,
-	tl_samples: [64]tl_sample,
+	tl_samples: [256]tl_sample,
 	tl_n_samples: int,
-	tl_marks: [64]tl_mark,
+	tl_marks: [256]tl_mark,
 	tl_n_marks: int,
 	tl_age: [4]int, // the last age index per seat (-1 = unset)
 	tl_dry: [4][4]bool, // ran-dry flags per seat per type (start true)
@@ -1337,7 +1338,7 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
 		for w in 0 ..< 3 {
 			x := sp[0] + (krng_draw(&s.k, key) - 0.5) * 10
 			z := sp[1] + (krng_draw(&s.k, key) - 0.5) * 10
-			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, speed = 1.0, harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
+			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, speed = 1.0, u_type = "worker", harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
 			s.n_units += 1
 			g.gl_u[g.n_gl_u] = gl_ref{seat = i32(i), idx = i32(w)}
 			g.n_gl_u += 1
@@ -1657,7 +1658,7 @@ tile_at :: proc(x: f64, z: f64, size: f64) -> string {
 // every string in the document is ASCII.
 // ===========================================================================
 
-JW_SIZE :: 33554432 // the whole one-minute stream (3.1 MB) fits with headroom; 5 minutes is 15.9 MB
+JW_SIZE :: 134217728 // the one-minute stream is 3.1 MB; 10 minutes is 34.7 MB
 
 jw :: struct {
 	buf: [JW_SIZE]byte,
@@ -3735,12 +3736,14 @@ manage_workers :: proc(g: ^game_state, s: ^seat) {
 }
 
 // ai.js trainUnit (the worker path; military buildings arrive later).
-train_unit :: proc(s: ^seat, b: ^bldg_state) -> bool {
+train_unit_id :: proc(s: ^seat, b: ^bldg_state, unit_id: string) -> bool {
+	// ai.js trainUnit: no production while building, a def with a cost, pop
+	// room, and the money — then the 5 s train timer starts.
 	if b.under_constr || b.is_producing {
 		return false
 	}
-	ud := unit_def_for(s.ci, "worker")
-	if ud == nil {
+	ud := unit_def_for(s.ci, unit_id)
+	if ud == nil || ud.cost.food == 0 && ud.cost.wood == 0 && ud.cost.stone == 0 && ud.cost.gold == 0 {
 		return false
 	}
 	if s.pop >= s.max_pop {
@@ -3753,8 +3756,87 @@ train_unit :: proc(s: ^seat, b: ^bldg_state) -> bool {
 	b.is_producing = true
 	b.prod_duration = 5000
 	b.prod_progress = 0
-	b.prod_type = "worker"
+	b.prod_type = unit_id
 	return true
+}
+
+train_unit :: proc(s: ^seat, b: ^bldg_state) -> bool {
+	return train_unit_id(s, b, "worker")
+}
+
+// ai.js getUnitToTrain: the per-age pick ladder, best first, restricted to
+// what THIS building offers (civ exclusions reshape the list); nothing from
+// the ladder means the building's last option — uniques append after the
+// standard tiers, so that is the most advanced one.
+get_unit_to_train :: proc(s: ^seat, b: ^bldg_state) -> string {
+	ladder: [3]string
+	n_ladder: int
+	if b.id == "barracks" {
+		if s.cur_age >= 2 {
+			ladder = {"champion", "warrior", "militia"}
+			n_ladder = 3
+		} else if s.cur_age == 1 {
+			ladder = {"warrior", "militia"}
+			n_ladder = 2
+		} else {
+			ladder = {"militia"}
+			n_ladder = 1
+		}
+	} else if b.id == "archery_range" {
+		if s.cur_age >= 2 {
+			ladder = {"elite_archer", "crossbowman", "archer"}
+			n_ladder = 3
+		} else {
+			ladder = {"archer"}
+			n_ladder = 1
+		}
+	} else if b.id == "stable" {
+		if s.cur_age >= 2 {
+			ladder = {"heavy_cavalry", "cavalry", "scout_cavalry"}
+			n_ladder = 3
+		} else if s.cur_age == 1 {
+			ladder = {"cavalry", "scout_cavalry"}
+			n_ladder = 2
+		} else {
+			ladder = {"scout_cavalry"}
+			n_ladder = 1
+		}
+	} else {
+		return ""
+	}
+	opts: [8]string
+	n_opts := train_tiers_for(s.ci, b.id, s.cur_age, opts[:])
+	for k in 0 ..< n_ladder {
+		for o in 0 ..< n_opts {
+			if opts[o] == ladder[k] {
+				return ladder[k]
+			}
+		}
+	}
+	if n_opts > 0 {
+		return opts[n_opts-1]
+	}
+	return ""
+}
+
+// ai.js trainMilitary: every finished, idle military building trains its
+// ladder pick (standard profile: no counter-pick, no reserve).
+train_military :: proc(g: ^game_state, s: ^seat) {
+	for b in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[b]
+		def := bldg_def_by_id(bd.id)
+		if def == nil || !def.can_train || bd.id == "town_center" {
+			continue
+		}
+		if bd.under_constr || bd.is_producing {
+			continue
+		}
+		unit_type := get_unit_to_train(s, bd)
+		if unit_type == "" {
+			continue
+		}
+		train_unit_id(s, bd, unit_type)
+	}
 }
 
 // ai.js maybeStartResearch: one affordable tech, unlock techs first (the
@@ -3942,12 +4024,10 @@ apply_builder :: proc(g: ^game_state, s: ^seat, pick: int, site: int, was_pulled
 	// _formerTask: remembered only when the worker was pulled off a task
 	// (pickBuilder's restore flag); an idle worker builds outright.
 	if was_pulled {
-		fmt.eprintln("APPLYB r=%d h=%d task=%d", g.step_no, w.handle, w.task)
 		w.former_task = w.task
 		w.former_node = w.harvest_node
 		w.former_farm = w.farm
 	} else {
-		fmt.eprintln("APPLYB-NR r=%d h=%d task=%d", g.step_no, w.handle, w.task)
 		w.former_task = -1
 		w.former_node = -1
 		w.former_farm = -1
@@ -4065,7 +4145,7 @@ build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
 run_turn :: proc(g: ^game_state, s: ^seat) {
 	workers := 0
 	for u in 0 ..< s.n_units {
-		if s.units[u].health > 0 {
+		if s.units[u].health > 0 && s.units[u].u_type == "worker" {
 			workers += 1 // every unit this corpus fields is a worker
 		}
 	}
@@ -4128,8 +4208,15 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 		// Defensive towers once we have stone to spare (standard: one).
 		build_structure(g, s, "tower")
 	}
-	// 8) train military: workers < 8 — dormant this minute.
-	// 9) commandArmy: no military — dormant.
+	// 8) train military once the economy is on its feet (or a rival Wonder
+	// must be answered — none in this corpus).
+	pop_free2 := s.max_pop - s.pop
+	if pop_free2 > 0 && workers >= 8 {
+		train_military(g, s)
+	}
+	// 9) commandArmy: march the army to the least-explored tile (no enemy
+	// contacts yet); dormant until a seat has military.
+	command_army(g, s)
 	// 10) keep revealing the map.
 	explore_map(g, s)
 }
@@ -4617,7 +4704,6 @@ update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
 			}
 			if near_farm >= 0 {
 				fb := &s.bldgs[near_farm]
-				fmt.eprintln("FARMIDLE step=%d h=%d farm=%d,%d", g.step_no, u.handle, int(math.floor(fb.x+0.5)), int(math.floor(fb.z+0.5)))
 				fb.assigned_worker = ui
 				u.task = TASK_FARM_WORK
 				u.farm = near_farm
@@ -4690,8 +4776,10 @@ update_production :: proc(g: ^game_state, dt: f64) {
 						s.handle_next += 1
 						w.x = spawn_x
 						w.z = spawn_z
-						w.health = 40
-						w.speed = 1.0
+						ud := unit_def_for(s.ci, bd.prod_type)
+						w.u_type = bd.prod_type
+						w.health = ud.health
+						w.speed = ud.speed
 						w.harvest_node = -1
 						w.build_site = -1
 						w.farm = -1
