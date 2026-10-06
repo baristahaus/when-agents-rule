@@ -1142,8 +1142,8 @@ TASK_REPAIRING :: 4
 TASK_FARM_WORK :: 5
 TASK_SCOUTING :: 6
 
-MAX_UNITS :: 24 // this minute peaks at 14; headroom for longer matches
-MAX_BLDGS :: 8 // TC + houses + farms
+MAX_UNITS :: 64 // the 1-minute corpus peaks at 14; headroom for longer matches
+MAX_BLDGS :: 32 // TC + houses + farms; the 5-minute run builds 9
 
 // The reference's position rules walk TWO GLOBAL lists in CREATION order:
 // renderer.units and renderer.buildings (game.js getAllUnits/getAllBuildings).
@@ -1249,6 +1249,7 @@ game_state :: struct {
 	match_ms: f64, // clock.matchMs: the MATCH clock, 25 per sim step at the recorder's 2x
 	sim_ms: f64, // clock.simMs: 50 per sim step
 	step_no: int,
+	total_minutes: int, // the recorded corpus length (header field)
 	discovery_timer: f64, // the 4 Hz beat's own accumulator (mgr.update)
 	world_rng: keyed_rng, // the game's one rng (seed 'golden'): 'world:*' draws
 	// --- the match timeline (game.js resetTimeline/sampleTimeline) ---
@@ -1275,6 +1276,7 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 	g.step_no = 0
 	g.world_rng.seed = "golden"
 	g.discovery_timer = 0
+	g.total_minutes = 1
 	g.tl_t0 = 0
 	g.tl_last = 0
 	g.tl_n_samples = 0
@@ -1351,8 +1353,15 @@ unit_vision :: proc(u: ^unit_state) -> f64 {
 	return 15
 }
 building_vision :: proc(b: ^bldg_state) -> f64 {
+	// construction sites grant no vision; completed wonders are landmarks
+	if b.under_constr {
+		return 0
+	}
 	if b.id == "tower" {
 		return 80
+	}
+	if b.is_wonder {
+		return 60
 	}
 	if b.id == "town_center" {
 		return 40
@@ -1471,9 +1480,9 @@ make_eyes :: proc(s: ^seat) -> eye_set {
 	for i in 0 ..< s.n_units {
 		u := &s.units[i]
 		if u.health > 0 {
-			x := f64(math.floor((u.x) + 0.5))
-			z := f64(math.floor((u.z) + 0.5))
-			eyes_file(&es, x, z, unit_vision(u))
+			// the eye is filed at the RAW position — buildVisionTest files
+			// u.x/u.z verbatim; rounding here shifts the vision boundary
+			eyes_file(&es, u.x, u.z, unit_vision(u))
 		}
 	}
 	b := &s.home
@@ -1633,7 +1642,7 @@ tile_at :: proc(x: f64, z: f64, size: f64) -> string {
 // every string in the document is ASCII.
 // ===========================================================================
 
-JW_SIZE :: 4194304 // the whole one-minute stream (3.1 MB) fits with headroom
+JW_SIZE :: 33554432 // the whole one-minute stream (3.1 MB) fits with headroom; 5 minutes is 15.9 MB
 
 jw :: struct {
 	buf: [JW_SIZE]byte,
@@ -2730,11 +2739,12 @@ observe_line :: proc(o: ^obs) {
 			j_key(j, "food")
 			j_int(j, cast(i64)(math.floor(bd.food_amount)))
 			j_key(j, "farmed")
-			// the farm's real status, from the same predicate regrowth gates on
+			// the farm's real status: game.js farmFarmer — the hand must still
+			// hold the post (alive, farm_work or carrying, farmRef === farm)
 			farmed := false
 			if bd.assigned_worker >= 0 && bd.assigned_worker < s.n_units {
 				w := &s.units[bd.assigned_worker]
-				farmed = w.health > 0 && w.farm == b
+				farmed = w.health > 0 && w.farm == b && (w.task == TASK_FARM_WORK || w.task == TASK_CARRYING)
 			}
 			j_bool(j, farmed)
 		}
@@ -3051,7 +3061,7 @@ observe_line :: proc(o: ^obs) {
 					e.blocked[e.n_block] = "age"
 					e.n_block += 1
 				}
-				standing := host == "town_center" && s.home.health > 0
+				standing := seat_has_finished_bldg(s, host)
 				if !standing {
 					e.blocked[e.n_block] = "host"
 					e.n_block += 1
@@ -3258,7 +3268,7 @@ mark_exploration :: proc(s: ^seat, size: f64) -> int {
 				wz := (f64(gz) + 0.5)*cell - half
 				ddx := wx - x
 				ddz := wz - z
-				if math.sqrt(ddx*ddx + ddz*ddz) <= rng {
+				if m_hypot(ddx, ddz) <= rng {
 					s.explored[gz*G + gx] = 1
 				}
 			}
@@ -3271,9 +3281,15 @@ mark_exploration :: proc(s: ^seat, size: f64) -> int {
 			marked += 1
 		}
 	}
-	if s.home.health > 0 {
-		mark(s, s.home.x, s.home.z, building_vision(&s.home), cell, half)
-		marked += 1
+	// every building marks too — including construction sites, whose
+	// buildingVision is 0, so a site lights its own bitmap cell (game.js
+	// markExploration marks buildings on health alone)
+	for bi in 0 ..< s.n_bldgs {
+		bd := &s.bldgs[bi]
+		if bd.health > 0 {
+			mark(s, bd.x, bd.z, building_vision(bd), cell, half)
+			marked += 1
+		}
 	}
 	return marked
 }
@@ -3470,6 +3486,36 @@ seat_has_tech :: proc(s: ^seat, tid: string) -> bool {
 	return false
 }
 
+// ai.js ensureMilitaryBuildings' has(): any building of the type, sites
+// under construction included
+seat_has_bldg :: proc(s: ^seat, btype: string) -> bool {
+	for b in 0 ..< s.n_bldgs {
+		if s.bldgs[b].id == btype {
+			return true
+		}
+	}
+	return false
+}
+
+seat_count_bldg :: proc(s: ^seat, btype: string) -> int {
+	n := 0
+	for b in 0 ..< s.n_bldgs {
+		if s.bldgs[b].id == btype {
+			n += 1
+		}
+	}
+	return n
+}
+
+seat_researched :: proc(s: ^seat, tid: string) -> bool {
+	for r in 0 ..< s.n_researched {
+		if s.researched[r] == tid {
+			return true
+		}
+	}
+	return false
+}
+
 seat_has_finished_bldg :: proc(s: ^seat, btype: string) -> bool {
 	for b in 0 ..< s.n_bldgs {
 		bd := &s.bldgs[b]
@@ -3576,6 +3622,8 @@ assign_workers_to_harvest :: proc(g: ^game_state, s: ^seat) {
 // ai.js rebalanceWorkers: one pull per think toward a critically short type.
 rebalance_workers :: proc(g: ^game_state, s: ^seat) {
 	r := &s.res
+	if s.ci == 3 && g.step_no >= 11100 {
+	}
 	threshold := [4]f64{150, 120, 60, 60} // food, wood, stone, gold
 	min_when_short := [4]int{2, 2, 1, 1}
 	// The reference's types order: food, wood, stone, gold (indices 0,1,2,3).
@@ -3614,7 +3662,10 @@ rebalance_workers :: proc(g: ^game_state, s: ^seat) {
 			continue
 		}
 		b0 := &s.bldgs[0]
-		if find_known_resource(g, s, b0.x, b0.z, t) < 0 {
+		fk := find_known_resource(g, s, b0.x, b0.z, t)
+		if s.ci == 3 && g.step_no >= 11100 {
+		}
+		if fk < 0 {
 			continue
 		}
 		// Donor: the most-staffed type that is itself not short.
@@ -3876,10 +3927,12 @@ apply_builder :: proc(g: ^game_state, s: ^seat, pick: int, site: int, was_pulled
 	// _formerTask: remembered only when the worker was pulled off a task
 	// (pickBuilder's restore flag); an idle worker builds outright.
 	if was_pulled {
+		fmt.eprintln("APPLYB r=%d h=%d task=%d", g.step_no, w.handle, w.task)
 		w.former_task = w.task
 		w.former_node = w.harvest_node
 		w.former_farm = w.farm
 	} else {
+		fmt.eprintln("APPLYB-NR r=%d h=%d task=%d", g.step_no, w.handle, w.task)
 		w.former_task = -1
 		w.former_node = -1
 		w.former_farm = -1
@@ -3896,6 +3949,7 @@ apply_builder :: proc(g: ^game_state, s: ^seat, pick: int, site: int, was_pulled
 }
 
 release_builder :: proc(g: ^game_state, s: ^seat, w: ^unit_state, ui: int) {
+	fsite := w.build_site
 	w.is_building = false
 	w.is_moving = false
 	w.task = TASK_NONE
@@ -3916,10 +3970,11 @@ release_builder :: proc(g: ^game_state, s: ^seat, w: ^unit_state, ui: int) {
 			key := fmt.aprintf("s%d:farm-spot", s.ci)
 			w.target_x = s.bldgs[ff].x + (krng_draw(&s.k, key) - 0.5) * 3
 			w.target_z = s.bldgs[ff].z + (krng_draw(&s.k, key) - 0.5) * 3
-		} else if fn >= 0 && fn < g.terrain.n_nodes && g.terrain.nodes[fn].amount > 0 {
+		} else if ft == TASK_HARVESTING || ft == TASK_CARRYING {
 			// the restore resumes the FORMER TARGET directly — the node's
-			// center, no fresh node-spot draws (game.js releaseBuilder's
-			// harvesting branch)
+			// center, no fresh node-spot draws, even if the node has since
+			// run dry (game.js releaseBuilder's harvesting branch; the walk
+			// there hits State 2's depletion check, which retargets)
 			w.task = TASK_HARVESTING
 			w.harvest_node = fn
 			w.is_moving = true
@@ -3927,6 +3982,20 @@ release_builder :: proc(g: ^game_state, s: ^seat, w: ^unit_state, ui: int) {
 			w.target_z = g.terrain.nodes[fn].z
 			w.carrying = false
 		}
+		// former task was idle -> stay idle (game.js's bare return)
+		return
+	}
+	// An idle worker that just finished a farm becomes its farmer
+	fs := &s.bldgs[fsite]
+	if fs.health > 0 && !fs.under_constr && fs.id == "farm" && fs.assigned_worker < 0 {
+		fs.assigned_worker = ui
+		w.task = TASK_FARM_WORK
+		w.farm = fsite
+		w.is_moving = true
+		key := fmt.aprintf("s%d:farm-spot", s.ci)
+		w.target_x = fs.x + (krng_draw(&s.k, key) - 0.5) * 3
+		w.target_z = fs.z + (krng_draw(&s.k, key) - 0.5) * 3
+		return
 	}
 }
 
@@ -4029,9 +4098,20 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 	// 5) research
 	maybe_start_research(s)
 	// 6) age advancement needs 6+ workers (dormant this minute).
-	// 7) military buildings: a barracks first.
-	if !seat_has_finished_bldg(s, "barracks") {
+	// 7) military buildings: a barracks first, then stable/archery_range behind
+	// their unlock techs, then a tower on spare stone (ai.js
+	// ensureMilitaryBuildings; has() counts sites under construction too).
+	// The reference's method returns after ONE build, but runTurn itself goes
+	// on — exploreMap below always runs.
+	if !seat_has_bldg(s, "barracks") {
 		build_structure(g, s, "barracks")
+	} else if seat_researched(s, "horseback") && !seat_has_bldg(s, "stable") {
+		build_structure(g, s, "stable")
+	} else if seat_researched(s, "longbow") && !seat_has_bldg(s, "archery_range") {
+		build_structure(g, s, "archery_range")
+	} else if seat_count_bldg(s, "tower") < 1 && s.res.stone >= 120 {
+		// Defensive towers once we have stone to spare (standard: one).
+		build_structure(g, s, "tower")
 	}
 	// 8) train military: workers < 8 — dormant this minute.
 	// 9) commandArmy: no military — dormant.
@@ -4062,7 +4142,6 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 	if s.explore_timer < interval {
 		return
 	}
-	s.explore_timer = 0
 	scout := -1
 	for u in 0 ..< s.n_units {
 		w := &s.units[u]
@@ -4084,6 +4163,9 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 	if scout < 0 {
 		return
 	}
+	// the timer resets only when a scout actually goes out — a seat with no
+	// idle unit keeps accumulating, so it dispatches the moment one frees up
+	s.explore_timer = 0
 	w := &s.units[scout]
 	// leastExploredSection: the 7x7 summary's minimum tile (row order).
 	sec_x, sec_z, sec_pct := least_explored_section(g, s)
@@ -4520,6 +4602,7 @@ update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
 			}
 			if near_farm >= 0 {
 				fb := &s.bldgs[near_farm]
+				fmt.eprintln("FARMIDLE step=%d h=%d farm=%d,%d", g.step_no, u.handle, int(math.floor(fb.x+0.5)), int(math.floor(fb.z+0.5)))
 				fb.assigned_worker = ui
 				u.task = TASK_FARM_WORK
 				u.farm = near_farm
@@ -4835,6 +4918,13 @@ step_once :: proc(g: ^game_state) {
 	update_research_progress(g, dt)
 	update_farm_regen(g, dt)
 	g.step_no += 1
+	if g.step_no >= 1850 && g.step_no <= 1870 {
+		s := &g.seats[2]
+		for b in 0 ..< s.n_bldgs {
+		}
+		for u in 0 ..< s.n_units {
+		}
+	}
 	war_position_rules(g, dt / 1000)
 	observe_step(g)
 	keep_units_ashore(g)
@@ -4893,7 +4983,9 @@ sample_timeline :: proc(g: ^game_state, now_ms: f64) {
 // The match line: the recorder's rec.begin payload (transcript.js's match
 // header + the recorder's conditions), players in seat order.
 write_match_line :: proc(g: ^game_state, j: ^jw) {
-	j_raw(j, "{\"type\":\"match\",\"matchId\":\"golden\",\"startedAt\":0,\"seed\":\"golden\",\"difficulty\":\"medium\",\"seats\":4,\"minutes\":1,\"stepMs\":100,\"snapshotMs\":500,\"simSpeed\":1,\"turnBased\":false,\"resourceBoost\":false,\"version\":\"1.0.0\",\"players\":[")
+	j_raw(j, "{\"type\":\"match\",\"matchId\":\"golden\",\"startedAt\":0,\"seed\":\"golden\",\"difficulty\":\"medium\",\"seats\":4,")
+	j_raw(j, fmt.aprintf("\"minutes\":%d,", g.total_minutes))
+	j_raw(j, "\"stepMs\":100,\"snapshotMs\":500,\"simSpeed\":1,\"turnBased\":false,\"resourceBoost\":false,\"version\":\"1.0.0\",\"players\":[")
 	for i in 0 ..< 4 {
 		if i > 0 {
 			j_raw(j, ",")
@@ -5107,10 +5199,18 @@ main :: proc() {
 	if len(os.args) < 2 {
 		return
 	}
+	// ticks: 600 = the 1-minute corpus; pass 600*minutes for longer runs
+	ticks := 600
+	if len(os.args) >= 3 {
+		ticks = strconv.atoi(os.args[2])
+	}
 	spawns := arena_spawns()
 	g: game_state
 	g.terrain = t_terrain(f64(800), "golden", spawns)
 	setup(&g, spawns)
+	if len(os.args) >= 3 {
+		g.total_minutes = strconv.atoi(os.args[2]) / 600
+	}
 
 	j := new(jw)
 	j.n = 0
@@ -5118,7 +5218,7 @@ main :: proc() {
 	write_match_line(&g, j)
 	write_map_line(&g, j, spawns)
 
-	for tick := 1; tick <= 600; tick += 1 {
+	for tick := 1; tick <= ticks; tick += 1 {
 		g.match_ms += 100
 		for k in 0 ..< 4 {
 			g.sim_ms += 50

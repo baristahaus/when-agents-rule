@@ -458,7 +458,9 @@ class AIManager {
             !u.isMoving && !u.isHarvesting && !u.carryingResource && !u.isBuilding &&
             !u.farmRef && u.task !== 'building' && u.task !== 'farm_work');
         const scout = idleMilitary || idleWorker;
-        if (!scout) return;
+        if (!scout) {
+            return;
+        }
 
         ai._exploreTimer = 0;
         const half = (this.game.terrain ? this.game.terrain.size : 800) / 2 - 40;
