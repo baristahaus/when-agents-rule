@@ -5659,6 +5659,29 @@ update_auto_defense :: proc(g: ^game_state, dt: f64) {
 		}
 		ex, ez := f64(0), f64(0)
 		if t_kind == 2 { ex, ez = s.bldgs[t_idx].x, s.bldgs[t_idx].z } else { ex, ez = s.units[t_idx].x, s.units[t_idx].z }
+		// "did anything answer" (game.js 1957): the mark sits on what is being
+		// hit, above the no-defenders return. "None" is nothing of the owner's
+		// fighting here: no idle military this reflex sends, AND nobody already
+		// attacking within one battle radius (90) of the attacker.
+		n_draft := 0
+		on_site := false
+		for i in 0 ..< s.n_units {
+			d := &s.units[i]
+			if d.u_type == "worker" || d.u_type == "support" || d.health <= 0 { continue }
+			if !d.is_attacking && m_hypot(d.x - ex, d.z - ez) <= reach {
+				n_draft += 1
+			}
+			if d.is_attacking && m_hypot(d.x - atk_x, d.z - atk_z) <= 90 {
+				on_site = true
+			}
+		}
+		if t_kind == 2 {
+			s.bldgs[t_idx].def_at = g.sim_ms
+			s.bldgs[t_idx].def_none = !(n_draft > 0 || on_site)
+		} else {
+			s.units[t_idx].def_at = g.sim_ms
+			s.units[t_idx].def_none = !(n_draft > 0 || on_site)
+		}
 		for i in 0 ..< s.n_units {
 			d := &s.units[i]
 			if d.u_type == "worker" || d.u_type == "support" || d.health <= 0 { continue }
