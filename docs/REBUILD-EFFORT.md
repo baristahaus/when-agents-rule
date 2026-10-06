@@ -399,7 +399,24 @@ turn-1 gate lands (§5, item 6).
    named and proven in `spike/mem/main.odin` (gate 7) — a balanced context, a
    seen-and-named leak, and the arena-per-match shape balancing after a match ends; the
    one-arena-per-match shape now rests on a check, not on `Arena` plus discipline.
-5. **After turn 1.** The tick is already in scope (`stepOnce` is part of the gate); a
+5. **After turn 1 — in progress, 5 October 2026.** Resumed for P0(c) and the
+   resumption found the third and largest harness bug of the project: the recorded
+   one-minute corpus was a FROZEN WORLD. The recorder's renderer stub let the real
+   `clearScene()` run, which rebinds `renderer.units = []`; after `startGame()`
+   every spawned unit landed in the stub's orphaned closure array, `getAllUnits()`
+   returned zero for the whole match, and the simulation iterated nothing — the rule
+   brains tasked ghost workers, timers advanced, but no unit ever moved, gathered,
+   spawned or fought (CORE-REPLAN §16 has the full story and the fix, which mirrors
+   the arena path's proven `clearScene` override). The corpus is re-recorded with the
+   fixed recorder — `golden/stream-1m.jsonl`, 604 records, 3,106,064 bytes, run twice
+   byte-identical, alive-world shape asserted by the corpus test — and it is the P0(c)
+   target now. The old `stream-b1040-1m.jsonl` stays as provenance, its frozen
+   property asserted by the same test. What P0(c) now needs in Odin: the rule brain
+   (manageWorkers and the economy/build/train/research decisions), the full tick
+   (movement, harvesting, carrying, node depletion, training spawns, construction,
+   research progress, exploration, the 250 ms discovery beat), the notice-text
+   formatting, and the stream serialization. The tick is already in scope in the sense
+   below (`stepOnce`); a
    whole match then needs the rule brain, which is the first *behaviour* the port will
    have to agree on rather than a projection of state; then the P0(c) state-sequence
    gate; then P1 (the daemon, the event stream, the match folder) per the proposal.

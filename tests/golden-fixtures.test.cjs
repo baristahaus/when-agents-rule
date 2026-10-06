@@ -134,6 +134,59 @@ test('the state fixture regenerates byte-identically from the reference', () => 
   }
 });
 
+test('the one-minute stream is the alive-world corpus (sha-pinned, regenerable)', () => {
+  // The P0(c) target: a real one-minute match on the true 800-world, recorded 5 October
+  // 2026 with the FIXED recorder. Two earlier recorder bugs had silently degenerated the
+  // shipped corpus: the terrain size (a 200-unit island, fixed and re-recorded for the map
+  // lines) and clearScene (the real one rebinds renderer.units = [], so after startGame()
+  // every spawned unit landed in the recorder's orphaned closure array and getAllUnits()
+  // returned zero for the whole match -- the rule brains tasked their workers, research
+  // and production timers advanced, but no unit ever moved, gathered, spawned or fought).
+  // This file is the recording after both fixes: the world is alive. Regeneration is the
+  // manual ledger row in MERGE-STATE.MD (a 60 s recorder run, too heavy for every test);
+  // what this test enforces is the pin and the alive-world shape.
+  const f = G('stream-1m.jsonl');
+  assert.equal(sha256(f), '0044b2d7fda3d405e078cb5d6418f1164c53a35a56888bdf31998a39519ee6ab',
+    'the alive-world stream changed -- a golden move that needs a MERGE-STATE line, not a quiet hash update');
+  const recs = fs.readFileSync(f, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  assert.equal(recs.length, 604, '1 match + 1 map + 120 snaps + 480 turn records + results + timeline');
+  assert.equal(recs[0].type, 'match');
+  assert.equal(recs[1].type, 'map');
+  assert.equal(recs[1].size, 800, 'the true 800-world, not the 200-unit island');
+  assert.equal(recs[1].resources.length, 941, '941 nodes, post Town Center clearance');
+  // The alive world, measured on seat 0: workers walk, gather, the population grows.
+  const seat0 = recs.filter(r => r.seat === 0 && r.state && r.turn);
+  assert.equal(seat0.length, 120);
+  const first = seat0[0].state, last = seat0[119].state;
+  const moved = (u, v) => Math.abs(u.x - v.x) > 0.5 || Math.abs(u.z - v.z) > 0.5;
+  assert.ok(moved(first.friendlyUnits[0], last.friendlyUnits[0]),
+    'the frozen world is back: the first worker never moved across the minute');
+  assert.ok(last.population.used > first.population.used,
+    'the frozen world is back: no trained worker ever spawned');
+  assert.ok(last.friendlyBuildings.length > 1,
+    'the frozen world is back: nothing was ever built');
+});
+
+test('the legacy b1040 stream stays as recorded: the frozen-world artifact', () => {
+  // Provenance, kept for the same reason turn1-b1040.jsonl is: it is what the project
+  // shipped as "the one-minute corpus" while both recorder bugs lived. Its units never
+  // move -- asserted here, so the artifact's nature is a checked fact rather than a
+  // story -- and nothing built on it may be called a port of a match.
+  const f = G('stream-b1040-1m.jsonl');
+  assert.equal(sha256(f), '8611ac58fa2726dbc88d48e94c76e373db4d16cb6b9314219d16e18266c41bc8',
+    'the legacy b1040 stream changed');
+  const recs = fs.readFileSync(f, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  const seat0 = recs.filter(r => r.seat === 0 && r.state && r.turn);
+  const first = seat0[0].state, last = seat0[119].state;
+  assert.equal(first.friendlyUnits.length, 3);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(first.friendlyUnits[i].x, last.friendlyUnits[i].x,
+      'the legacy recording was alive -- then it is not the artifact the docs describe');
+    assert.equal(first.friendlyUnits[i].z, last.friendlyUnits[i].z);
+  }
+  assert.equal(last.friendlyBuildings.length, 1, 'the legacy recording built something');
+});
+
 test('the legacy turn-1 capture is kept as recorded, not as an oracle', () => {
   const WarRng = require('../js/simulation/rng.js');
   const st = WarRng.keyed(manifest.seed);

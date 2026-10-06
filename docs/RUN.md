@@ -51,9 +51,11 @@ odin build spike/mem -out:spike/bin/mem-track && ./spike/bin/mem-track   # the l
 node tools/trace-states-port.cjs golden/states-b1040-t0-t1.canonical.jsonl
 # → GATE PASS: 8 lines, byte-identical   (no args: dumps the state view to stdout)
 
-node tools/golden/record.cjs -out /tmp/new-recording.jsonl     # the headless reference recorder
-# → takes ~1 minute (it records a full match-minute, 50 ms steps), then prints
-#   the four seat summaries; the stream it writes is what the corpus test pins
+node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl
+# → takes ~1 minute; two runs are byte-identical; the output matches
+#   golden/stream-1m.jsonl (cmp), the alive-world corpus recorded 5 Oct 2026 after
+#   the recorder's clearScene fix — before it, every recorded match was a frozen
+#   world (no unit ever moved; CORE-REPLAN §16)
 node --test tests/golden-fixtures.test.cjs                     # the golden corpus test (6 pass)
 npm test                                                        # the full v1 suite (671 tests)
 ```
@@ -90,7 +92,7 @@ P0–P4). Where each one stands:
 | **P0 (b)** the turn-1 state view | the tick and the per-seat observation | **green** — 8 lines, 45,840 bytes (gate 6) | — |
 | **the rule brain** | the 250 ms discovery beat, the decisions (`js/ai.js`) | **not started** | the first *behaviour* the port must agree on, not a projection of state; transcribed from the JS spec's functions |
 | **the enemy memories** | enemy-unit memory (b1041/42), enemy-building memory | **not started** (not transcribed anywhere yet — the JS port's header says so) | required by the first gate where seats meet rivals; the contacts gate needs them first |
-| **P0 (c)** the state sequence | a whole recorded sequence byte-identical for a fixed seed set (the 2.7 MB stream) | **not started** | the method's scaling test; the JS oracle already regenerates the corpus byte-identically (gate 5 proves it), so the target exists and is green on the JS side — the Odin port must match it |
+| **P0 (c)** the state sequence | the one-minute stream byte-identical in Odin | **not started — but the target is now real** | the corpus was re-recorded 5 Oct 2026 with the fixed recorder: `golden/stream-1m.jsonl`, 604 records, 3.1 MB, an ALIVE match (the old corpus was a frozen world — the recorder's clearScene bug, CORE-REPLAN §16). Transcribing it needs: the rule brain, the full tick (movement, harvesting, training, construction, research, exploration, the discovery beat), the notice texts, and the stream serialization |
 | **P1** the trace | the daemon, the event stream, the match folder, the redaction at export, the LLM seats | **not started** | a headless 4-seat match writes a folder: `transcript.jsonl` (schema v1), `events.jsonl` (same seed → empty diff), `traces/` with raw usage, exports with no key/endpoint/cost. This is where the arena-per-match + `mem.Tracking_Allocator` memory discipline lands — the shape gate 7 was proven for |
 | **P2** the face | the webview shell, the renderer, playable and recordable on Win/macOS/Linux | **not started** | 60 fps on a mid desktop, the Playwright suite green, the browser question re-decided (the revisit trigger is the first real shim cost) |
 | **P3/P4** the eyes, the arena | the analyzer, the hosted serve, the spectator feed | **not started; scope is an owner call** | §4's still-open product calls: P3/P4 scope, the mesh set, the name |

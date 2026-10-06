@@ -572,3 +572,55 @@ is the original b1040 recording — provenance — and its 200-world snapshots a
 the recorder-bug artifact rather than re-recorded. The states oracle needed nothing: it was always
 the true 800-world, which is why nothing about the turn-1 gate moved. The turn-1 raw capture and
 its canonical form stay pinned, as the corpus test requires.
+
+## 16. The second recorder bug: the recorded match was a frozen world (found 5 October 2026, the day the engine work resumed)
+
+**What was found.** With the engine transcription resumed for P0(c) — "the state
+sequence byte-identical to the shipped corpus" — the shipped corpus was re-read and
+found to be a **degenerate recording**: across the whole one-minute stream, no unit
+ever moved, no worker ever gathered, no trained unit ever spawned, nothing was ever
+built. The rule brains thought and spent (workers tasked, techs bought, resources
+deducted at decision time), research and production *timers* advanced, the clock ran —
+but the physical world stood still. The recorded match was a frozen diorama.
+
+**The cause.** The headless recorder's renderer stub (`tools/golden/record.cjs`) keeps
+the entity lists in closure arrays and overrides `addUnit`/`addBuilding` to push into
+them — but it let the REAL `clearScene()` run (`js/engine/gamerenderer.js:1205`), which
+**rebinds** `this.units = []` / `this.buildings = []`. After `game.startGame('spectator')`
+calls `clearScene()`, `renderer.units` points at a fresh empty array while every
+`addUnit` below keeps pushing into the orphaned closure list. `getAllUnits()` — which
+the whole simulation iterates: `updateWorkerTasks`, `updateUnitMovement`, `WarPositionRules`,
+`updateCombat`, contacts, the enemy memories — returns **zero for the entire match**.
+The arena path (`tools/bench/realm.cjs`, behind `dump-states.cjs`) overrides `clearScene`
+to clear *in place* — `units.length = 0`, no rebind — which is why the turn-1 state
+fixture always showed real movement and this bug never surfaced through it.
+
+**The fix.** The recorder's stub now overrides `clearScene` the same way (clear in
+place, no rebind) plus the lifecycle hooks the alive world reaches and the frozen world
+never did: `onBuildingCompleted`, `rebuildBuildingMesh`, `_ghostFrom`, the effect
+spawns (`spawnDust`/`spawnBattleRing`/`spawnProjectile`/`flashHit`), and `killUnit`/
+`killBuilding` (bookkeeping kept, GL composition skipped — the same split `addUnit`
+makes). The first fixed recording crashed inside `_composeBuilding` — proof the world
+had come alive: a worker had *completed a building*, a thing no recorded match had
+ever done.
+
+**The second golden move.** `golden/stream-1m.jsonl` — 604 records, 3,106,064 bytes,
+sha256 `0044b2d7…`, recorded 5 October 2026 with the fixed recorder at the true
+800-world, **run twice and byte-identical both times** — is the one-minute corpus
+now: the P0(c) target, pinned in `golden/MANIFEST.json`, its alive-world shape
+enforced by the corpus test (units move, the population grows, a second building
+exists by t=60 s). `golden/stream-b1040-1m.jsonl` (the old corpus) no longer
+regenerates as anything: it stays as provenance, the frozen-world artifact, sha-pinned
+by the same test with its frozen property *asserted* — the artifact's nature is a
+checked fact, not a story.
+
+**What this means for P0(c).** The transcription target is no longer a frozen
+world's bytes (which no engine should replicate) but a real match's: the rule brain
+(manageWorkers, the economy/build/train/research decisions), the full tick (walk to
+node, rim positioning, harvest, carry, deposit, node depletion, training spawns,
+construction, population, research progress, exploration growth, the 250 ms discovery
+beat), the notice-text formatting, and the stream serialization (match, map, 120
+snaps, 480 per-seat-turn records, results, timeline — the double-newline format).
+No rival contacts occur in the first minute on the 800 map (spawns 306 apart, workers
+and scouts do not cross the gap), so the b1041/42 enemy memories remain invisible in
+this corpus and stay deferred to the contacts gate — unchanged from §13's plan.

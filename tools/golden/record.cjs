@@ -278,6 +278,49 @@ renderer.addBuilding = function (b) {
   b._engine = null;
   b.mesh = { visible: true, children: [] };
 };
+// clearScene MUST be overridden, not inherited: the real one (gamerenderer.js:1205)
+// REBINDS this.units = [] / this.buildings = [], so after game.startGame() calls it the
+// arrays above become orphans — renderer.units points at a fresh empty list while
+// every addUnit below keeps pushing into the orphan, and getAllUnits() (which reads
+// renderer.units) returns ZERO for the whole match. Found 5 October 2026, after the
+// terrain-size bug: the recorded one-minute stream was a frozen world — the rule
+// brains tasked their workers, research and production TIMERS advanced (owner-level
+// state), but no unit ever moved, gathered, spawned or fought, because the sim iterates
+// getAllUnits()/getAllBuildings() and both were empty. bench/realm.cjs (the arena path
+// behind dump-states.cjs, whose fixture shows real movement) overrides clearScene to
+// clear IN PLACE — units.length = 0, no rebind — and that is the shape copied here.
+renderer.clearScene = function () {
+  units.forEach(u => { u._engine = null; u.mesh = null; });
+  buildings.forEach(b => { b._engine = null; b.mesh = null; });
+  units.length = 0;
+  buildings.length = 0;
+  renderer.selectedUnits.length = 0;
+  renderer.selectedNode = null;
+  renderer.isPlacingBuilding = false;
+  renderer.buildingPreview = null;
+  renderer.placingBuildingType = null;
+};
+// The lifecycle hooks the ALIVE world reaches. In the frozen world (the clearScene
+// bug above) no unit ever moved, nothing was ever built, nothing ever died, so
+// none of these fired; with entities registered they all do, and the GL halves
+// they call (mesh composition, ghosts, dust, projectiles) are not headless-safe.
+// Bookkeeping halves are kept; composition is skipped — the same split addUnit
+// above makes. updateUnitPosition is already inert upstream (gamerenderer.js:1672).
+renderer.onBuildingCompleted = function () {};
+renderer.rebuildBuildingMesh = function () {};
+renderer._ghostFrom = function () {};
+renderer.spawnDust = function () {};
+renderer.spawnBattleRing = function () {};
+renderer.spawnProjectile = function () {};
+renderer.flashHit = function () {};
+renderer.killUnit = function (unit) {
+  renderer.removeUnit(unit);
+  unit.healthBar = null;
+};
+renderer.killBuilding = function (building) {
+  renderer.removeBuilding(building);
+  building.healthBar = null;
+};
 renderer.removeBuilding = function (b) {
   const i = buildings.indexOf(b);
   if (i > -1) buildings.splice(i, 1);
