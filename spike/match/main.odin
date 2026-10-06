@@ -828,7 +828,8 @@ rnode :: struct {
 terrain :: struct {
 	seed: string,
 	size: f64,
-	nodes: [1024]rnode, // 942 pre-clearing (98+784+40+20); 1024 for headroom
+
+	nodes: [2048]rnode, // 942 pre-clearing on golden/medium; easy's multipliers raise the count
 	n_nodes: int,
 }
 
@@ -985,8 +986,9 @@ terrain_scatter_equal :: proc(t: ^terrain, usable: f64, tile: f64, st: ^u32, nty
 // every other. The arena's spawns are the ideal circle, so the plain
 // rotation runs (the shifted variant needs a jittered caller, which the
 // arena is not).
-terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0: f64, sector: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
-	per := f64(math.max(1, math.floor((total / 4) + 0.5)))
+terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [][2]f64, a0: f64, sector: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
+	ns := len(spawns)
+	per := f64(math.max(1, math.floor((total / f64(ns)) + 0.5)))
 	R := size/2 - 40    // same usable radius the grid's box spans
 	rMin := f64(60)      // nothing on the map's navel
 	KEEP_OUT := f64(95)  // no stone/gold this close to ANY Town Center
@@ -1000,7 +1002,7 @@ terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0
 			x := m_cos(ang) * r
 			z := m_sin(ang) * r
 			close := false
-			for s in 0 ..< 4 {
+			for s in 0 ..< ns {
 				if m_hypot(x - spawns[s][0], z - spawns[s][1]) < KEEP_OUT {
 					close = true
 					break
@@ -1010,7 +1012,7 @@ terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0
 				break
 			}
 		}
-		for p := 0; p < 4; p += 1 {
+		for p := 0; p < ns; p += 1 {
 			angp := ang + f64(p)*sector
 			t.nodes[t.n_nodes] = rnode{ntype, m_cos(angp)*r, m_sin(angp)*r, amount}
 			t.n_nodes += 1
@@ -1034,7 +1036,7 @@ terrain_clear_near :: proc(t: ^terrain, x: f64, z: f64, radius: f64) {
 	t.n_nodes = j
 }
 
-t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
+t_terrain :: proc(size: f64, seed: string, spawns: [][2]f64, diff: string) -> terrain {
 	coast_lat_build()
 	coast_limit_table()
 
@@ -1045,19 +1047,29 @@ t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
 	// The rotation the scarce types use is about the first spawn's angle; the
 	// arena's four are the ideal circle, so this is the one the whole layout shares.
 	a0 := m_atan2(spawns[0][1], spawns[0][0])
-	sector := (math.PI * 2) / 4
+	sector := (math.PI * 2) / f64(len(spawns))
 
 	st := hash_seed(seed)
 	if st == 0 {
 		st = 42
 	}
 
-	// medium: food 196 x 0.5, wood 784 x 1, stone 40 x 1, gold 18 (no mods entry).
-	terrain_scatter_equal(&t, usable, tile, &st, 0, 196*0.5, 500)         // food
-	terrain_scatter_equal(&t, usable, tile, &st, 1, 784*1.0, 300)         // wood
-	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 2, 40*1.0, 1000) // stone
+	// the difficulty mods (terrain.js DIFFICULTY_MODS): easy food x2 is the
+	// baseline; medium food x0.5; hard food x0.25, wood x0.25, stone x0.5.
+	// Gold has no entry and is identical in all three.
+	fm, wm, sm := f64(2.0), f64(1.0), f64(1.0)
+	if diff == "medium" {
+		fm = 0.5
+	} else if diff == "hard" {
+		fm = 0.25
+		wm = 0.25
+		sm = 0.5
+	}
+	terrain_scatter_equal(&t, usable, tile, &st, 0, 196*fm, 500)         // food
+	terrain_scatter_equal(&t, usable, tile, &st, 1, 784*wm, 300)         // wood
+	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 2, 40*sm, 1000) // stone
 	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 3, 18, 2000)     // gold
-	for s in 0 ..< 4 {
+	for s in 0 ..< len(spawns) {
 		terrain_clear_near(&t, spawns[s][0], spawns[s][1], 9.5 + 3)
 	}
 
@@ -1066,12 +1078,12 @@ t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
 
 // The arena's spawn circle: (i/4) * 2pi - pi/2 on a 306-unit radius, in WarMath
 // (game.js:373-381; halfSize = 400 - 40, radius = 0.85 x that).
-arena_spawns :: proc() -> [4][2]f64 {
-	sp: [4][2]f64
+arena_spawns :: proc(n: int) -> [][2]f64 {
+	sp := make([][2]f64, n)
 	half := f64(400) - 40
 	radius := half * 0.85
-	for i := 0; i < 4; i += 1 {
-		angle := f64(i)/f64(4) * math.PI * 2 - math.PI/2
+	for i in 0 ..< n {
+		angle := f64(i)/f64(n) * math.PI * 2 - math.PI/2
 		sp[i][0] = m_cos(angle) * radius
 		sp[i][1] = m_sin(angle) * radius
 	}
@@ -1198,9 +1210,9 @@ seat :: struct {
 	gathered: res_state, // ResourceManager.gathered: lifetime delivered, per type
 	pop: int, // resources.updatePopulation(units.length) each step
 	max_pop: int, // recomputeMaxPopulation: 10 (TC) + 5/house
-	known: [1024]byte, // _knownResIdx: node index -> seen
-	seen_amt: [1024]f64, // the seen amount the harness caches with the node
-	seen_set: [1024]byte,
+	known: [2048]byte, // _knownResIdx: node index -> seen
+	seen_amt: [2048]f64, // the seen amount the harness caches with the node
+	seen_set: [2048]byte,
 	explored: [42 * 42]byte, // the exploration bitmap, one per 19-unit cell
 	met: [4]bool, // first-contact memory: has this seat ever seen rival <i>?
 	harvest_bonus: f64, // workerHarvestBonus: 1.0 — the spectator path applies NO civ bonus
@@ -1223,7 +1235,7 @@ seat :: struct {
 	n_events: int,
 	turn_seq: int, // ai._turnSeq
 	last_counts: [4]int, // _lastNodeCounts: {food,wood,stone,gold}
-	dry_told: [1024]bool, // _dryNodesTold: once per node
+	dry_told: [2048]bool, // _dryNodesTold: once per node
 	explore_timer: int, // _exploreTimer
 	scout_angle: f64, // _scoutAngle
 	scout_radius: f64, // _scoutRadius
@@ -1250,6 +1262,9 @@ game_state :: struct {
 	sim_ms: f64, // clock.simMs: 50 per sim step
 	step_no: int,
 	total_minutes: int, // the recorded corpus length (header field)
+	n_seats: int, // the corpus seat count
+	map_seed: string, // the corpus seed (header/map fields)
+	map_diff: string, // the corpus difficulty (header/map fields)
 	discovery_timer: f64, // the 4 Hz beat's own accumulator (mgr.update)
 	world_rng: keyed_rng, // the game's one rng (seed 'golden'): 'world:*' draws
 	// --- the match timeline (game.js resetTimeline/sampleTimeline) ---
@@ -1270,7 +1285,7 @@ game_state :: struct {
 
 // resetTimeline: a fresh match — population 0, the match clock 0, the
 // discovery beat 0, no pending events, the exploration bitmaps blank.
-setup :: proc(g: ^game_state, spawns: [4][2]f64) {
+setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int) {
 	g.match_ms = 0
 	g.sim_ms = 0
 	g.step_no = 0
@@ -1289,7 +1304,7 @@ setup :: proc(g: ^game_state, spawns: [4][2]f64) {
 			g.tl_dry[i][k] = true
 		}
 	}
-	for i in 0 ..< 4 {
+	for i in 0 ..< g.n_seats {
 		s := &g.seats[i]
 		c := &civs[i]
 		s.ci = i
@@ -4204,7 +4219,7 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 
 // keepUnitsAshore: the chebyshev clamp onto the land (game.js 3784).
 keep_units_ashore :: proc(g: ^game_state) {
-	for i in 0 ..< 4 {
+	for i in 0 ..< g.n_seats {
 		s := &g.seats[i]
 		for u in 0 ..< s.n_units {
 			w := &s.units[u]
@@ -4649,7 +4664,7 @@ recompute_max_population :: proc(s: ^seat) {
 
 // updateProduction: the train timers and the spawn at the building.
 update_production :: proc(g: ^game_state, dt: f64) {
-	for i in 0 ..< 4 {
+	for i in 0 ..< g.n_seats {
 		s := &g.seats[i]
 		for b in 0 ..< s.n_bldgs {
 			bd := &s.bldgs[b]
@@ -4699,7 +4714,7 @@ update_production :: proc(g: ^game_state, dt: f64) {
 
 // updateResearchProgress: the timers, then the completion.
 update_research_progress :: proc(g: ^game_state, dt: f64) {
-	for i in 0 ..< 4 {
+	for i in 0 ..< g.n_seats {
 		s := &g.seats[i]
 		if !s.cur_research {
 			continue
@@ -4953,7 +4968,7 @@ sample_timeline :: proc(g: ^game_state, now_ms: f64) {
 	tn := int(math.floor((now_ms - g.tl_t0)/1000 + 0.5))
 	row := tl_sample{t = tn}
 	counts: [4]int
-	for i in 0 ..< 4 {
+	for i in 0 ..< g.n_seats {
 		s := &g.seats[i]
 		row.f[i] = math.floor(s.gathered.food + 0.5)
 		row.w[i] = math.floor(s.gathered.wood + 0.5)
@@ -4982,8 +4997,9 @@ sample_timeline :: proc(g: ^game_state, now_ms: f64) {
 
 // The match line: the recorder's rec.begin payload (transcript.js's match
 // header + the recorder's conditions), players in seat order.
-write_match_line :: proc(g: ^game_state, j: ^jw) {
-	j_raw(j, "{\"type\":\"match\",\"matchId\":\"golden\",\"startedAt\":0,\"seed\":\"golden\",\"difficulty\":\"medium\",\"seats\":4,")
+write_match_line :: proc(g: ^game_state, j: ^jw, n_seats: int, seed: string, diff: string) {
+	j_raw(j, "{\"type\":\"match\",\"matchId\":\"golden\",\"startedAt\":0,")
+	j_raw(j, fmt.aprintf("\"seed\":\"%s\",\"difficulty\":\"%s\",\"seats\":%d,", seed, diff, n_seats))
 	j_raw(j, fmt.aprintf("\"minutes\":%d,", g.total_minutes))
 	j_raw(j, "\"stepMs\":100,\"snapshotMs\":500,\"simSpeed\":1,\"turnBased\":false,\"resourceBoost\":false,\"version\":\"1.0.0\",\"players\":[")
 	for i in 0 ..< 4 {
@@ -5000,10 +5016,11 @@ write_match_line :: proc(g: ^game_state, j: ^jw) {
 
 // The map line: the recorder's rec.note('__map__', ...) payload — the seeded
 // layout exactly as the match starts, spawns and nodes in millimetres.
-write_map_line :: proc(g: ^game_state, j: ^jw, spawns: [4][2]f64) {
+write_map_line :: proc(g: ^game_state, j: ^jw, spawns: [][2]f64, seed: string, diff: string) {
 	t := &g.terrain
-	j_raw(j, "{\"playerId\":\"__map__\",\"type\":\"map\",\"seed\":\"golden\",\"difficulty\":\"medium\",\"seats\":4,\"size\":800,\"spawns\":[")
-	for p in 0 ..< 4 {
+	j_raw(j, "{\"playerId\":\"__map__\",\"type\":\"map\",")
+	j_raw(j, fmt.aprintf("\"seed\":\"%s\",\"difficulty\":\"%s\",\"seats\":%d,\"size\":800,\"spawns\":[", seed, diff, len(spawns)))
+	for p in 0 ..< len(spawns) {
 		if p > 0 {
 			j_raw(j, ",")
 		}
@@ -5204,10 +5221,31 @@ main :: proc() {
 	if len(os.args) >= 3 {
 		ticks = strconv.atoi(os.args[2])
 	}
-	spawns := arena_spawns()
+	// argv: <out> [ticks] [seed] [seats] [difficulty] [map-only]
+	seed := "golden"
+	n_seats := 4
+	diff := "medium"
+	map_only := false
+	if len(os.args) >= 4 { seed = os.args[3] }
+	if len(os.args) >= 5 { if v, ok := strconv.parse_int(os.args[4]); ok { n_seats = v } }
+	if len(os.args) >= 6 { diff = os.args[5] }
+	if len(os.args) >= 7 { map_only = os.args[6] == "map" }
+	spawns := arena_spawns(n_seats)
 	g: game_state
-	g.terrain = t_terrain(f64(800), "golden", spawns)
-	setup(&g, spawns)
+	g.n_seats = n_seats
+	g.map_seed = seed
+	g.map_diff = diff
+	if map_only {
+		// the map-line oracle: terrain + Town Center clearance only
+		g.terrain = t_terrain(f64(800), seed, spawns, diff)
+		j := new(jw)
+		j.n = 0
+		write_map_line(&g, j, spawns, seed, diff)
+		_ = os.write_entire_file(os.args[1], j.buf[:j.n])
+		return
+	}
+	g.terrain = t_terrain(f64(800), seed, spawns, diff)
+	setup(&g, spawns, n_seats)
 	if len(os.args) >= 3 {
 		g.total_minutes = strconv.atoi(os.args[2]) / 600
 	}
@@ -5215,8 +5253,8 @@ main :: proc() {
 	j := new(jw)
 	j.n = 0
 
-	write_match_line(&g, j)
-	write_map_line(&g, j, spawns)
+	write_match_line(&g, j, n_seats, seed, diff)
+	write_map_line(&g, j, spawns, seed, diff)
 
 	for tick := 1; tick <= ticks; tick += 1 {
 		g.match_ms += 100
