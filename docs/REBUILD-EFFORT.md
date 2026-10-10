@@ -72,6 +72,26 @@ and the b1076 arena layout in the turn-1 engine (the seeded spawn stream, home d
 the scatter exclusion, the shifted stone/gold scatter). P0(a), P0(b) and P0(c) are all
 green; the milestone ladder's next rung is P1, the trace.
 
+### 1.1c P1 — the trace, green except the owner's key (10 October 2026)
+
+The match folder exists and is gate-held: `spike/match <dir> N seed seats diff
+folder` writes `meta.json`, `transcript.jsonl` (byte-identical to the pinned
+golden stream — the v1 contract unchanged), `events.jsonl` (the frame-accurate
+action log: orders, creations, damage, kills, node depletion, research,
+battles, the end; per-step movement deliberately omitted — the transcript's
+states already carry it), and `traces/seat-N.jsonl` (one line per turn: the
+model, its decisions, and for model seats the reply tier). Two runs of one
+seed diff to empty on every file, at 1 m and 10 m (gate 8). `serve` hosts a
+live match: seats attach over TCP, receive their state record per turn, answer
+with an actions line the v1 executor runs through the brain's own gates (gate
+9); an attached seat's decisions replace the rule brain's think while the
+per-step machines keep running. `tools/llm-seat.cjs` plays a seat against a
+real OpenAI-compatible endpoint or, without one, a deterministic scripted
+policy — so a served match of model seats diffs to empty (gate 10). What
+remains for P1 needs the owner's key: a real-model corpus run to exercise the
+usage/pricing redaction pass (bd `when-agents-rule-y3b`). The next rung is P2,
+the face.
+
 ### 1.2 The corpus — the treaty, pinned and regenerating
 
 `golden/MANIFEST.json` pins nine files by sha256 and byte count, enforced by
