@@ -4,7 +4,9 @@ One page that is always true about where this fork stands against the parent, wr
 that whoever picks it up next (including a future me with no memory) can rebuild the whole
 picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Last updated: 5 October 2026, at HEAD on `rebuild/v2`, after the b1054 merge — the
+Last updated: 8 October 2026, at HEAD on `rebuild/v2`, after the b1081 merge — the
+parent's twenty-seven more builds (b1055–b1081), absorbed with five conflicts, and the
+golden corpus re-recorded at the merged rules the same day (see below).
 parent's fifteen builds, absorbed with our divergences on top.
 
 ## The one-paragraph version
@@ -30,9 +32,11 @@ work lives on `rebuild/v2` (reconciled and pushed 5 October — see *Branch and 
 | Does the Odin core reproduce turn 1? | `./spike/gates.sh` (gate 6) | green — 8 lines, 45,840 bytes, byte-identical, 5 Oct 2026 |
 | Does the one-minute stream regenerate? | `node tools/golden/record.cjs -seed golden -seats 4 -minutes 1 -difficulty medium -out /tmp/x.jsonl && cmp /tmp/x.jsonl golden/stream-1m.jsonl` | byte-identical, 3,106,064 bytes, run twice 5 Oct 2026 (the recorder is fixed twice over: terrain size, then clearScene — see CORE-REPLAN §16). The old `stream-b1040-1m.jsonl` no longer regenerates by anything: it stays as provenance, the frozen-world artifact, sha-pinned by the corpus test |
 | Is the game green? | `npm test` | 671/671, 5 Oct 2026 (the parent's 43 new tests included) |
-| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1054, 5 Oct 2026) |
+| How far behind the parent are we? | `git log --oneline HEAD..upstream/main \| wc -l` | 0 (merged through b1081, 8 Oct 2026) |
 | What did we change that they did not? | `git log --oneline $(git merge-base HEAD upstream/main)..HEAD` | 71 commits, at the b1054 merge |
-| Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7, 5 Oct 2026 |
+| Does the state still honour its contract? | `node --test tests/contract.test.cjs` | 7/7, 8 Oct 2026 |
+| Do the golden fixtures still regenerate? | `node --test tests/golden-fixtures.test.cjs` | 8/8, 8 Oct 2026 — the corpus RE-RECORDED at the b1081 rules: the b1056 civ-training pick (Greece now trains hoplites, Egypt's stable its chariot) and the b1055 scout cost changed the streams; the spectator recorder keeps the even circle, so the map line is unchanged and still 941 nodes |
+| Is the game green? | `npm test` | 711/711, 8 Oct 2026 (upstream's new tests included; samples pricing-redacted) |
 
 ## Branch and remote state
 
