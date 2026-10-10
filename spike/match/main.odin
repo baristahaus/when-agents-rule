@@ -3285,7 +3285,7 @@ observe_line :: proc(o: ^obs) {
 		j_bool(j, s.um_visible[m])
 		if !s.um_visible[m] {
 			j_key(j, "secondsAgo")
-			j_int(j, i64(math.max(0, math.round((g.sim_ms - s.um_at[m]) / 2000))))
+			j_int(j, i64(math.max(0, math.round((g.match_ms - s.um_at[m]/2) / 1000))))
 		}
 		moved := s.um_has_sx[m] && m_hypot(s.um_x[m] - s.um_sx[m], s.um_z[m] - s.um_sz[m]) >= 3
 		if moved {
@@ -3730,7 +3730,7 @@ observe_line :: proc(o: ^obs) {
 					n_counts += 1
 				}
 				if k >= 0 { cnums[k] += 1 }
-				a := i64(math.max(0, math.round((g.sim_ms - s.um_at[m]) / 2000)))
+				a := i64(math.max(0, math.round((g.match_ms - s.um_at[m]/2) / 1000)))
 				if newest < 0 || a < newest { newest = a }
 				if a > oldest { oldest = a }
 			}
@@ -3999,6 +3999,19 @@ sweep_memory :: proc(g: ^game_state, v: ^seat, now: f64, es: ^eye_set, sighted: 
 		v.um_located[oldest] = v.um_located[v.n_um]
 		v.um_spot_hidden[oldest] = v.um_spot_hidden[v.n_um]
 	}
+}
+
+// aiManager.update's discovery beat: markExploration, updateRivalContacts
+// and the brain's own discovery for every seat, then detectContacts — fired
+// per TICK (openai-ai.js update(deltaTime), the tick's wall ms, before the
+// tick's steps run).
+discovery_beat :: proc(g: ^game_state) {
+	for i in 0 ..< 4 {
+		mark_exploration(&g.seats[i], g.terrain.size)
+		update_rival_contacts(g, &g.seats[i])
+		brain_discovery(g, &g.seats[i])
+	}
+	detect_contacts(g)
 }
 
 // detectContacts (game.js 4497): one seat per beat, rotating; notes the
@@ -6672,19 +6685,12 @@ step_once :: proc(g: ^game_state) {
 		}
 		g.seats[i].pop = n_alive
 	}
-	// aiManager.update(dt): the 250 ms discovery beat, then the 2 s think beat.
-	// The brain's own node discovery (ai.js updateDiscovery) fills the same
-	// known set with the same batched vision test the harness's per-step
-	// observeStep uses below, so one pass covers both.
+	// aiManager.update(dt): the 250 ms discovery beat (every 250 SIM ms —
+	// stepOnce calls it with the step's dt), then the 2 s think beat.
 	g.discovery_timer += dt
 	if g.discovery_timer >= 250 {
 		g.discovery_timer -= 250
-		for i in 0 ..< 4 {
-			mark_exploration(&g.seats[i], g.terrain.size)
-			update_rival_contacts(g, &g.seats[i])
-			brain_discovery(g, &g.seats[i])
-		}
-		detect_contacts(g)
+		discovery_beat(g)
 	}
 	for i in 0 ..< 4 {
 		advance_think(g, &g.seats[i], dt)
@@ -7069,7 +7075,8 @@ main :: proc() {
 		j := new(jw)
 		j.n = 0
 		write_map_line(&g, j, spawns, seed, diff)
-		_ = os.write_entire_file(os.args[1], j.buf[:j.n])
+		// the golden map files carry NO trailing newline
+		_ = os.write_entire_file(os.args[1], j.buf[:j.n - 1])
 		return
 	}
 	g.terrain = t_terrain(f64(800), seed, spawns, diff)
