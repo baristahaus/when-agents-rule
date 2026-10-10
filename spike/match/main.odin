@@ -1345,6 +1345,9 @@ seat :: struct {
 	// replace the rule brain's discrete orders; the per-step worker machines
 	// still run, exactly as the reference's model seats do).
 	model_seat: bool,
+	model_name: string, // the model playing this seat ("" = the rule brain)
+	reply_usage: string, // the client's usage block this turn, verbatim JSON
+	reply_text: string, // the client's reply text this turn
 	sock: net.TCP_Socket,
 	has_sock: bool,
 	// P1 traces: the decisions taken since this seat's last turn record, one
@@ -7124,7 +7127,11 @@ trace_line :: proc(g: ^game_state, si: int, turn: int) {
 	j_key(j, "seat")
 	j_int(j, i64(si))
 	j_key(j, "model")
-	j_null(j)
+	if g.seats[si].model_name != "" {
+		j_str(j, g.seats[si].model_name)
+	} else {
+		j_null(j)
+	}
 	j_key(j, "decisions")
 	if g.seats[si].dec_n == 0 {
 		j_raw(j, "[]")
@@ -7143,6 +7150,25 @@ trace_line :: proc(g: ^game_state, si: int, turn: int) {
 			j.sep = false
 		}
 		j_raw(j, "]")
+	}
+	j.sep = true
+	if g.seats[si].model_name != "" {
+		j_key(j, "reply")
+		j_raw(j, "{")
+		j.sep = false
+		j_key(j, "usage")
+		if g.seats[si].reply_usage != "" {
+			j_raw(j, g.seats[si].reply_usage)
+		} else {
+			j_null(j)
+		}
+		j_key(j, "text")
+		if g.seats[si].reply_text != "" {
+			j_str(j, g.seats[si].reply_text)
+		} else {
+			j_null(j)
+		}
+		j_raw(j, "}")
 	}
 	j_raw(j, "}\n")
 	for b in j.buf[:j.n] {
@@ -7682,7 +7708,20 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 		g.seats[si].sock = cl
 		g.seats[si].has_sock = true
 		g.seats[si].model_seat = true
-		fmt.eprintln("serve: seat", si, "attached from", src)
+		// the attach line names the model playing this seat
+		hello, hok := serve_read_line(cl)
+		if hok {
+			if a := sindex(hello, "\"model\""); a >= 0 {
+				rest := hello[a+len("\"model\":"):]
+				if q := sindex(rest, "\""); q >= 0 {
+					rest = rest[q+1:]
+					if qe := sindex(rest, "\""); qe >= 0 {
+						g.seats[si].model_name = rest[:qe]
+					}
+				}
+			}
+		}
+		fmt.eprintln("serve: seat", si, "attached from", src, "model:", g.seats[si].model_name)
 	}
 
 	j := new(jw)
@@ -7716,6 +7755,27 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 					g.seats[si].model_seat = false
 					g.seats[si].has_sock = false
 					continue
+				}
+				// the reply tier, when the client sent one (an LLM seat's
+				// usage and text; a scripted client may omit both)
+				g.seats[si].reply_usage = ""
+				g.seats[si].reply_text = ""
+				if a := sindex(cmds, "\"usage\""); a >= 0 {
+					rest := cmds[a:]
+					if ob := sindex(rest, "{"); ob >= 0 {
+						if cb := sindex(rest[ob:], "}"); cb >= 0 {
+							g.seats[si].reply_usage = rest[ob+1:ob+cb]
+						}
+					}
+				}
+				if a := sindex(cmds, "\"replyText\""); a >= 0 {
+					rest := cmds[a+len("\"replyText\":"):]
+					if q := sindex(rest, "\""); q >= 0 {
+						rest = rest[q+1:]
+						if qe := sindex(rest, "\""); qe >= 0 {
+							g.seats[si].reply_text = rest[:qe]
+						}
+					}
 				}
 				reply := serve_execute(g, si, cmds)
 				send_buf: [1 << 16]u8

@@ -240,6 +240,34 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 10 - the LLM seat slot: four seats played by tools/llm-seat.cjs in its
+# scripted mode (the model the gate can afford: deterministic on the state, so
+# two served matches of fake seats diff to empty). The gate holds when the
+# model seats' orders land in the events AND the traces carry the model tier
+# (the model's name and its reply record), both runs identical.
+if "$ODIN" build spike/match -out:spike/bin/match >/tmp/odin-match.log 2>&1; then
+	rm -rf /tmp/gate-llm-a /tmp/gate-llm-b
+	for run in a b; do
+		(timeout 150 ./spike/bin/match /tmp/gate-llm-$run 60 golden 4 medium serve 7896 >/dev/null 2>/dev/null &)
+		sleep 1
+		for i in 0 1 2 3; do (node tools/llm-seat.cjs $i 7896 >/dev/null 2>&1 &); done
+		sleep 9
+	done
+	if cmp -s /tmp/gate-llm-a/transcript.jsonl /tmp/gate-llm-b/transcript.jsonl \
+	   && cmp -s /tmp/gate-llm-a/events.jsonl /tmp/gate-llm-b/events.jsonl \
+	   && cmp -s /tmp/gate-llm-a/traces/seat-0.jsonl /tmp/gate-llm-b/traces/seat-0.jsonl \
+	   && grep -q '"order":"train"' /tmp/gate-llm-a/events.jsonl \
+	   && node -e 'const fs=require("fs");const lines=fs.readFileSync("/tmp/gate-llm-a/traces/seat-0.jsonl","utf8").split("\n").filter(l=>l.trim());const withModel=lines.filter(l=>{try{const j=JSON.parse(l);return j.model==="fake-policy"&&j.reply}catch(e){return false}}).length;process.exit(withModel>3?0:1)'; then
+		say "gate 10  LLM seats: four model seats, deterministic" "ok - the seats play, their orders land in events, traces carry the model and reply tier, two runs diff empty"
+	else
+		say "gate 10  LLM seats: four model seats, deterministic" "FAIL"
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 10  LLM seats: four model seats, deterministic" "FAIL - the build"
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else

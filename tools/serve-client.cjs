@@ -5,7 +5,7 @@ const train = process.argv[4] === 'train';
 let connected = 0, done = 0;
 const bufs = Array.from({length: seats}, () => '');
 for (let i = 0; i < seats; i++) {
-  const s = net.connect(Number(process.argv[5] || 7777), '127.0.0.1', () => { connected++; if (connected === seats) console.log('all attached'); });
+  const s = net.connect(Number(process.argv[5] || 7777), '127.0.0.1', () => { s.write(JSON.stringify({model: 'dumb-client'}) + '\n'); connected++; if (connected === seats) console.log('all attached'); });
   s.on('data', d => {
     bufs[i] += d.toString();
     let nl;
