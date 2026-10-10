@@ -56,6 +56,9 @@ frame :: struct {
 	nn:     int,
 	fog:    [49]i32, // the state's map.exploration: 7x7 tiles, 0..100% seen
 	has_fog: bool,
+	res:    [4][4]i32, // per seat: food, wood, stone, gold
+	pop:    [4][2]i32, // per seat: used, capacity
+	turn_no: int,
 	battles: [8][2]f64, // the state's ongoing battles: ring positions
 	n_battles: int,
 }
@@ -183,6 +186,21 @@ scene_fill :: proc(v: json.Value, f: ^frame) {
 			if sv, has := po["seat"]; has {
 				seat_i = int(jnum(sv))
 			}
+		}
+	}
+	// the HUD row for THIS record's seat: its resources and population
+	if rv, has := st["resources"]; has {
+		if ro, ok := rv.(json.Object); ok {
+			f.res[seat_i][0] = i32(jnum2(ro, "food"))
+			f.res[seat_i][1] = i32(jnum2(ro, "wood"))
+			f.res[seat_i][2] = i32(jnum2(ro, "stone"))
+			f.res[seat_i][3] = i32(jnum2(ro, "gold"))
+		}
+	}
+	if pv, has := st["population"]; has {
+		if po, ok := pv.(json.Object); ok {
+			f.pop[seat_i][0] = i32(jnum2(po, "used"))
+			f.pop[seat_i][1] = i32(jnum2(po, "capacityNow"))
 		}
 	}
 	// the battles: this seat's ongoing engagements, drawn as rings
@@ -603,6 +621,107 @@ u32_le :: proc(f: f32) -> u32 {
 	return transmute(u32)f
 }
 
+// draw_text: the string at px (sx, sy) from the top-left, glyph cells 2x2 px
+// per font pixel, in the colour given. Appends to the same vertex stream; the
+// caller uses the HUD transform (px → NDC) in its push constants.
+draw_text :: proc(dst: []byte, n: ^int, txt: string, sx, sy: f32, cr, cg, cb: f32) {
+	px :: 2.0
+	cx := sx
+	for ch in txt {
+		g := glyph_for(byte(ch))
+		if g.ch != 0 {
+			for row := 0; row < 7; row += 1 {
+				bits := g.rows[row]
+				for col := 0; col < 5; col += 1 {
+					if bits & (u8(1) << u8(4 - col)) != 0 {
+						x := cx + f32(col) * px
+						y := sy + f32(row) * px
+						// one px quad: 4 corner vertices as 2 triangles
+						p := [4][2]f32{{x, y}, {x + px, y}, {x, y + px}, {x + px, y + px}}
+						idx := [6]int{0, 3, 2, 0, 1, 3}
+						for k := 0; k < 6; k += 1 {
+							v := p[idx[k]]
+							if n^ + 24 > len(dst) {
+								return
+							}
+							vals := [6]f32{v[0], v[1], cr, cg, cb, 1}
+							for ff in vals {
+								bits32 := u32_le(ff)
+								dst[n^] = byte(bits32 & 0xFF)
+								dst[n^ + 1] = byte((bits32 >> 8) & 0xFF)
+								dst[n^ + 2] = byte((bits32 >> 16) & 0xFF)
+								dst[n^ + 3] = byte((bits32 >> 24) & 0xFF)
+								n^ += 4
+							}
+						}
+					}
+				}
+			}
+		}
+		cx += 6.0 * px
+	}
+}
+
+glyph_for :: proc(ch: byte) -> glyph {
+	for i := 0; i < len(glyph5x7); i += 1 {
+		if glyph5x7[i].ch == ch {
+			return glyph5x7[i]
+		}
+	}
+	return glyph{}
+}
+
+// The 5x7 bitmap font, generated for the HUD (the glyphs the viewer
+// needs: digits, A-Z, space, colon, slash, minus). One u8 per row, bit 4
+// = the leftmost column.
+glyph :: struct {
+	ch: byte,
+	rows: [7]u8,
+}
+
+glyph5x7 := [40]glyph{
+	{'0', {0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110}},
+{'1', {0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}},
+{'2', {0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111}},
+{'3', {0b11110, 0b00001, 0b00001, 0b01110, 0b00001, 0b00001, 0b11110}},
+{'4', {0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010}},
+{'5', {0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110}},
+{'6', {0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110}},
+{'7', {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000}},
+{'8', {0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110}},
+{'9', {0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100}},
+{'A', {0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001}},
+{'B', {0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110}},
+{'C', {0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110}},
+{'D', {0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110}},
+{'E', {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111}},
+{'F', {0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000}},
+{'G', {0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111}},
+{'H', {0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001}},
+{'I', {0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110}},
+{'J', {0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100}},
+{'K', {0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001}},
+{'L', {0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111}},
+{'M', {0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001}},
+{'N', {0b10001, 0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001}},
+{'O', {0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110}},
+{'P', {0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000}},
+{'Q', {0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101}},
+{'R', {0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001}},
+{'S', {0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110}},
+{'T', {0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100}},
+{'U', {0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110}},
+{'V', {0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100}},
+{'W', {0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001}},
+{'X', {0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001}},
+{'Y', {0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100}},
+{'Z', {0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111}},
+{' ', {0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000}},
+{':', {0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000}},
+{'/', {0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000}},
+{'-', {0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000}},
+}
+
 render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 	// build the vertex stream: the terrain, the map's nodes, then the entities
 	vbp := cast(^byte)s.vbuf_ptr
@@ -662,6 +781,18 @@ render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 	// the camera: world → NDC, zoom about the centre point, y flips
 	world := cam.zoom / 420.0
 	pc := [4]f32{world, -world, -(cam.cx * world), (cam.cz * world)}
+	// the HUD: screen-space text, appended after the world's vertices, drawn
+	// with its own push constants in the same pass
+	n_world := n
+	hud := fmt.aprintf("TURN {}", f.turn)
+	draw_text(vbuf, &n, hud, 4, 4, 0.9, 0.9, 0.9)
+	civ_tag := [4]string{"E", "G", "P", "Y"}
+	for seat := 0; seat < 4; seat += 1 {
+		line := fmt.aprintf("{} F:{} W:{} S:{} G:{} P:{}/{}", civ_tag[seat], f.res[seat][0], f.res[seat][1], f.res[seat][2], f.res[seat][3], f.pop[seat][0], f.pop[seat][1])
+		col := CIV_COLORS[seat % 4]
+		draw_text(vbuf, &n, line, f32(4 + seat * 190), f32(H - 20), col.r, col.g, col.b)
+	}
+	hud_pc := [4]f32{2.0 / f32(W), 2.0 / f32(H), -1, -1}
 	rec_start := time.tick_now()
 	vk.ResetCommandBuffer(s.cmd, {})
 	cbi := vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}
@@ -675,12 +806,13 @@ render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 	rpbi.pClearValues = &clear
 	vk.CmdBeginRenderPass(s.cmd, &rpbi, .INLINE)
 	vk.CmdBindPipeline(s.cmd, .GRAPHICS, s.pipe)
-	vk.CmdPushConstants(s.cmd, s.pipe_layout, {.VERTEX}, 0, 16, &pc)
 	offsets := [1]vk.DeviceSize{0}
 	vbuf_h := s.vbuf
 	vk.CmdBindVertexBuffers(s.cmd, 0, 1, &vbuf_h, raw_data(offsets[:]))
-	verts := n / 6
-	vk.CmdDraw(s.cmd, u32(verts), 1, 0, 0)
+	vk.CmdPushConstants(s.cmd, s.pipe_layout, {.VERTEX}, 0, 16, &pc)
+	vk.CmdDraw(s.cmd, u32(n_world / 6), 1, 0, 0)
+	vk.CmdPushConstants(s.cmd, s.pipe_layout, {.VERTEX}, 0, 16, &hud_pc)
+	vk.CmdDraw(s.cmd, u32((n - n_world) / 6), 1, 0, 0)
 	vk.CmdEndRenderPass(s.cmd)
 	rec_end := time.tick_now()
 	region := vk.BufferImageCopy{
