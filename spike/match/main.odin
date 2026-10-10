@@ -7798,6 +7798,80 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 	net.close(ls)
 }
 
+// serve_folder: the hosted seam (REBUILD_PROPOSAL P4's seed): GET <path> on
+// the port answers the file under the folder, Content-Type by extension, 404
+// otherwise. The analyzer (the parent's web UI) reads a folder over exactly
+// this — the core hosts, the readers read.
+serve_folder_http :: proc(dir: string, port: int) {
+	ep := net.Endpoint{address = net.IP4_Any, port = port}
+	ls, lerr := net.listen_tcp(ep)
+	if lerr != nil {
+		fmt.eprintln("folder-serve: cannot listen on port", port, ":", lerr)
+		return
+	}
+	fmt.eprintln("folder-serve: hosting", dir, "on port", port)
+	for {
+		cl, _, aerr := net.accept_tcp(ls)
+		if aerr != nil {
+			continue
+		}
+		req, ok := serve_read_line(cl)
+		if !ok {
+			net.close(cl)
+			continue
+		}
+		// drain the rest of the request headers to the blank line: closing
+		// with unread received data makes the stack RST the connection and
+		// kill the unread SEND buffer too — the 3.1 MB transcript measured
+		// dying at ~670 KB for exactly this reason
+		for {
+			hline, hok := serve_read_line(cl)
+			if !hok || hline == "" || hline == "\r" {
+				break
+			}
+		}
+		// "GET /meta.json HTTP/1.1" → the path, sanitized to the folder
+		path := ""
+		if strings.has_prefix(req, "GET ") {
+			rest := req[4:]
+			if sp := sindex(rest, " "); sp >= 0 {
+				path = rest[:sp]
+			}
+		}
+		path = strings.trim_prefix(path, "/")
+		safe := path != "" && !strings.contains(path, "..") && !strings.contains(path, "\\")
+		body: []u8
+		ctype := "application/octet-stream"
+		if safe {
+			full := fmt.aprintf("{}/{}", dir, path)
+			if data, rerr := os.read_entire_file_from_path(full, context.allocator); rerr == nil {
+				body = data
+				if strings.has_suffix(path, ".json") {
+					ctype = "application/json"
+				} else if strings.has_suffix(path, ".jsonl") {
+					ctype = "application/x-ndjson"
+				}
+			}
+		}
+		head := fmt.aprintf("HTTP/1.1 {} \r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", len(body) > 0 ? "200 OK" : "404 Not Found", ctype, len(body))
+		hb := make([]u8, len(head) + len(body))
+		copy(hb[0:len(head)], head)
+		copy(hb[len(head):], body)
+		// send loops: a single call may write partially (the 3.1 MB
+		// transcript measured truncating at ~1.3 MB)
+		sent := 0
+		for sent < len(hb) {
+			nw, werr := net.send_tcp(cl, hb[sent:])
+			if werr != nil || nw == 0 {
+				fmt.eprintln("folder-serve: send stopped at", sent, "of", len(hb), ":", werr)
+				break
+			}
+			sent += nw
+		}
+		net.close(cl)
+	}
+}
+
 main :: proc() {
 	if len(os.args) < 2 {
 		return
@@ -7857,6 +7931,16 @@ main :: proc() {
 	}
 	if folder_out {
 		run_folder(os.args[1], ticks, seed, n_seats, diff)
+		return
+	}
+	if os.args[6] == "host" {
+		port := 7777
+		if len(os.args) >= 8 {
+			if v, ok := strconv.parse_int(os.args[7]); ok {
+				port = int(v)
+			}
+		}
+		serve_folder_http(os.args[1], port)
 		return
 	}
 	if serve_out {

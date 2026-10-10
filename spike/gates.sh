@@ -296,6 +296,27 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 12 - the hosted folder: the core serves a match folder over HTTP
+# (REBUILD_PROPOSAL P4's seed - the analyzer reads a folder over exactly this).
+# The gate holds when meta.json and the transcript answer 200 with the right
+# bytes and the traversal and missing-file requests refuse.
+if "$ODIN" build spike/match -out:spike/bin/match >/tmp/odin-match.log 2>&1; then
+	(timeout 30 ./spike/bin/match /tmp/gate-p1-a 600 golden 4 medium host 7901 >/dev/null 2>&1 &)
+	sleep 1
+	if [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7901/meta.json)" = "200" ] \
+	   && cmp -s <(curl -s http://127.0.0.1:7901/transcript.jsonl) /tmp/gate-p1-a/transcript.jsonl \
+	   && [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7901/../etc/passwd)" = "404" ] \
+	   && [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7901/nope.json)" = "404" ]; then
+		say "gate 12  the hosted folder: HTTP answers the match" "ok - meta and transcript served byte-identical, traversal and 404s refuse"
+	else
+		say "gate 12  the hosted folder: HTTP answers the match" "FAIL"
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 12  the hosted folder: HTTP answers the match" "FAIL - the build"
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
