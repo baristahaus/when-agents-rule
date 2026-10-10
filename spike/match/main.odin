@@ -1361,6 +1361,12 @@ tl_mark :: struct {
 
 game_state :: struct {
 	contact_idx: int, // detectContacts' rotating seat
+	// P1 the trace: events.jsonl's bytes, one line per committed action, in
+	// commit order. The sim is single-threaded and deterministic, so commit
+	// order is total: two runs of one seed produce byte-identical files.
+	evbuf: [dynamic]u8,
+	ev_seq: i64,
+	evj: jw, // the shared scratch writer for event lines (JW_SIZE is huge; one reused)
 	// the battle ledger (game.js _battles): engagements opened by damage
 	b_x, b_z: [8]f64,
 	b_started, b_last: [8]f64,
@@ -1460,6 +1466,7 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int, seed_for_rng: stri
 		// TC is created first (startGame), then houses/farms append as built.
 		s.bldgs[0] = s.home
 		s.bldgs[0].pid = mint_entity(g, "building_")
+		ev_building_created(g, i, s.bldgs[0].pid, "town_center", sp[0], sp[1])
 		s.n_bldgs = 1
 		g.gl_b[g.n_gl_b] = gl_ref{seat = i32(i), idx = 0}
 		g.n_gl_b += 1
@@ -1472,6 +1479,7 @@ setup :: proc(g: ^game_state, spawns: [][2]f64, n_seats: int, seed_for_rng: stri
 			z := sp[1] + (krng_draw(&s.k, key) - 0.5) * 10
 			s.units[w] = unit_state{handle = w + 1, x = x, z = z, health = 40, max_health = 40, speed = 1.0, u_type = "worker", harvest_node = -1, build_site = -1, farm = -1, former_node = -1, former_farm = -1, repair_site = -1}
 			s.units[w].pid = mint_entity(g, "unit_")
+			ev_unit_created(g, i, s.units[w].pid, "worker", s.units[w].x, s.units[w].z)
 			s.n_units += 1
 			g.gl_u[g.n_gl_u] = gl_ref{seat = i32(i), idx = i32(w)}
 			g.n_gl_u += 1
@@ -4473,7 +4481,7 @@ manage_workers :: proc(g: ^game_state, s: ^seat) {
 }
 
 // ai.js trainUnit (the worker path; military buildings arrive later).
-train_unit_id :: proc(s: ^seat, b: ^bldg_state, unit_id: string) -> bool {
+train_unit_id :: proc(g: ^game_state, s: ^seat, b: ^bldg_state, unit_id: string) -> bool {
 	// ai.js trainUnit: no production while building, a def with a cost, pop
 	// room, and the money — then the 5 s train timer starts.
 	if b.under_constr || b.is_producing {
@@ -4490,6 +4498,7 @@ train_unit_id :: proc(s: ^seat, b: ^bldg_state, unit_id: string) -> bool {
 		return false
 	}
 	spend(s, ud.cost)
+	ev_order(g, int(s.ci), "train", unit_id)
 	b.is_producing = true
 	b.prod_duration = 5000
 	b.prod_progress = 0
@@ -4497,8 +4506,8 @@ train_unit_id :: proc(s: ^seat, b: ^bldg_state, unit_id: string) -> bool {
 	return true
 }
 
-train_unit :: proc(s: ^seat, b: ^bldg_state) -> bool {
-	return train_unit_id(s, b, "worker")
+train_unit :: proc(g: ^game_state, s: ^seat, b: ^bldg_state) -> bool {
+	return train_unit_id(g, s, b, "worker")
 }
 
 // ai.js getUnitToTrain: the per-age pick ladder, best first, restricted to
@@ -4572,13 +4581,13 @@ train_military :: proc(g: ^game_state, s: ^seat) {
 		if unit_type == "" {
 			continue
 		}
-		train_unit_id(s, bd, unit_type)
+		train_unit_id(g, s, bd, unit_type)
 	}
 }
 
 // ai.js maybeStartResearch: one affordable tech, unlock techs first (the
 // reference's stable sort keeps tree order within each group).
-maybe_start_research :: proc(s: ^seat) -> bool {
+maybe_start_research :: proc(g: ^game_state, s: ^seat) -> bool {
 	if s.cur_research {
 		return false
 	}
@@ -4619,6 +4628,7 @@ maybe_start_research :: proc(s: ^seat) -> bool {
 				s.res.stone -= cs
 				s.res.gold -= cg
 				s.cur_research = true
+				ev_order(g, int(s.ci), "research", tid)
 				s.res_tech = tid
 				s.res_progress = 0
 				s.res_duration = te.research_time
@@ -4871,6 +4881,7 @@ build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
 	}
 	s.n_bldgs += 1
 	bd.pid = mint_entity(g, "building_")
+	ev_building_created(g, int(s.ci), bd.pid, bd.id, bd.x, bd.z)
 	g.gl_b[g.n_gl_b] = gl_ref{seat = i32(s.ci), idx = i32(s.n_bldgs - 1)}
 	g.n_gl_b += 1
 	pick, pulled := pick_builder(g, s, bd)
@@ -4909,7 +4920,7 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 		for b in 0 ..< s.n_bldgs {
 			bd := &s.bldgs[b]
 			if bd.id == "town_center" && !bd.under_constr && !bd.is_producing {
-				if train_unit(s, bd) {
+				if train_unit(g, s, bd) {
 					break
 				}
 			}
@@ -4929,7 +4940,7 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 	}
 	// 4) research hosts: academy/temple are age-gated — dormant at stone.
 	// 5) research
-	maybe_start_research(s)
+	maybe_start_research(g, s)
 	// 6) age advancement needs 6+ workers (dormant this minute).
 	// 7) military buildings: a barracks first, then stable/archery_range behind
 	// their unlock techs, then a tower on spare stone (ai.js
@@ -5219,6 +5230,7 @@ battle_at :: proc(g: ^game_state, x, z: f64, open: bool) -> int {
 		g.b_inv_n[bi] = [8]int{}
 		g.b_nlost[bi] = [8]int{}
 		g.n_battles += 1
+		ev_battle(g, bi)
 		return bi
 	}
 	b := near[0]
@@ -5251,6 +5263,169 @@ battle_at :: proc(g: ^game_state, x, z: f64, open: bool) -> int {
 	return b
 }
 
+// ---- events.jsonl (P1 the trace): one line per committed action ----------
+// Positions are integer millimetres. The vocabulary is the proposal's
+// (docs/REBUILD_PROPOSAL.md, "the match folder"): orders, creations, damage,
+// kills, node depletion, buildings, research, battles, the end. Per-step
+// movement is NOT emitted: the transcript's state already carries
+// frame-accurate positions every turn, and the mover set would be the file's
+// bulk without adding a fact the transcript lacks.
+ev_mm :: proc(v: f64) -> i64 {
+	return i64(math.floor(v * 1000 + 0.5))
+}
+
+// One event line, built with the same JSON writer the transcript uses, then
+// appended whole. The line opens itself: t (the MATCH clock, floored to the
+// 50 ms step), seq (a total order over the run), type.
+ev_line :: proc(g: ^game_state, kind: string) -> ^jw {
+	j := &g.evj
+	j.n = 0
+	j.sep = false
+	j_raw(j, "{\"t\":")
+	j_int(j, i64(math.floor(g.sim_ms / 50 + 0.5)) * 50)
+	j_key(j, "seq")
+	j_int(j, g.ev_seq)
+	j_key(j, "type")
+	j_str(j, kind)
+	return j
+}
+
+ev_finish :: proc(g: ^game_state, j: ^jw) {
+	j_raw(j, "}\n")
+	g.ev_seq += 1
+	for b in j.buf[:j.n] {
+		append(&g.evbuf, b)
+	}
+}
+
+ev_unit_created :: proc(g: ^game_state, seat: int, pid, ut: string, x, z: f64) {
+	j := ev_line(g, "unitCreated")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "pid")
+	j_str(j, pid)
+	j_key(j, "unitType")
+	j_str(j, ut)
+	j_key(j, "x")
+	j_int(j, ev_mm(x))
+	j_key(j, "z")
+	j_int(j, ev_mm(z))
+	ev_finish(g, j)
+}
+
+ev_building_created :: proc(g: ^game_state, seat: int, pid, bt: string, x, z: f64) {
+	j := ev_line(g, "buildingCreated")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "pid")
+	j_str(j, pid)
+	j_key(j, "buildingType")
+	j_str(j, bt)
+	j_key(j, "x")
+	j_int(j, ev_mm(x))
+	j_key(j, "z")
+	j_int(j, ev_mm(z))
+	ev_finish(g, j)
+}
+
+ev_building_finished :: proc(g: ^game_state, seat: int, pid, bt: string) {
+	j := ev_line(g, "buildingFinished")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "pid")
+	j_str(j, pid)
+	j_key(j, "buildingType")
+	j_str(j, bt)
+	ev_finish(g, j)
+}
+
+ev_order :: proc(g: ^game_state, seat: int, kind, detail: string) {
+	j := ev_line(g, "order")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "order")
+	j_str(j, kind)
+	j_key(j, "detail")
+	j_str(j, detail)
+	ev_finish(g, j)
+}
+
+ev_research_done :: proc(g: ^game_state, seat: int, tech: string) {
+	j := ev_line(g, "researchCompleted")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "tech")
+	j_str(j, tech)
+	ev_finish(g, j)
+}
+
+ev_node_depleted :: proc(g: ^game_state, seat: int, ntype: i32, x, z: f64) {
+	j := ev_line(g, "nodeDepleted")
+	j_key(j, "seat")
+	j_int(j, i64(seat))
+	j_key(j, "resource")
+	j_str(j, res_type_name[ntype])
+	j_key(j, "x")
+	j_int(j, ev_mm(x))
+	j_key(j, "z")
+	j_int(j, ev_mm(z))
+	ev_finish(g, j)
+}
+
+ev_battle :: proc(g: ^game_state, bi: int) {
+	j := ev_line(g, "battleReported")
+	j_key(j, "battle")
+	j_int(j, i64(bi))
+	j_key(j, "x")
+	j_int(j, ev_mm(g.b_x[bi]))
+	j_key(j, "z")
+	j_int(j, ev_mm(g.b_z[bi]))
+	ev_finish(g, j)
+}
+
+ev_kill :: proc(g: ^game_state, towner: int, ttype: string, tx, tz: f64) {
+	j := ev_line(g, "unitKilled")
+	j_key(j, "seat")
+	j_int(j, i64(towner))
+	j_key(j, "unitType")
+	j_str(j, ttype)
+	j_key(j, "x")
+	j_int(j, ev_mm(tx))
+	j_key(j, "z")
+	j_int(j, ev_mm(tz))
+	ev_finish(g, j)
+}
+
+ev_damage :: proc(g: ^game_state, apid, atype: string, aseat: int, vpid, vtype: string, vseat: int, v_is_building: bool, amount, tx, tz: f64) {
+	j := ev_line(g, v_is_building ? "buildingDamaged" : "unitDamaged")
+	j_key(j, "attacker")
+	j_str(j, apid)
+	j_key(j, "attackerType")
+	j_str(j, atype)
+	j_key(j, "attackerSeat")
+	j_int(j, i64(aseat))
+	j_key(j, "victim")
+	j_str(j, vpid)
+	j_key(j, "victimType")
+	j_str(j, vtype)
+	j_key(j, "victimSeat")
+	j_int(j, i64(vseat))
+	j_key(j, "amount")
+	j_f64(j, amount)
+	j_key(j, "x")
+	j_int(j, ev_mm(tx))
+	j_key(j, "z")
+	j_int(j, ev_mm(tz))
+	ev_finish(g, j)
+}
+
+ev_match_end :: proc(g: ^game_state, reason: string) {
+	j := ev_line(g, "matchEnded")
+	j_key(j, "reason")
+	j_str(j, reason)
+	ev_finish(g, j)
+}
+
 record_battle_damage :: proc(g: ^game_state, aseat: int, atype: string, apid: string, tx, tz: f64, towner: int, t_is_building: bool, amount: f64) {
 	if amount <= 0 { return }
 	bi := battle_at(g, tx, tz, true)
@@ -5269,6 +5444,7 @@ record_battle_damage :: proc(g: ^game_state, aseat: int, atype: string, apid: st
 }
 
 record_battle_loss :: proc(g: ^game_state, towner: int, ttype: string, tx, tz: f64) {
+	ev_kill(g, towner, ttype, tx, tz)
 	bi := battle_at(g, tx, tz, false)
 	if bi < 0 { return }
 	si := -1
@@ -5565,6 +5741,7 @@ update_combat :: proc(g: ^game_state, dt: f64) {
 						te.last_dmg_time = g.sim_ms
 						te.ldk_kind, te.ldk_seat, te.ldk_idx = 1, int(s.ci), int(r.idx)
 						record_battle_damage(g, int(s.ci), u.u_type, u.pid, te.x, te.z, u.atk_seat, false, dealt)
+						ev_damage(g, u.pid, u.u_type, int(s.ci), te.pid, te.u_type, u.atk_seat, false, dealt, te.x, te.z)
 						if te.health <= 0 && !te.dead_counted {
 							te.dead_counted = true
 							record_battle_loss(g, u.atk_seat, te.u_type, te.x, te.z)
@@ -5577,6 +5754,7 @@ update_combat :: proc(g: ^game_state, dt: f64) {
 						tb.last_dmg_time = g.sim_ms
 						tb.ldk_kind, tb.ldk_seat, tb.ldk_idx = 1, int(s.ci), int(r.idx)
 						record_battle_damage(g, int(s.ci), u.u_type, u.pid, tb.x, tb.z, u.atk_seat, true, dealt)
+						ev_damage(g, u.pid, u.u_type, int(s.ci), tb.pid, tb.id, u.atk_seat, true, dealt, tb.x, tb.z)
 						if tb.health <= 0 && !tb.dead_counted {
 							tb.dead_counted = true
 							record_battle_loss(g, u.atk_seat, tb.id, tb.x, tb.z)
@@ -5976,6 +6154,7 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 	}
 	// exploreMap: a worker scouts (task 'scouting'); military units scout
 	// with the task flag left alone (null)
+	ev_order(g, int(s.ci), "explore", fmt.aprintf("{i64(math.floor(tx + 0.5))}_{i64(math.floor(tz + 0.5))}"))
 	if w.u_type == "worker" {
 		w.task = TASK_SCOUTING
 	}
@@ -6197,8 +6376,12 @@ update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
 			u.harvest_timer += dt
 			if u.harvest_timer >= 2000 {
 				amount := 10 * s.harvest_bonus
+				was := n.amount
 				n.amount = math.max(0, n.amount - amount)
 				if n.amount <= 0 {
+					if was > 0 {
+						ev_node_depleted(g, int(s.ci), n.n_type, n.x, n.z)
+					}
 					// the crew that emptied it knows: correct the owner's belief
 					s.seen_amt[u.harvest_node] = 0
 				}
@@ -6406,6 +6589,7 @@ complete_construction :: proc(g: ^game_state, s: ^seat, b: ^bldg_state) {
 		return
 	}
 	b.under_constr = false
+	ev_building_finished(g, int(s.ci), b.pid, b.id)
 	b.build_progress = b.build_time
 	b.health = b.max_health
 	recompute_max_population(s)
@@ -6469,6 +6653,7 @@ update_production :: proc(g: ^game_state, dt: f64) {
 						w.max_health = ud.health
 						w.speed = ud.speed
 						w.pid = mint_entity(g, "unit_")
+						ev_unit_created(g, int(s.ci), w.pid, w.u_type, w.x, w.z)
 						w.harvest_node = -1
 						w.build_site = -1
 						w.farm = -1
@@ -6497,13 +6682,14 @@ update_research_progress :: proc(g: ^game_state, dt: f64) {
 		}
 		s.res_progress += dt
 		if s.res_progress >= s.res_duration {
-			complete_research(s, s.res_tech)
+			complete_research(g, s, s.res_tech)
 		}
 	}
 }
 
 // completeResearch: researched, unlocks applied, the slot freed.
-complete_research :: proc(s: ^seat, tid: string) {
+complete_research :: proc(g: ^game_state, s: ^seat, tid: string) {
+	ev_research_done(g, s.ci, tid)
 	if s.n_researched < len(s.researched) {
 		s.researched[s.n_researched] = tid
 		s.n_researched += 1
@@ -7069,9 +7255,15 @@ main :: proc() {
 	if len(os.args) >= 4 { seed = os.args[3] }
 	if len(os.args) >= 5 { if v, ok := strconv.parse_int(os.args[4]); ok { n_seats = v } }
 	if len(os.args) >= 6 { diff = os.args[5] }
-	if len(os.args) >= 7 { map_only = os.args[6] == "map" }
+	folder_out := false
+	if len(os.args) >= 7 {
+		map_only = os.args[6] == "map"
+		folder_out = os.args[6] == "folder"
+	}
 	spawns := arena_spawns(n_seats)
-	g: game_state
+	// heap, not main's frame: game_state carries a full transcript writer
+	// (JW_SIZE), far past any sane stack.
+	g := new(game_state)
 	g.n_seats = n_seats
 	g.map_seed = seed
 	g.map_diff = diff
@@ -7080,13 +7272,13 @@ main :: proc() {
 		g.terrain = t_terrain(f64(800), seed, spawns, diff)
 		j := new(jw)
 		j.n = 0
-		write_map_line(&g, j, spawns, seed, diff)
+		write_map_line(g, j, spawns, seed, diff)
 		// the golden map files carry NO trailing newline
 		_ = os.write_entire_file(os.args[1], j.buf[:j.n - 1])
 		return
 	}
 	g.terrain = t_terrain(f64(800), seed, spawns, diff)
-	setup(&g, spawns, n_seats, seed)
+	setup(g, spawns, n_seats, seed)
 	if len(os.args) >= 3 {
 		g.total_minutes = strconv.atoi(os.args[2]) / 600
 	}
@@ -7094,25 +7286,75 @@ main :: proc() {
 	j := new(jw)
 	j.n = 0
 
-	write_match_line(&g, j, n_seats, seed, diff)
-	write_map_line(&g, j, spawns, seed, diff)
+	write_match_line(g, j, n_seats, seed, diff)
+	write_map_line(g, j, spawns, seed, diff)
 
 	for tick := 1; tick <= ticks; tick += 1 {
 		g.match_ms += 100
 		for k in 0 ..< 4 {
-			step_once(&g)
+			step_once(g)
 		}
-		sample_timeline(&g, g.match_ms)
+		sample_timeline(g, g.match_ms)
 		if tick % 5 == 0 {
 			seq := tick / 5
-			write_snap_line(&g, j, tick*100, seq)
+			write_snap_line(g, j, tick*100, seq)
 			for si in 0 ..< 4 {
-				write_turn_line(&g, j, si, seq)
+				write_turn_line(g, j, si, seq)
 			}
 		}
 	}
 
-	write_results_line(&g, j)
-	write_timeline_line(&g, j)
+	ev_match_end(g, "time-limit")
+	write_results_line(g, j)
+	write_timeline_line(g, j)
+	if folder_out {
+		// P1 the trace: the match folder (docs/REBUILD_PROPOSAL.md). The
+		// transcript is the v1 contract, byte for byte the stream the corpus
+		// pins; meta.json carries the conditions; events.jsonl is the action
+		// log the simulation emitted as it ran. traces/ arrives with the LLM
+		// seats; a rule seat's decisions are in the events as `order` lines.
+		os.make_directory_all(os.args[1])
+		m := new(jw)
+		m.n = 0
+		m.sep = false
+		j_raw(m, "{")
+		j_key(m, "matchId")
+		j_str(m, seed)
+		j_key(m, "seed")
+		j_str(m, seed)
+		j_key(m, "difficulty")
+		j_str(m, diff)
+		j_key(m, "seats")
+		j_int(m, i64(n_seats))
+		j_key(m, "minutes")
+		j_int(m, i64(ticks / 600))
+		j_key(m, "stepMs")
+		j_int(m, 100)
+		j_key(m, "snapshotMs")
+		j_int(m, 500)
+		j_key(m, "simSpeed")
+		j_int(m, 1)
+		j_key(m, "turnBased")
+		j_bool(m, false)
+		j_key(m, "core")
+		j_str(m, "odin")
+		j_key(m, "rulesBuild")
+		j_int(m, 1081)
+		j_key(m, "events")
+		j_int(m, g.ev_seq)
+		j_raw(m, "}")
+		dir := os.args[1]
+		p_t := fmt.aprintf("{}/transcript.jsonl", dir)
+		p_e := fmt.aprintf("{}/events.jsonl", dir)
+		p_m := fmt.aprintf("{}/meta.json", dir)
+		err_t := os.write_entire_file_from_bytes(p_t, j.buf[:j.n])
+		err_e := os.write_entire_file_from_bytes(p_e, g.evbuf[:])
+		err_m := os.write_entire_file_from_bytes(p_m, m.buf[:m.n])
+		if err_t != nil || err_e != nil || err_m != nil {
+			fmt.eprintln("folder write failed:", err_t, err_e, err_m)
+		}
+		_ = os.write_entire_file(fmt.aprintf("{os.args[1]}/meta.json"), m.buf[:m.n])
+		return
+	}
 	_ = os.write_entire_file(os.args[1], j.buf[:j.n])
 }

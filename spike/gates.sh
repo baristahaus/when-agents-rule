@@ -188,6 +188,30 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 8 — P1's determinism, the first folder gate (docs/REBUILD_PROPOSAL.md,
+# "the match folder"): two one-minute folder runs of one seed. The transcripts
+# must be byte-identical to each other AND to the pinned golden stream (the
+# folder's transcript IS the v1 contract); the events files must diff to empty.
+if "$ODIN" build spike/match -out:spike/bin/match >/tmp/odin-match.log 2>&1; then
+	rm -rf /tmp/gate-p1-a /tmp/gate-p1-b
+	if ./spike/bin/match /tmp/gate-p1-a 600 golden 4 medium folder >/dev/null 2>&1 \
+	   && ./spike/bin/match /tmp/gate-p1-b 600 golden 4 medium folder >/dev/null 2>&1 \
+	   && cmp -s /tmp/gate-p1-a/transcript.jsonl /tmp/gate-p1-b/transcript.jsonl \
+	   && cmp -s /tmp/gate-p1-a/events.jsonl /tmp/gate-p1-b/events.jsonl \
+	   && cmp -s /tmp/gate-p1-a/transcript.jsonl golden/stream-1m.jsonl \
+	   && node -e 'let ok=0,bad=0;require("readline").createInterface({input:require("fs").createReadStream("/tmp/gate-p1-a/events.jsonl")}).on("line",l=>{try{JSON.parse(l);ok++}catch(e){bad++}}).on("close",()=>process.exit(bad?1:0))'; then
+		say "gate 8  the match folder: two runs, empty diff" "ok — transcript = the golden stream, events deterministic ($(wc -l < /tmp/gate-p1-a/events.jsonl) lines)"
+	else
+		say "gate 8  the match folder: two runs, empty diff" "FAIL"
+		diff <(head -5 /tmp/gate-p1-a/events.jsonl) <(head -5 /tmp/gate-p1-b/events.jsonl) | head -6
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 8  the match folder: two runs, empty diff" "FAIL — the build"
+	grep Error /tmp/odin-match.log | head -5
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
