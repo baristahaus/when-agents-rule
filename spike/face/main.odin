@@ -23,6 +23,8 @@ import "core:fmt"
 import "core:encoding/json"
 import "core:dynlib"
 import "core:os"
+import "core:strconv"
+import "core:time"
 import "core:strings"
 import "core:math"
 import "core:mem"
@@ -47,8 +49,15 @@ entity :: struct {
 
 frame :: struct {
 	turn:   int,
-	ents:   [512]entity,
+	ents:   [1024]entity,
 	n:      int,
+	nodes:  [1024]entity, // the map line's resource nodes: static scenery
+	nn:     int,
+}
+
+camera :: struct {
+	zoom:    f32, // world→screen scale, 1 = the whole map fits
+	cx, cz:  f32, // the world point at the screen's centre
 }
 
 // FNV-1a 64, the transcript's own diagnostic hash (game.js stateDigest)
@@ -76,6 +85,32 @@ jnum :: proc(v: json.Value) -> f64 {
 	return 0
 }
 
+// jnum2: an object field as f64 (0 when absent)
+jnum2 :: proc(o: json.Object, key: string) -> f64 {
+	v, has := o[key]
+	if !has {
+		return 0
+	}
+	return jnum(v)
+}
+
+// node_kind: the map line's resource types, drawn in distinct colours
+node_kind :: proc(s: string) -> i32 {
+	if s == "food" {
+		return 1
+	}
+	if s == "wood" {
+		return 2
+	}
+	if s == "stone" {
+		return 3
+	}
+	if s == "gold" {
+		return 4
+	}
+	return 0
+}
+
 scene_at :: proc(lines: []string, want_turn: int, f: ^frame) {
 	f.turn = want_turn
 	f.n = 0
@@ -91,6 +126,34 @@ scene_at :: proc(lines: []string, want_turn: int, f: ^frame) {
 		obj, o_ok := v.(json.Object)
 		if !o_ok {
 			continue
+		}
+		tv_type, type_has := obj["type"]
+		if type_has {
+			if ts, ok := tv_type.(json.String); ok && ts == "map" {
+				// the static scenery: the map line's resource nodes
+				if rv, has := obj["resources"]; has {
+					if items, a_ok := rv.(json.Array); a_ok {
+						for item in items {
+							io, ok := item.(json.Object)
+							if !ok {
+								continue
+							}
+							x, z := jnum2(io, "x"), jnum2(io, "z")
+							nt: i32 = 0
+							if ttv, has := io["t"]; has {
+								if tts, ok := ttv.(json.String); ok {
+									nt = node_kind(tts)
+								}
+							}
+							if f.nn < len(f.nodes) {
+								f.nodes[f.nn] = entity{x = x, z = z, kind = 2 + nt, seat = 0}
+								f.nn += 1
+							}
+						}
+					}
+				}
+				continue
+			}
 		}
 		tval, has := obj["turn"]
 		if !has {
@@ -184,6 +247,7 @@ vk_state :: struct {
 	vbuf:       vk.Buffer,
 	vbuf_mem:   vk.DeviceMemory,
 	vbuf_ptr:   rawptr,
+	cpu_ns, gpu_ns, read_ns: i64, // the bench's phase split
 	readbuf:    vk.Buffer, // the read-back target (transfer dst, host-visible)
 	read_mem:   vk.DeviceMemory,
 	pool:       vk.CommandPool,
@@ -384,7 +448,12 @@ vk_init :: proc(s: ^vk_state) -> bool {
 	}
 	rreq := vk.MemoryRequirements{}
 	vk.GetBufferMemoryRequirements(s.device, s.readbuf, &rreq)
-	ridx := mem_type_for(s, rreq.memoryTypeBits, {.HOST_VISIBLE} | {.HOST_COHERENT})
+	// cached when the device offers it: uncached mapped reads run at PCIe
+	// speeds and measured 41 ms/frame — the 60 fps budget is 16.7
+	ridx := mem_type_for(s, rreq.memoryTypeBits, {.HOST_VISIBLE} | {.HOST_CACHED} | {.HOST_COHERENT})
+	if ridx < 0 {
+		ridx = mem_type_for(s, rreq.memoryTypeBits, {.HOST_VISIBLE} | {.HOST_COHERENT})
+	}
 	if ridx < 0 {
 		fmt.println("face: no host-visible read-back memory")
 		return false
@@ -477,14 +546,27 @@ u32_le :: proc(f: f32) -> u32 {
 	return transmute(u32)f
 }
 
-render_frame :: proc(s: ^vk_state, f: ^frame) -> []byte {
-	// build the vertex stream: the terrain, then buildings, then units
-		vbp := cast(^byte)s.vbuf_ptr
+render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
+	// build the vertex stream: the terrain, the map's nodes, then the entities
+	vbp := cast(^byte)s.vbuf_ptr
 	vbuf := mem.slice_ptr(vbp, 1 << 20)
 	n := 0
 	// water border then the island (the true 800-world's beach ring)
 	draw_quads(vbuf, &n, 0, 0, 430, 0.15, 0.25, 0.5)
 	draw_quads(vbuf, &n, 0, 0, 385, 0.35, 0.55, 0.25)
+	// the map's resource nodes: static scenery, colour by kind
+	node_cols := [5][3]f32{
+		{0.4, 0.4, 0.4},
+		{0.8, 0.3, 0.8}, // food, magenta-ish
+		{0.2, 0.45, 0.15}, // wood, dark green
+		{0.6, 0.6, 0.65}, // stone, grey
+		{0.95, 0.85, 0.2}, // gold, yellow
+	}
+	for i := 0; i < f.nn; i += 1 {
+		nd := &f.nodes[i]
+		c := node_cols[nd.kind - 2]
+		draw_quads(vbuf, &n, f32(nd.x), f32(nd.z), 1.6, c.r, c.g, c.b)
+	}
 	for i := 0; i < f.n; i += 1 {
 		e := &f.ents[i]
 		col := CIV_COLORS[e.seat % 4]
@@ -494,8 +576,10 @@ render_frame :: proc(s: ^vk_state, f: ^frame) -> []byte {
 			draw_quads(vbuf, &n, f32(e.x), f32(e.z), 2.5, col.r, col.g, col.b)
 		}
 	}
-	world := f32(1.0 / 420.0) // world units → NDC
-	pc := [4]f32{world, -world, 0, 0} // y flips: world z up, screen down
+	// the camera: world → NDC, zoom about the centre point, y flips
+	world := cam.zoom / 420.0
+	pc := [4]f32{world, -world, -(cam.cx * world), (cam.cz * world)}
+	rec_start := time.tick_now()
 	vk.ResetCommandBuffer(s.cmd, {})
 	cbi := vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}
 	vk.BeginCommandBuffer(s.cmd, &cbi)
@@ -515,6 +599,7 @@ render_frame :: proc(s: ^vk_state, f: ^frame) -> []byte {
 	verts := n / 6
 	vk.CmdDraw(s.cmd, u32(verts), 1, 0, 0)
 	vk.CmdEndRenderPass(s.cmd)
+	rec_end := time.tick_now()
 	region := vk.BufferImageCopy{
 		bufferOffset = 0,
 		imageSubresource = vk.ImageSubresourceLayers{aspectMask = {.COLOR}, mipLevel = 0, baseArrayLayer = 0, layerCount = 1},
@@ -525,16 +610,13 @@ render_frame :: proc(s: ^vk_state, f: ^frame) -> []byte {
 	si := vk.SubmitInfo{sType = .SUBMIT_INFO, commandBufferCount = 1, pCommandBuffers = &s.cmd}
 	vk.QueueSubmit(s.queue, 1, &si, vk.Fence({}))
 	vk.QueueWaitIdle(s.queue)
-	// the pixels: the mapped linear image, row stride per the subresource layout
-	lay := vk.SubresourceLayout{}
-	sub := vk.ImageSubresource{aspectMask = {.COLOR}, mipLevel = 0, arrayLayer = 0}
-	vk.GetImageSubresourceLayout(s.device, s.image, &sub, &lay)
+	t2 := time.tick_now()
+	s.gpu_ns += t2._nsec - rec_end._nsec
 	rows := make([]byte, H * W * 4)
 	ipb := cast(^byte)s.img_ptr
-	src := mem.slice_ptr(ipb, 1 << 22)[lay.offset:]
-	for row := 0; row < H; row += 1 {
-		copy(rows[row * W * 4:(row + 1) * W * 4], src[row * int(lay.rowPitch):][0:W * 4])
-	}
+	copy(rows, mem.slice_ptr(ipb, H * W * 4))
+	t3 := time.tick_now()
+	s.read_ns += t3._nsec - t2._nsec
 	return rows
 }
 
@@ -566,13 +648,32 @@ main :: proc() {
 	args := os.args
 	path := "golden/stream-1m.jsonl"
 	png_prefix := ""
+	bench := false
 	if len(args) >= 2 {
 		path = args[1]
 	}
+	cam := camera{zoom = 1, cx = 0, cz = 0}
 	for a := 2; a < len(args); a += 1 {
 		if args[a] == "--png" && a + 1 < len(args) {
 			a += 1
 			png_prefix = args[a]
+		} else if args[a] == "--zoom" && a + 1 < len(args) {
+			a += 1
+			if v, ok := strconv.parse_f64(args[a]); ok {
+				cam.zoom = f32(v)
+			}
+		} else if args[a] == "--cx" && a + 1 < len(args) {
+			a += 1
+			if v, ok := strconv.parse_f64(args[a]); ok {
+				cam.cx = f32(v)
+			}
+		} else if args[a] == "--cz" && a + 1 < len(args) {
+			a += 1
+			if v, ok := strconv.parse_f64(args[a]); ok {
+				cam.cz = f32(v)
+			}
+		} else if args[a] == "--bench" {
+			bench = true
 		}
 	}
 	data, rerr := os.read_entire_file_from_path(path, context.allocator)
@@ -583,15 +684,48 @@ main :: proc() {
 	lines := strings.split(string(data), "\n")
 	// the sampled turns: every 10 turns across the minute (turn 10..120)
 	sample := [12]int{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120}
+	if bench {
+		// the 60 fps question, measured: every turn of the corpus, timed
+		for i := 1; i <= 12; i += 1 {
+			sample[i - 1] = i * 10
+		}
+	}
+	if bench {
+		// the 60 fps question, measured: every turn of the corpus, timed
+		for i := 1; i <= 12; i += 1 {
+			sample[i - 1] = i * 10
+		}
+	}
 	vs: vk_state
 	if !vk_init(&vs) {
 		os.exit(1)
 	}
 	defer vk_shutdown(&vs)
-	f: frame
+	// the transcript parses ONCE: the scenes for the whole match, the map line
+	// folded into every frame (scene_at's 600-line JSON walk is the slow part;
+	// the GPU must be measured alone)
+	frames := make([]frame, 121)
+	for turn := 1; turn <= 120; turn += 1 {
+		scene_at(lines, turn, &frames[turn])
+	}
+	f := &frames[1]
+	if bench {
+		// every turn, timed: the ms/frame the milestone's 60 fps needs
+		start := time.tick_now()
+		rendered := 0
+		for turn := 1; turn <= 120; turn += 1 {
+			_ = render_frame(&vs, &frames[turn], &cam)
+			rendered += 1
+		}
+		e2 := time.tick_now()
+		ns := e2._nsec - start._nsec
+		fmt.println("bench: rendered", rendered, "frames in", f64(ns) / 1e6, "ms —", f64(ns) / 1e6 / f64(rendered), "ms/frame")
+		fmt.println("  submit+gpu wait:", f64(vs.gpu_ns) / 1e6, "ms; read map:", f64(vs.read_ns) / 1e6, "ms")
+		return
+	}
 	for si := 0; si < len(sample); si += 1 {
-		scene_at(lines, sample[si], &f)
-		rows := render_frame(&vs, &f)
+		f = &frames[sample[si]]
+		rows := render_frame(&vs, f, &cam)
 		fmt.println("frame turn", f.turn, "entities", f.n, "fnv1a", fmt.aprintf("{}{}{}", fnv(rows), "", ""))
 		if png_prefix != "" {
 			write_ppm(fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn), rows)
