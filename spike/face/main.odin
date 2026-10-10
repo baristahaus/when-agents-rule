@@ -53,6 +53,8 @@ frame :: struct {
 	n:      int,
 	nodes:  [1024]entity, // the map line's resource nodes: static scenery
 	nn:     int,
+	fog:    [49]i32, // the state's map.exploration: 7x7 tiles, 0..100% seen
+	has_fog: bool,
 }
 
 camera :: struct {
@@ -109,6 +111,20 @@ node_kind :: proc(s: string) -> i32 {
 		return 4
 	}
 	return 0
+}
+
+// fog_cell: an exploration entry "C5": 42 — the tile at column C, row 5 has
+// 42% of its cells seen. The grid is 7x7 tiles in label order.
+fog_cell :: proc(f: ^frame, key: string, val: f64) {
+	if len(key) < 2 {
+		return
+	}
+	col := int(key[0] - 'A')
+	row := int(key[1] - '1')
+	if col < 0 || col > 6 || row < 0 || row > 6 {
+		return
+	}
+	f.fog[row * 7 + col] = i32(val)
 }
 
 scene_at :: proc(lines: []string, want_turn: int, f: ^frame) {
@@ -176,6 +192,25 @@ scene_at :: proc(lines: []string, want_turn: int, f: ^frame) {
 			if po, ok := pval.(json.Object); ok {
 				if sv, has := po["seat"]; has {
 					seat_i = int(jnum(sv))
+				}
+			}
+		}
+		// the fog: one seat's exploration grid per frame (the first record
+		// that carries one — the viewer plays that seat's knowledge)
+		if !f.has_fog {
+			if mv, has := st["map"]; has {
+				if mo, ok := mv.(json.Object); ok {
+					if ev, has := mo["exploration"]; has {
+						if eo, ok := ev.(json.Object); ok {
+							f.has_fog = true
+							for cell := 0; cell < 49; cell += 1 {
+								f.fog[cell] = 0
+							}
+							for k, val in eo {
+								fog_cell(f, k, jnum(val))
+							}
+						}
+					}
 				}
 			}
 		}
@@ -566,6 +601,21 @@ render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 		nd := &f.nodes[i]
 		c := node_cols[nd.kind - 2]
 		draw_quads(vbuf, &n, f32(nd.x), f32(nd.z), 1.6, c.r, c.g, c.b)
+	}
+	// the fog: tiles under half-seen go dark, drawn over the terrain and
+	// nodes but under this seat's own units (the reference's own seat is
+	// never fogged for itself — the viewer keeps that honesty)
+	if f.has_fog {
+		tile := 800.0 / 7.0
+		for row := 0; row < 7; row += 1 {
+			for col := 0; col < 7; col += 1 {
+				if f.fog[row * 7 + col] < 50 {
+					cx := f32(-400) + (f32(col) + 0.5) * f32(tile)
+					cz := f32(-400) + (f32(row) + 0.5) * f32(tile)
+					draw_quads(vbuf, &n, cx, cz, f32(tile / 2), 0.02, 0.03, 0.05)
+				}
+			}
+		}
 	}
 	for i := 0; i < f.n; i += 1 {
 		e := &f.ents[i]
