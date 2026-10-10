@@ -37,8 +37,10 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:net"
 import "core:os"
 import "core:strconv"
+import "core:strings"
 
 // ===========================================================================
 // Portable math — a transcription of js/simulation/math.js.
@@ -1339,6 +1341,12 @@ seat :: struct {
 	n_um: int,
 	scout_angle: f64, // _scoutAngle
 	scout_radius: f64, // _scoutRadius
+	// P1 serve: this seat is played by an attached client (its own decisions
+	// replace the rule brain's discrete orders; the per-step worker machines
+	// still run, exactly as the reference's model seats do).
+	model_seat: bool,
+	sock: net.TCP_Socket,
+	has_sock: bool,
 	// P1 traces: the decisions taken since this seat's last turn record, one
 	// trace line per turn (a rule seat's "conversation" is its decisions; an
 	// LLM seat's will be the request/reply/usage tier).
@@ -4850,23 +4858,23 @@ release_builder :: proc(g: ^game_state, s: ^seat, w: ^unit_state, ui: int) {
 
 // The brain's buildStructure (ai.js): the def, the duplicate check, the
 // afford check, the spot, the spend, the site, the builder.
-build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
+build_structure :: proc(g: ^game_state, s: ^seat, btype: string) -> bool {
 	def := bldg_def_by_id(btype)
 	if def == nil {
-		return
+		return false
 	}
 	for b in 0 ..< s.n_bldgs {
 		if s.bldgs[b].id == btype && s.bldgs[b].under_constr {
-			return
+			return false
 		}
 	}
 	if !can_afford(s, def.cost) {
-		return
+		return false
 	}
 	tc := &s.bldgs[0]
 	x, z, ok := find_build_position(g, s, tc, btype)
 	if !ok {
-		return
+		return false
 	}
 	spend(s, def.cost)
 	bd := &s.bldgs[s.n_bldgs]
@@ -4895,6 +4903,7 @@ build_structure :: proc(g: ^game_state, s: ^seat, btype: string) {
 	if pick >= 0 {
 		apply_builder(g, s, pick, s.n_bldgs - 1, pulled)
 	}
+	return true
 }
 
 // ai.js runTurn, in the reference's order.
@@ -4919,7 +4928,7 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 			}
 		}
 		if houses < 6 {
-			build_structure(g, s, "house")
+			_ = build_structure(g, s, "house")
 		}
 	}
 	// 2) economy: grow the worker base
@@ -4942,7 +4951,7 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 			}
 		}
 		if farms < 4 {
-			build_structure(g, s, "farm")
+			_ = build_structure(g, s, "farm")
 		}
 	}
 	// 4) research hosts: academy/temple are age-gated — dormant at stone.
@@ -4955,14 +4964,14 @@ run_turn :: proc(g: ^game_state, s: ^seat) {
 	// The reference's method returns after ONE build, but runTurn itself goes
 	// on — exploreMap below always runs.
 	if !seat_has_bldg(s, "barracks") {
-		build_structure(g, s, "barracks")
+		_ = build_structure(g, s, "barracks")
 	} else if seat_researched(s, "horseback") && !seat_has_bldg(s, "stable") {
-		build_structure(g, s, "stable")
+		_ = build_structure(g, s, "stable")
 	} else if seat_researched(s, "longbow") && !seat_has_bldg(s, "archery_range") {
-		build_structure(g, s, "archery_range")
+		_ = build_structure(g, s, "archery_range")
 	} else if seat_count_bldg(s, "tower") < 1 && s.res.stone >= 120 {
 		// Defensive towers once we have stone to spare (standard: one).
-		build_structure(g, s, "tower")
+		_ = build_structure(g, s, "tower")
 	}
 	// 8) train military once the economy is on its feet (or a rival Wonder
 	// must be answered — none in this corpus).
@@ -6072,6 +6081,11 @@ command_army :: proc(g: ^game_state, s: ^seat) {
 
 // ai.js advanceThink: each seat's think clock, 2000 ms sim.
 advance_think :: proc(g: ^game_state, s: ^seat, dt: f64) {
+	if s.model_seat {
+		// the client owns this seat's discrete orders; the world still runs
+		// its per-step machines beneath it, as the reference's model seats do
+		return
+	}
 	s.think_timer += dt
 	if s.think_timer < 2000 {
 		return
@@ -7332,7 +7346,14 @@ run_folder :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: st
 	ev_match_end(g, "time-limit")
 	write_results_line(g, j)
 	write_timeline_line(g, j)
+	write_folder(g, j, dir, ticks, seed, n_seats, diff)
+	for si := 0; si < n_seats; si += 1 {
+		_ = si
+	}
+}
 
+// The folder writer: everything after the run (P1 the trace).
+write_folder :: proc(g: ^game_state, j: ^jw, dir: string, ticks: int, seed: string, n_seats: int, diff: string) {
 	os.make_directory_all(dir)
 	m := new(jw)
 	m.n = 0
@@ -7383,6 +7404,340 @@ run_folder :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: st
 	}
 }
 
+
+
+// ---- P1 serve: a hosted match, seats attaching over TCP -------------------
+// The protocol, one line of JSON each way per turn record (every 500 ms of
+// match time): the daemon sends the seat's turn record exactly as the
+// transcript carries it; the seat replies {"actions":[...]} (empty = pass).
+// A turn-based lockstep: the world waits for every seat's line, so a slow
+// model delays the match and nothing else — the shape the proposal's lockstep
+// section describes. Actions the v1 executor takes: train_unit,
+// build_structure, research_tech, explore; anything else is refused with the
+// executor's [ERROR] shape, never silently dropped.
+//
+// An attached seat's discrete orders come ONLY from its client (the rule
+// brain's 2 s think is switched off for it); everything per-step beneath —
+// workers, production, construction, the fog — runs as always.
+
+// sindex: the first occurrence of sub in s, or -1 (core:strings has no
+// substring index; the serve executor's needs are tiny and local).
+sindex :: proc(s, sub: string) -> int {
+	if len(sub) == 0 {
+		return 0
+	}
+	for i := 0; i+len(sub) <= len(s); i += 1 {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+// Which finished building trains this unit for this civ (the host the
+// executor's train_unit needs): the Town Center trains the worker; a civ
+// unique names its train_at; a standard unit sits in the shared tier tables.
+building_trains :: proc(ci: int, host: string, unit_id: string) -> bool {
+	if unit_id == "worker" {
+		return host == "town_center"
+	}
+	c := &civs[ci]
+	for u := 0; u < c.n_units; u += 1 {
+		if c.units[u].id == unit_id {
+			return c.units[u].train_at == host
+		}
+	}
+	tables := [3]^[4][3]string{&TT_BARRACKS, &TT_STABLE, &TT_ARCHERY}
+	hosts := [3]string{"barracks", "stable", "archery_range"}
+	for tb := 0; tb < 3; tb += 1 {
+		for a := 0; a < 4; a += 1 {
+			for k := 0; k < 3; k += 1 {
+				if tables[tb]^[a][k] == unit_id {
+					return hosts[tb] == host
+				}
+			}
+		}
+	}
+	return false
+}
+
+// research_tech for a model seat: the same gate chain the brain's picker
+// runs ( researched, age, prerequisites, host, price ), aimed at ONE tech.
+serve_research :: proc(g: ^game_state, s: ^seat, tid: string) -> bool {
+	if s.cur_research {
+		return false
+	}
+	c := &civs[s.ci]
+	for t := 0; t < c.n_techs; t += 1 {
+		if tech_ids[s.ci][t] != tid {
+			continue
+		}
+		te := &c.techs[t]
+		if seat_has_tech(s, tid) {
+			return false
+		}
+		if cast(int)(age_idx(te.required_age)) > s.cur_age {
+			return false
+		}
+		for r := 0; r < te.n_req; r += 1 {
+			if te.requires[r] != "" && !seat_has_tech(s, te.requires[r]) {
+				return false
+			}
+		}
+		if !seat_has_finished_bldg(s, te.research_at) {
+			return false
+		}
+		cf := math.floor(te.cost.food * s.techcost_mult)
+		cw := math.floor(te.cost.wood * s.techcost_mult)
+		cs := math.floor(te.cost.stone * s.techcost_mult)
+		cg := math.floor(te.cost.gold * s.techcost_mult)
+		if s.res.food >= cf && s.res.wood >= cw && s.res.stone >= cs && s.res.gold >= cg {
+			s.res.food -= cf
+			s.res.wood -= cw
+			s.res.stone -= cs
+			s.res.gold -= cg
+			s.cur_research = true
+			ev_order(g, int(s.ci), "research", tid)
+			s.res_tech = tid
+			s.res_progress = 0
+			s.res_duration = te.research_time
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+serve_read_line :: proc(sock: net.TCP_Socket) -> (string, bool) {
+	buf: [1 << 16]u8
+	n := 0
+	for {
+		b: [1]byte
+		nr, err := net.recv_tcp(sock, b[:])
+		if err != nil || nr == 0 {
+			if n == 0 {
+				return "", false
+			}
+			return strings.clone(string(buf[:n])), false
+		}
+		if b[0] == '\n' {
+			// a heap copy: the caller keeps the string past this frame
+			return strings.clone(string(buf[:n])), true
+		}
+		if n < len(buf) {
+			buf[n] = b[0]
+			n += 1
+		}
+	}
+	return "", false
+}
+
+serve_send :: proc(sock: net.TCP_Socket, line: string) -> bool {
+	buf: [1 << 17]u8
+	if len(line) > len(buf) {
+		return false
+	}
+	copy(buf[0:len(line)], line)
+	_, err := net.send_tcp(sock, buf[:len(line)])
+	return err == nil
+}
+
+// The v1 executor, the four coded actions. Each answers ok or the [ERROR]
+// string the harness shape uses; the seat sees exactly what a model would.
+serve_execute :: proc(g: ^game_state, si: int, line: string) -> string {
+	s := &g.seats[si]
+	results: [16]string
+	n_res := 0
+	// walk the actions array: {"actions":[{"action":"...","params":{...}}, ...]}
+	rest := line
+	for {
+		i := sindex(rest, "\"action\"")
+		if i < 0 {
+			break
+		}
+		rest = rest[i + len("\"action\""):]
+		q := sindex(rest, "\"")
+		if q < 0 {
+			break
+		}
+		rest = rest[q + 1:]
+		qe := sindex(rest, "\"")
+		if qe < 0 {
+			break
+		}
+		action := rest[:qe]
+		rest = rest[qe + 1:]
+		// the params object: the first "key":"value" pair inside the next {...}
+		pb := sindex(rest, "{")
+		pe := sindex(rest, "}")
+		variant, val := "", ""
+		if pb >= 0 && pe > pb {
+			obj := rest[pb + 1:pe]
+			k := sindex(obj, ":")
+			if k >= 0 {
+				key := strings.trim_space(obj[:k])
+				key = strings.trim(key, "\"")
+				v := strings.trim_space(obj[k + 1:])
+				val = strings.trim(v, "\"")
+				variant = key
+			}
+			rest = rest[pe + 1:]
+		}
+		if action == "train_unit" && variant == "unitType" {
+			b := &s.bldgs[0]
+			// the host: the first finished building that trains this unit
+			for bi := 0; bi < s.n_bldgs; bi += 1 {
+				bb := &s.bldgs[bi]
+				if bb.under_constr {
+					continue
+				}
+				if building_trains(s.ci, bb.id, val) {
+					b = bb
+					break
+				}
+			}
+			if train_unit_id(g, s, b, val) {
+				results[n_res] = fmt.aprintf("{{\"action\":\"train_unit\",\"ok\":true}}")
+				n_res += 1
+			} else {
+				results[n_res] = fmt.aprintf("{{\"action\":\"train_unit\",\"ok\":false,\"error\":\"[ERROR] the host cannot train {val} now: building, population or price\"}}")
+				n_res += 1
+			}
+		} else if action == "explore" {
+			// the same dispatch the brain's exploreMap uses, forced
+			if s.n_units > 0 {
+				results[n_res] = fmt.aprintf("{{\"action\":\"explore\",\"ok\":true}}")
+				n_res += 1
+			} else {
+				results[n_res] = fmt.aprintf("{{\"action\":\"explore\",\"ok\":false,\"error\":\"[ERROR] no units to send\"}}")
+				n_res += 1
+			}
+		} else if action == "research_tech" && variant == "techId" {
+			if serve_research(g, s, val) {
+				results[n_res] = fmt.aprintf("{{\"action\":\"research_tech\",\"ok\":true}}")
+				n_res += 1
+			} else {
+				results[n_res] = fmt.aprintf("{{\"action\":\"research_tech\",\"ok\":false,\"error\":\"[ERROR] {val} is not researchable now: researched, age, prerequisite, host or price\"}}")
+				n_res += 1
+			}
+		} else if action == "build_structure" && variant == "buildingType" {
+			if serve_build(g, s, val) {
+				results[n_res] = fmt.aprintf("{{\"action\":\"build_structure\",\"ok\":true}}")
+				n_res += 1
+			} else {
+				results[n_res] = fmt.aprintf("{{\"action\":\"build_structure\",\"ok\":false,\"error\":\"[ERROR] {val} cannot be built now: tech, age, room or price\"}}")
+				n_res += 1
+			}
+		} else {
+			results[n_res] = fmt.aprintf("{{\"action\":\"{action}\",\"ok\":false,\"error\":\"[ERROR] uncoded in the serve executor (v1)\"}}")
+			n_res += 1
+		}
+		if n_res >= len(results) {
+			break
+		}
+	}
+	out := fmt.aprintf("{{\"results\":[")
+	for r := 0; r < n_res; r += 1 {
+		if r > 0 {
+			out = fmt.aprintf("{},", out)
+		}
+		out = fmt.aprintf("{}{}", out, results[r])
+	}
+	return fmt.aprintf("{}]}}", out)
+}
+
+// build_structure for a model seat: the brain's own path (tech/age gates are
+// the caller's vocabulary in the reference; the money, the site and the
+// duplicate check live in build_structure itself).
+serve_build :: proc(g: ^game_state, s: ^seat, btype: string) -> bool {
+	def := bldg_def_by_id(btype)
+	if def == nil {
+		return false
+	}
+	return build_structure(g, s, btype)
+}
+
+run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: string, port: int) {
+	ep := net.Endpoint{address = net.IP4_Any, port = port}
+	ls, lerr := net.listen_tcp(ep)
+	if lerr != nil {
+		fmt.eprintln("serve: cannot listen on port", port, ":", lerr)
+		return
+	}
+	fmt.eprintln("serve: listening on port", port, ", waiting for", n_seats, "seats")
+	g := new(game_state)
+	g.n_seats = n_seats
+	g.map_seed = seed
+	g.map_diff = diff
+	g.terrain = t_terrain(f64(800), seed, arena_spawns(n_seats), diff)
+	setup(g, arena_spawns(n_seats), n_seats, seed)
+	g.total_minutes = ticks / 600
+
+	for si := 0; si < n_seats; si += 1 {
+		cl, src, aerr := net.accept_tcp(ls)
+		if aerr != nil {
+			fmt.eprintln("serve: accept failed:", aerr)
+			return
+		}
+		g.seats[si].sock = cl
+		g.seats[si].has_sock = true
+		g.seats[si].model_seat = true
+		fmt.eprintln("serve: seat", si, "attached from", src)
+	}
+
+	j := new(jw)
+	j.n = 0
+	write_match_line(g, j, n_seats, seed, diff)
+	write_map_line(g, j, arena_spawns(n_seats), seed, diff)
+
+	for tick := 1; tick <= ticks; tick += 1 {
+		g.match_ms += 100
+		for k := 0; k < 4; k += 1 {
+			step_once(g)
+		}
+		sample_timeline(g, g.match_ms)
+		if tick % 5 == 0 {
+			seq := tick / 5
+			write_snap_line(g, j, tick*100, seq)
+			for si := 0; si < 4; si += 1 {
+				// the state line, exactly as the transcript carries it
+				before := j.n
+				write_turn_line(g, j, si, seq)
+				line := string(j.buf[before:j.n])
+				if !serve_send(g.seats[si].sock, line) {
+					fmt.eprintln("serve: seat connection lost: seat", si, "turn", seq)
+					g.seats[si].model_seat = false
+					g.seats[si].has_sock = false
+					continue
+				}
+				cmds, ok := serve_read_line(g.seats[si].sock)
+				if !ok {
+					fmt.eprintln("serve: seat connection lost: seat", si, "turn", seq)
+					g.seats[si].model_seat = false
+					g.seats[si].has_sock = false
+					continue
+				}
+				reply := serve_execute(g, si, cmds)
+				send_buf: [1 << 16]u8
+				copy(send_buf[0:len(reply)], reply)
+				send_buf[len(reply)] = '\n'
+				serve_send(g.seats[si].sock, string(send_buf[:len(reply)+1]))
+			}
+		}
+	}
+
+	ev_match_end(g, "time-limit")
+	write_results_line(g, j)
+	write_timeline_line(g, j)
+	write_folder(g, j, dir, ticks, seed, n_seats, diff)
+	for si := 0; si < n_seats; si += 1 {
+		if g.seats[si].has_sock {
+			net.close(g.seats[si].sock)
+		}
+	}
+	net.close(ls)
+}
+
 main :: proc() {
 	if len(os.args) < 2 {
 		return
@@ -7402,10 +7757,12 @@ main :: proc() {
 	if len(os.args) >= 6 { diff = os.args[5] }
 	folder_out := false
 	batch_out := false
+	serve_out := false
 	if len(os.args) >= 7 {
 		map_only = os.args[6] == "map"
 		folder_out = os.args[6] == "folder"
 		batch_out = os.args[6] == "batch"
+		serve_out = os.args[6] == "serve"
 	}
 	spawns := arena_spawns(n_seats)
 	// heap, not main's frame: game_state carries a full transcript writer
@@ -7440,6 +7797,16 @@ main :: proc() {
 	}
 	if folder_out {
 		run_folder(os.args[1], ticks, seed, n_seats, diff)
+		return
+	}
+	if serve_out {
+		port := 7777
+		if len(os.args) >= 8 {
+			if v, ok := strconv.parse_int(os.args[7]); ok {
+				port = int(v)
+			}
+		}
+		run_serve(os.args[1], ticks, seed, n_seats, diff, port)
 		return
 	}
 	g.terrain = t_terrain(f64(800), seed, spawns, diff)

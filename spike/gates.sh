@@ -215,6 +215,31 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 9 - the serve mode: a hosted match with attached seats. The core listens,
+# four seats attach (the checked-in client), each receives its state record per
+# turn and answers; seat 0 trains a worker at turn 3. The gate holds when every
+# round-trip completes and the match folder at the end shows the client's order
+# in its events and traces - the seat slot an LLM will sit in.
+if "$ODIN" build spike/match -out:spike/bin/match >/tmp/odin-match.log 2>&1; then
+	rm -rf /tmp/gate-serve
+	(timeout 120 ./spike/bin/match /tmp/gate-serve 30 golden 4 medium serve 7891 >/dev/null 2>/tmp/gate-serve.log &)
+	sleep 1
+	if node tools/serve-client.cjs 4 8 train 7891 >/tmp/gate-serve-client.log 2>&1 \
+	   && node -e 'let ok=0,bad=0;require("readline").createInterface({input:require("fs").createReadStream("/tmp/gate-serve/transcript.jsonl")}).on("line",l=>{if(!l.trim())return;try{JSON.parse(l);ok++}catch(e){bad++;console.log("bad:",l.slice(0,60))}}).on("close",()=>process.exit(bad?1:0))' \
+	   && grep -q '"order":"train"' /tmp/gate-serve/events.jsonl \
+	   && grep -q '"order":"train"' /tmp/gate-serve/traces/seat-0.jsonl; then
+		say "gate 9  serve: seats attach, commands execute" "ok - 4 seats round-trip a hosted match; the client's train order lands in events and traces"
+	else
+		say "gate 9  serve: seats attach, commands execute" "FAIL"
+		head -4 /tmp/gate-serve-client.log /tmp/gate-serve.log 2>/dev/null
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 9  serve: seats attach, commands execute" "FAIL - the build"
+	grep Error /tmp/odin-match.log | head -5
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
