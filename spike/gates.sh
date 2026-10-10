@@ -268,6 +268,31 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 11 - P2's first face: the replay viewer. spike/face replays the pinned
+# one-minute corpus through a Vulkan renderer offscreen (no window, no SDL) and
+# prints a per-frame FNV-1a digest of the rendered pixels. The gate holds when
+# the shaders compile, the frames render, and two runs produce identical
+# digests - the pixels ARE deterministic, which is the property every later
+# increment (the SDL window, the live camera, the model-facing HUD) inherits.
+if "$ODIN" build spike/face -file -out:spike/bin/face >/tmp/odin-face.log 2>&1; then
+	if glslc spike/face/shader.vert -o spike/face/shader.vert.spv 2>>/tmp/odin-face.log \
+	   && glslc spike/face/shader.frag -o spike/face/shader.frag.spv 2>>/tmp/odin-face.log \
+	   && timeout 240 ./spike/bin/face golden/stream-1m.jsonl >/tmp/gate-face-a.txt 2>&1 \
+	   && timeout 240 ./spike/bin/face golden/stream-1m.jsonl >/tmp/gate-face-b.txt 2>&1 \
+	   && cmp -s /tmp/gate-face-a.txt /tmp/gate-face-b.txt \
+	   && [ "$(grep -c 'fnv1a' /tmp/gate-face-a.txt)" -eq 12 ]; then
+		say "gate 11  the replay viewer: 12 frames, pixels deterministic" "ok - Vulkan renders the recorded match; $(head -1 /tmp/gate-face-a.txt | grep -o 'entities [0-9]*' | head -1), digests pinned by the run"
+	else
+		say "gate 11  the replay viewer: 12 frames, pixels deterministic" "FAIL"
+		grep -E "Error|face:" /tmp/odin-face.log /tmp/gate-face-a.txt 2>/dev/null | head -6
+		fails=$((fails + 1))
+	fi
+else
+	say "gate 11  the replay viewer: 12 frames, pixels deterministic" "FAIL - the build"
+	grep Error /tmp/odin-face.log | head -5
+	fails=$((fails + 1))
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
