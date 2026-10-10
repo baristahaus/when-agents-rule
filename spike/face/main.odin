@@ -43,8 +43,9 @@ CIV_COLORS := [4][3]f32{
 
 entity :: struct {
 	x, z:  f64,
-	kind:  i32, // 0 unit, 1 building
+	kind:  i32, // 0 unit, 1 building, 2..6 map node kinds
 	seat:  i32,
+	worker: bool, // units: a villager (smaller mark, as the reference draws its own)
 }
 
 frame :: struct {
@@ -55,6 +56,8 @@ frame :: struct {
 	nn:     int,
 	fog:    [49]i32, // the state's map.exploration: 7x7 tiles, 0..100% seen
 	has_fog: bool,
+	battles: [8][2]f64, // the state's ongoing battles: ring positions
+	n_battles: int,
 }
 
 camera :: struct {
@@ -127,126 +130,145 @@ fog_cell :: proc(f: ^frame, key: string, val: f64) {
 	f.fog[row * 7 + col] = i32(val)
 }
 
-scene_at :: proc(lines: []string, want_turn: int, f: ^frame) {
-	f.turn = want_turn
-	f.n = 0
-	for line in lines {
-		if len(line) == 0 {
-			continue
-		}
-		v, err := json.parse_string(line)
-		if err != nil {
-			continue
-		}
-		defer json.destroy_value(v)
-		obj, o_ok := v.(json.Object)
-		if !o_ok {
-			continue
-		}
-		tv_type, type_has := obj["type"]
-		if type_has {
-			if ts, ok := tv_type.(json.String); ok && ts == "map" {
-				// the static scenery: the map line's resource nodes
-				if rv, has := obj["resources"]; has {
-					if items, a_ok := rv.(json.Array); a_ok {
-						for item in items {
-							io, ok := item.(json.Object)
-							if !ok {
-								continue
-							}
-							x, z := jnum2(io, "x"), jnum2(io, "z")
-							nt: i32 = 0
-							if ttv, has := io["t"]; has {
-								if tts, ok := ttv.(json.String); ok {
-									nt = node_kind(tts)
-								}
-							}
-							if f.nn < len(f.nodes) {
-								f.nodes[f.nn] = entity{x = x, z = z, kind = 2 + nt, seat = 0}
-								f.nn += 1
+scene_fill :: proc(v: json.Value, f: ^frame) {
+	// no resets here: the driver clears a turn's frame at its first record;
+	// the four seat records then accumulate into one scene
+	obj, o_ok := v.(json.Object)
+	if !o_ok {
+		return
+	}
+	tv_type, type_has := obj["type"]
+	if type_has {
+		if ts, ok := tv_type.(json.String); ok && ts == "map" {
+			// the static scenery: the map line's resource nodes
+			if rv, has := obj["resources"]; has {
+				if items, a_ok := rv.(json.Array); a_ok {
+					for item in items {
+						io, ok := item.(json.Object)
+						if !ok {
+							continue
+						}
+						x, z := jnum2(io, "x"), jnum2(io, "z")
+						nt: i32 = 0
+						if ttv, has := io["t"]; has {
+							if tts, ok := ttv.(json.String); ok {
+								nt = node_kind(tts)
 							}
 						}
-					}
-				}
-				continue
-			}
-		}
-		tval, has := obj["turn"]
-		if !has {
-			continue // match/map/results/timeline lines
-		}
-		turn := jnum(tval)
-		if int(turn) != want_turn {
-			continue
-		}
-		stval, st_has := obj["state"]
-		if !st_has {
-			continue
-		}
-		st, s_ok := stval.(json.Object)
-		if !s_ok {
-			continue
-		}
-		seat_i := 0
-		if pval, has := st["player"]; has {
-			if po, ok := pval.(json.Object); ok {
-				if sv, has := po["seat"]; has {
-					seat_i = int(jnum(sv))
-				}
-			}
-		}
-		// the fog: one seat's exploration grid per frame (the first record
-		// that carries one — the viewer plays that seat's knowledge)
-		if !f.has_fog {
-			if mv, has := st["map"]; has {
-				if mo, ok := mv.(json.Object); ok {
-					if ev, has := mo["exploration"]; has {
-						if eo, ok := ev.(json.Object); ok {
-							f.has_fog = true
-							for cell := 0; cell < 49; cell += 1 {
-								f.fog[cell] = 0
-							}
-							for k, val in eo {
-								fog_cell(f, k, jnum(val))
-							}
+						if f.nn < len(f.nodes) {
+							f.nodes[f.nn] = entity{x = x, z = z, kind = 2 + nt, seat = 0}
+							f.nn += 1
 						}
 					}
 				}
 			}
+			return
 		}
-		lists := [4]string{"friendlyUnits", "enemyUnits", "friendlyBuildings", "enemyBuildings"}
-		for li := 0; li < 4; li += 1 {
-			kind := i32(0)
-			if li >= 2 {
-				kind = 1
+	}
+	tval, has := obj["turn"]
+	if !has {
+		return // match/map/results/timeline lines
+	}
+	stval, st_has := obj["state"]
+	if !st_has {
+		return
+	}
+	st, s_ok := stval.(json.Object)
+	if !s_ok {
+		return
+	}
+	seat_i := 0
+	if pval, has := st["player"]; has {
+		if po, ok := pval.(json.Object); ok {
+			if sv, has := po["seat"]; has {
+				seat_i = int(jnum(sv))
 			}
-			aval, has := st[lists[li]]
-			if !has {
-				continue
-			}
-			items, a_ok := aval.(json.Array)
-			if !a_ok {
-				continue
-			}
+		}
+	}
+	// the battles: this seat's ongoing engagements, drawn as rings
+	if bv, has := st["battles"]; has {
+		if items, a_ok := bv.(json.Array); a_ok {
 			for item in items {
 				io, ok := item.(json.Object)
 				if !ok {
 					continue
 				}
-				x, z := f64(0), f64(0)
-				if xv, has := io["x"]; has {
-					x = jnum(xv)
+				ong := false
+				if ov, has := io["ongoing"]; has {
+					if ob, ok := ov.(json.Boolean); ok {
+						ong = ob
+					}
 				}
-				if zv, has := io["z"]; has {
-					z = jnum(zv)
+				if !ong || f.n_battles >= len(f.battles) {
+					continue
 				}
-				add_entity(f, x, z, kind, i32(seat_i))
+				if av, has := io["at"]; has {
+					if aa, ok := av.(json.Array); ok && len(aa) == 2 {
+						f.battles[f.n_battles][0] = jnum(aa[0])
+						f.battles[f.n_battles][1] = jnum(aa[1])
+						f.n_battles += 1
+					}
+				}
 			}
+		}
+	}
+	// the fog: one seat's exploration grid per frame (the first record
+	// that carries one — the viewer plays that seat's knowledge)
+	if !f.has_fog {
+		if mv, has := st["map"]; has {
+			if mo, ok := mv.(json.Object); ok {
+				if ev, has := mo["exploration"]; has {
+					if eo, ok := ev.(json.Object); ok {
+						f.has_fog = true
+						for cell := 0; cell < 49; cell += 1 {
+							f.fog[cell] = 0
+						}
+						for k, val in eo {
+							fog_cell(f, k, jnum(val))
+						}
+					}
+				}
+			}
+		}
+	}
+	lists := [4]string{"friendlyUnits", "enemyUnits", "friendlyBuildings", "enemyBuildings"}
+	for li := 0; li < 4; li += 1 {
+		kind := i32(0)
+		if li >= 2 {
+			kind = 1
+		}
+		aval, has := st[lists[li]]
+		if !has {
+			continue
+		}
+		items, a_ok := aval.(json.Array)
+		if !a_ok {
+			continue
+		}
+		for item in items {
+			io, ok := item.(json.Object)
+			if !ok {
+				continue
+			}
+			x, z := f64(0), f64(0)
+			if xv, has := io["x"]; has {
+				x = jnum(xv)
+			}
+			if zv, has := io["z"]; has {
+				z = jnum(zv)
+			}
+			worker := false
+			if tv, has := io["type"]; has {
+				if ts, ok := tv.(json.String); ok && ts == "worker" {
+					worker = true
+				}
+			}
+			add_entity(f, x, z, kind, i32(seat_i), worker)
 		}
 	}
 }
 
-add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32) {
+add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32, worker: bool) {
 	// dedupe: the same (kind, rounded position) seen through another seat's
 	// enemy list is the entity this frame already has
 	for i := 0; i < f.n; i += 1 {
@@ -256,7 +278,7 @@ add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32) {
 		}
 	}
 	if f.n < len(f.ents) {
-		f.ents[f.n] = entity{x, z, kind, seat}
+		f.ents[f.n] = entity{x = x, z = z, kind = kind, seat = seat, worker = worker}
 		f.n += 1
 	}
 }
@@ -622,9 +644,20 @@ render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 		col := CIV_COLORS[e.seat % 4]
 		if e.kind == 1 {
 			draw_quads(vbuf, &n, f32(e.x), f32(e.z), 7, col.r * 0.7, col.g * 0.7, col.b * 0.7)
+		} else if e.worker {
+			draw_quads(vbuf, &n, f32(e.x), f32(e.z), 1.8, col.r * 0.85, col.g * 0.85, col.b * 0.85)
 		} else {
-			draw_quads(vbuf, &n, f32(e.x), f32(e.z), 2.5, col.r, col.g, col.b)
+			draw_quads(vbuf, &n, f32(e.x), f32(e.z), 3.2, col.r, col.g, col.b)
 		}
+	}
+	// the battles: a red frame around each ongoing engagement
+	for b := 0; b < f.n_battles; b += 1 {
+		bx, bz := f32(f.battles[b][0]), f32(f.battles[b][1])
+		BR, hw := f32(20), f32(1.2)
+		draw_quads(vbuf, &n, bx, bz - BR, hw, 0.9, 0.15, 0.1)
+		draw_quads(vbuf, &n, bx, bz + BR, hw, 0.9, 0.15, 0.1)
+		draw_quads(vbuf, &n, bx - BR, bz, hw, 0.9, 0.15, 0.1)
+		draw_quads(vbuf, &n, bx + BR, bz, hw, 0.9, 0.15, 0.1)
 	}
 	// the camera: world → NDC, zoom about the centre point, y flips
 	world := cam.zoom / 420.0
@@ -699,6 +732,7 @@ main :: proc() {
 	path := "golden/stream-1m.jsonl"
 	png_prefix := ""
 	bench := false
+	one_turn := -1
 	if len(args) >= 2 {
 		path = args[1]
 	}
@@ -724,6 +758,11 @@ main :: proc() {
 			}
 		} else if args[a] == "--bench" {
 			bench = true
+		} else if args[a] == "--turn" && a + 1 < len(args) {
+			a += 1
+			if v, ok := strconv.parse_int(args[a]); ok {
+				one_turn = int(v)
+			}
 		}
 	}
 	data, rerr := os.read_entire_file_from_path(path, context.allocator)
@@ -754,9 +793,67 @@ main :: proc() {
 	// the transcript parses ONCE: the scenes for the whole match, the map line
 	// folded into every frame (scene_at's 600-line JSON walk is the slow part;
 	// the GPU must be measured alone)
-	frames := make([]frame, 121)
-	for turn := 1; turn <= 120; turn += 1 {
-		scene_at(lines, turn, &frames[turn])
+	max_turn := 120
+	if one_turn > max_turn {
+		max_turn = one_turn
+	}
+	frames := make([]frame, max_turn + 1)
+	seen := make([]bool, max_turn + 1)
+	// one pass: each line parsed once and routed to its own turn's frame —
+	// the per-turn scan over the whole file was the slow path at 10m
+	for line in lines {
+		if len(line) == 0 {
+			continue
+		}
+		v, err := json.parse_string(line)
+		if err != nil {
+			continue
+		}
+		if obj, ok := v.(json.Object); ok {
+			if tv, has := obj["turn"]; has {
+				tn := int(jnum(tv))
+				if tn >= 1 && tn <= max_turn {
+					if !seen[tn] {
+						seen[tn] = true
+						frames[tn].n = 0
+						frames[tn].n_battles = 0
+						frames[tn].has_fog = false
+						frames[tn].nn = 0
+					}
+					scene_fill(v, &frames[tn])
+					frames[tn].turn = tn
+				}
+			} else {
+				if tv2, has := obj["type"]; has {
+					if ts, ok := tv2.(json.String); ok && ts == "map" {
+						if rv, has := obj["resources"]; has {
+							if items, a_ok := rv.(json.Array); a_ok {
+								for item in items {
+									io, ok := item.(json.Object)
+									if !ok {
+										continue
+									}
+									x, z := jnum2(io, "x"), jnum2(io, "z")
+									nt: i32 = 0
+									if ttv, has := io["t"]; has {
+										if tts, ok := ttv.(json.String); ok {
+											nt = node_kind(tts)
+										}
+									}
+									for ti := 1; ti <= max_turn; ti += 1 {
+										if frames[ti].nn < len(frames[ti].nodes) {
+											frames[ti].nodes[frames[ti].nn] = entity{x = x, z = z, kind = 2 + nt, seat = 0}
+											frames[ti].nn += 1
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		json.destroy_value(v)
 	}
 	f := &frames[1]
 	if bench {
@@ -771,6 +868,15 @@ main :: proc() {
 		ns := e2._nsec - start._nsec
 		fmt.println("bench: rendered", rendered, "frames in", f64(ns) / 1e6, "ms —", f64(ns) / 1e6 / f64(rendered), "ms/frame")
 		fmt.println("  submit+gpu wait:", f64(vs.gpu_ns) / 1e6, "ms; read map:", f64(vs.read_ns) / 1e6, "ms")
+		return
+	}
+	if one_turn > 0 {
+		f = &frames[one_turn]
+		rows := render_frame(&vs, f, &cam)
+		fmt.println("frame turn", f.turn, "entities", f.n, "battles", f.n_battles, "fnv1a", fnv(rows))
+		if png_prefix != "" {
+			write_ppm(fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn), rows)
+		}
 		return
 	}
 	for si := 0; si < len(sample); si += 1 {
