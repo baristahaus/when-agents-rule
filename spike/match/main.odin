@@ -1339,6 +1339,12 @@ seat :: struct {
 	n_um: int,
 	scout_angle: f64, // _scoutAngle
 	scout_radius: f64, // _scoutRadius
+	// P1 traces: the decisions taken since this seat's last turn record, one
+	// trace line per turn (a rule seat's "conversation" is its decisions; an
+	// LLM seat's will be the request/reply/usage tier).
+	dec_order: [16]string,
+	dec_detail: [16]string,
+	dec_n: int,
 	eb_known: [4][32]bool, // _knownEnemyBuildings, per enemy seat per building
 	eb_hp: [4][32]int, // _enemyBuildingSeen snapshot: healthPct at last sight
 	eb_x, eb_z: [4][32]f64, // snapshot position (rounded at write time)
@@ -1367,6 +1373,7 @@ game_state :: struct {
 	evbuf: [dynamic]u8,
 	ev_seq: i64,
 	evj: jw, // the shared scratch writer for event lines (JW_SIZE is huge; one reused)
+	tracebuf: [4][dynamic]u8, // traces/seat-N.jsonl's bytes, one per seat, appended per turn record
 	// the battle ledger (game.js _battles): engagements opened by damage
 	b_x, b_z: [8]f64,
 	b_started, b_last: [8]f64,
@@ -5340,6 +5347,13 @@ ev_building_finished :: proc(g: ^game_state, seat: int, pid, bt: string) {
 }
 
 ev_order :: proc(g: ^game_state, seat: int, kind, detail: string) {
+	// the seat's trace collects the same fact for traces/seat-N.jsonl
+	s := &g.seats[seat]
+	if s.dec_n < len(s.dec_order) {
+		s.dec_order[s.dec_n] = kind
+		s.dec_detail[s.dec_n] = detail
+		s.dec_n += 1
+	}
 	j := ev_line(g, "order")
 	j_key(j, "seat")
 	j_int(j, i64(seat))
@@ -7085,8 +7099,49 @@ write_snap_line :: proc(g: ^game_state, j: ^jw, wall_ms: int, seq: int) {
 }
 
 // One turn record: the stream's per-seat wrapper around the state view.
+// One traces/seat-N.jsonl line: the turn, the seat, the model (null for a
+// rule seat), and the decisions taken since the seat's last record.
+trace_line :: proc(g: ^game_state, si: int, turn: int) {
+	j := &g.evj
+	j.n = 0
+	j.sep = false
+	j_raw(j, "{\"turn\":")
+	j_int(j, i64(turn))
+	j_key(j, "seat")
+	j_int(j, i64(si))
+	j_key(j, "model")
+	j_null(j)
+	j_key(j, "decisions")
+	if g.seats[si].dec_n == 0 {
+		j_raw(j, "[]")
+	} else {
+		j_raw(j, "[")
+		for d := 0; d < g.seats[si].dec_n; d += 1 {
+			if d > 0 {
+				j_raw(j, ",")
+			}
+			j.sep = false
+			j_raw(j, "{\"order\":")
+			j_str(j, g.seats[si].dec_order[d])
+			j_key(j, "detail")
+			j_str(j, g.seats[si].dec_detail[d])
+			j_raw(j, "}")
+			j.sep = false
+		}
+		j_raw(j, "]")
+	}
+	j_raw(j, "}\n")
+	for b in j.buf[:j.n] {
+		append(&g.tracebuf[si], b)
+	}
+	g.seats[si].dec_n = 0
+}
+
 write_turn_line :: proc(g: ^game_state, j: ^jw, si: int, turn: int) {
 	s := &g.seats[si]
+	// the seat's trace line: what it decided since its last look (P1 the
+	// trace; an LLM seat's line will carry the request/reply/usage instead)
+	trace_line(g, si, turn)
 	// the state build's own look (openai-ai.js 3656): on a copy that is
 	// then merged back — one look changes the live memory — noted at the
 	// build's simNow with the harness sight test, then swept the same way
@@ -7238,6 +7293,96 @@ write_timeline_line :: proc(g: ^game_state, j: ^jw) {
 // each tick advancing the match clock 100 ms and running 4 sim steps of 50 ms
 // (NORMAL_SIM_SPEED 2), with the snap/turn records every 5th tick and the
 // two-line tail at the time limit.
+// One recorded match as a FOLDER (P1 the trace): transcript.jsonl (the v1
+// contract, byte for byte the stream the corpus pins), meta.json (the
+// conditions), events.jsonl (the action log emitted as the sim ran), and
+// traces/seat-N.jsonl (one line per turn: the model, null for a rule seat,
+// and the decisions taken since the seat's last look).
+run_folder :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: string) {
+	spawns := arena_spawns(n_seats)
+	g := new(game_state)
+	g.n_seats = n_seats
+	g.map_seed = seed
+	g.map_diff = diff
+	g.terrain = t_terrain(f64(800), seed, spawns, diff)
+	setup(g, spawns, n_seats, seed)
+	g.total_minutes = ticks / 600
+
+	j := new(jw)
+	j.n = 0
+
+	write_match_line(g, j, n_seats, seed, diff)
+	write_map_line(g, j, spawns, seed, diff)
+
+	for tick := 1; tick <= ticks; tick += 1 {
+		g.match_ms += 100
+		for k := 0; k < 4; k += 1 {
+			step_once(g)
+		}
+		sample_timeline(g, g.match_ms)
+		if tick % 5 == 0 {
+			seq := tick / 5
+			write_snap_line(g, j, tick*100, seq)
+			for si := 0; si < 4; si += 1 {
+				write_turn_line(g, j, si, seq)
+			}
+		}
+	}
+
+	ev_match_end(g, "time-limit")
+	write_results_line(g, j)
+	write_timeline_line(g, j)
+
+	os.make_directory_all(dir)
+	m := new(jw)
+	m.n = 0
+	m.sep = false
+	j_raw(m, "{")
+	j_key(m, "matchId")
+	j_str(m, seed)
+	j_key(m, "seed")
+	j_str(m, seed)
+	j_key(m, "difficulty")
+	j_str(m, diff)
+	j_key(m, "seats")
+	j_int(m, i64(n_seats))
+	j_key(m, "minutes")
+	j_int(m, i64(ticks / 600))
+	j_key(m, "stepMs")
+	j_int(m, 100)
+	j_key(m, "snapshotMs")
+	j_int(m, 500)
+	j_key(m, "simSpeed")
+	j_int(m, 1)
+	j_key(m, "turnBased")
+	j_bool(m, false)
+	j_key(m, "core")
+	j_str(m, "odin")
+	j_key(m, "rulesBuild")
+	j_int(m, 1081)
+	j_key(m, "events")
+	j_int(m, g.ev_seq)
+	j_raw(m, "}")
+	p_t := fmt.aprintf("{}/transcript.jsonl", dir)
+	p_e := fmt.aprintf("{}/events.jsonl", dir)
+	p_m := fmt.aprintf("{}/meta.json", dir)
+	err_t := os.write_entire_file_from_bytes(p_t, j.buf[:j.n])
+	err_e := os.write_entire_file_from_bytes(p_e, g.evbuf[:])
+	err_m := os.write_entire_file_from_bytes(p_m, m.buf[:m.n])
+	err_s: os.Error = nil
+	os.make_directory_all(fmt.aprintf("{}/traces", dir))
+	for si := 0; si < 4; si += 1 {
+		p_s := fmt.aprintf("{}/traces/seat-{}.jsonl", dir, si)
+		e := os.write_entire_file_from_bytes(p_s, g.tracebuf[si][:])
+		if e != nil {
+			err_s = e
+		}
+	}
+	if err_t != nil || err_e != nil || err_m != nil || err_s != nil {
+		fmt.eprintln("folder write failed:", err_t, err_e, err_m, err_s)
+	}
+}
+
 main :: proc() {
 	if len(os.args) < 2 {
 		return
@@ -7256,9 +7401,11 @@ main :: proc() {
 	if len(os.args) >= 5 { if v, ok := strconv.parse_int(os.args[4]); ok { n_seats = v } }
 	if len(os.args) >= 6 { diff = os.args[5] }
 	folder_out := false
+	batch_out := false
 	if len(os.args) >= 7 {
 		map_only = os.args[6] == "map"
 		folder_out = os.args[6] == "folder"
+		batch_out = os.args[6] == "batch"
 	}
 	spawns := arena_spawns(n_seats)
 	// heap, not main's frame: game_state carries a full transcript writer
@@ -7275,6 +7422,24 @@ main :: proc() {
 		write_map_line(g, j, spawns, seed, diff)
 		// the golden map files carry NO trailing newline
 		_ = os.write_entire_file(os.args[1], j.buf[:j.n - 1])
+		return
+	}
+	if batch_out {
+		// the bench matrix (REBUILD_PROPOSAL §"the milestones", --batch): the
+		// four corpus conditions, one folder each, one minute apiece.
+		confs := [4][3]string{{"golden", "4", "medium"}, {"alpha", "2", "easy"}, {"alpha", "3", "hard"}, {"beta", "4", "medium"}}
+		for ci in 0 ..< len(confs) {
+			n_seats_i := 4
+			if v, ok := strconv.parse_int(confs[ci][1]); ok {
+				n_seats_i = int(v)
+			}
+			name := fmt.aprintf("{}-{}-{}-1m", confs[ci][0], confs[ci][1], confs[ci][2])
+			run_folder(fmt.aprintf("{}/{}/", os.args[1], name), 600, confs[ci][0], n_seats_i, confs[ci][2])
+		}
+		return
+	}
+	if folder_out {
+		run_folder(os.args[1], ticks, seed, n_seats, diff)
 		return
 	}
 	g.terrain = t_terrain(f64(800), seed, spawns, diff)
@@ -7304,57 +7469,8 @@ main :: proc() {
 		}
 	}
 
-	ev_match_end(g, "time-limit")
 	write_results_line(g, j)
 	write_timeline_line(g, j)
-	if folder_out {
-		// P1 the trace: the match folder (docs/REBUILD_PROPOSAL.md). The
-		// transcript is the v1 contract, byte for byte the stream the corpus
-		// pins; meta.json carries the conditions; events.jsonl is the action
-		// log the simulation emitted as it ran. traces/ arrives with the LLM
-		// seats; a rule seat's decisions are in the events as `order` lines.
-		os.make_directory_all(os.args[1])
-		m := new(jw)
-		m.n = 0
-		m.sep = false
-		j_raw(m, "{")
-		j_key(m, "matchId")
-		j_str(m, seed)
-		j_key(m, "seed")
-		j_str(m, seed)
-		j_key(m, "difficulty")
-		j_str(m, diff)
-		j_key(m, "seats")
-		j_int(m, i64(n_seats))
-		j_key(m, "minutes")
-		j_int(m, i64(ticks / 600))
-		j_key(m, "stepMs")
-		j_int(m, 100)
-		j_key(m, "snapshotMs")
-		j_int(m, 500)
-		j_key(m, "simSpeed")
-		j_int(m, 1)
-		j_key(m, "turnBased")
-		j_bool(m, false)
-		j_key(m, "core")
-		j_str(m, "odin")
-		j_key(m, "rulesBuild")
-		j_int(m, 1081)
-		j_key(m, "events")
-		j_int(m, g.ev_seq)
-		j_raw(m, "}")
-		dir := os.args[1]
-		p_t := fmt.aprintf("{}/transcript.jsonl", dir)
-		p_e := fmt.aprintf("{}/events.jsonl", dir)
-		p_m := fmt.aprintf("{}/meta.json", dir)
-		err_t := os.write_entire_file_from_bytes(p_t, j.buf[:j.n])
-		err_e := os.write_entire_file_from_bytes(p_e, g.evbuf[:])
-		err_m := os.write_entire_file_from_bytes(p_m, m.buf[:m.n])
-		if err_t != nil || err_e != nil || err_m != nil {
-			fmt.eprintln("folder write failed:", err_t, err_e, err_m)
-		}
-		_ = os.write_entire_file(fmt.aprintf("{os.args[1]}/meta.json"), m.buf[:m.n])
-		return
-	}
 	_ = os.write_entire_file(os.args[1], j.buf[:j.n])
 }
+

@@ -198,9 +198,12 @@ if "$ODIN" build spike/match -out:spike/bin/match >/tmp/odin-match.log 2>&1; the
 	   && ./spike/bin/match /tmp/gate-p1-b 600 golden 4 medium folder >/dev/null 2>&1 \
 	   && cmp -s /tmp/gate-p1-a/transcript.jsonl /tmp/gate-p1-b/transcript.jsonl \
 	   && cmp -s /tmp/gate-p1-a/events.jsonl /tmp/gate-p1-b/events.jsonl \
+	   && cmp -s /tmp/gate-p1-a/traces/seat-0.jsonl /tmp/gate-p1-b/traces/seat-0.jsonl \
+	   && cmp -s /tmp/gate-p1-a/traces/seat-3.jsonl /tmp/gate-p1-b/traces/seat-3.jsonl \
 	   && cmp -s /tmp/gate-p1-a/transcript.jsonl golden/stream-1m.jsonl \
-	   && node -e 'let ok=0,bad=0;require("readline").createInterface({input:require("fs").createReadStream("/tmp/gate-p1-a/events.jsonl")}).on("line",l=>{try{JSON.parse(l);ok++}catch(e){bad++}}).on("close",()=>process.exit(bad?1:0))'; then
-		say "gate 8  the match folder: two runs, empty diff" "ok — transcript = the golden stream, events deterministic ($(wc -l < /tmp/gate-p1-a/events.jsonl) lines)"
+	   && node -e 'let ok=0,bad=0;require("readline").createInterface({input:require("fs").createReadStream("/tmp/gate-p1-a/events.jsonl")}).on("line",l=>{try{JSON.parse(l);ok++}catch(e){bad++}}).on("close",()=>process.exit(bad?1:0))' \
+	   && ! grep -riEq "api[_-]?key|endpoint|usageRaw" /tmp/gate-p1-a; then
+		say "gate 8  the match folder: two runs, empty diff" "ok — transcript = the golden stream, events deterministic ($(wc -l < /tmp/gate-p1-a/events.jsonl) lines), traces clean, export redacted"
 	else
 		say "gate 8  the match folder: two runs, empty diff" "FAIL"
 		diff <(head -5 /tmp/gate-p1-a/events.jsonl) <(head -5 /tmp/gate-p1-b/events.jsonl) | head -6
