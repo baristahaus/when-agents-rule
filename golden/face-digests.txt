@@ -1,0 +1,17 @@
+# The face's pixel digests, pinned like the corpus (RE-RECORDABLE: a GPU or
+# driver change re-pins them with a MERGE-STATE line; the digest is FNV-1a
+# over the 800x800 RGBA read-back, one line per frame: the 1m corpus's 12
+# sampled frames, then the 10m raid frame at turn 1181 (zoom 3 at the battle).
+frame turn 10 entities 20 fnv1a 8879689520674221492
+frame turn 20 entities 28 fnv1a 6159320807511574712
+frame turn 30 entities 29 fnv1a 15857571158948048612
+frame turn 40 entities 31 fnv1a 15505783370978301044
+frame turn 50 entities 32 fnv1a 4158443473064143987
+frame turn 60 entities 37 fnv1a 13033439110560454552
+frame turn 70 entities 37 fnv1a 16422854141635308332
+frame turn 80 entities 42 fnv1a 10688131140039557564
+frame turn 90 entities 42 fnv1a 4086317322911382419
+frame turn 100 entities 46 fnv1a 4503828152050014296
+frame turn 110 entities 44 fnv1a 17900335090064614792
+frame turn 120 entities 48 fnv1a 14050617478444553312
+frame turn 1181 entities 115 battles 2 fnv1a 14881808210516576444

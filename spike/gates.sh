@@ -280,15 +280,18 @@ if "$ODIN" build spike/face -file -out:spike/bin/face >/tmp/odin-face.log 2>&1; 
 	   && timeout 240 ./spike/bin/face golden/stream-1m.jsonl >/tmp/gate-face-a.txt 2>&1 \
 	   && timeout 240 ./spike/bin/face golden/stream-1m.jsonl >/tmp/gate-face-b.txt 2>&1 \
 	   && cmp -s /tmp/gate-face-a.txt /tmp/gate-face-b.txt \
-	   && [ "$(grep -c 'fnv1a' /tmp/gate-face-a.txt)" -eq 12 ]; then
-		say "gate 11  the replay viewer: 12 frames, pixels deterministic" "ok - Vulkan renders the recorded match; $(head -1 /tmp/gate-face-a.txt | grep -o 'entities [0-9]*' | head -1), digests pinned by the run"
+	   && timeout 280 ./spike/bin/face golden/stream-10m.jsonl --turn 1181 --zoom 3 --cx 24 --cz -321 >>/tmp/gate-face-a.txt 2>&1 \
+	   && grep -o 'fnv1a [0-9]*' /tmp/gate-face-a.txt > /tmp/gate-face-pins.txt \
+	   && grep -o 'fnv1a [0-9]*' golden/face-digests.txt > /tmp/gate-face-want.txt \
+	   && cmp -s /tmp/gate-face-pins.txt /tmp/gate-face-want.txt; then
+		say "gate 11  the replay viewer: 13 frames, pixels pinned" "ok - Vulkan renders the recorded match; the digests match golden/face-digests.txt"
 	else
-		say "gate 11  the replay viewer: 12 frames, pixels deterministic" "FAIL"
+		say "gate 11  the replay viewer: 13 frames, pixels pinned" "FAIL"
 		grep -E "Error|face:" /tmp/odin-face.log /tmp/gate-face-a.txt 2>/dev/null | head -6
 		fails=$((fails + 1))
 	fi
 else
-	say "gate 11  the replay viewer: 12 frames, pixels deterministic" "FAIL - the build"
+	say "gate 11  the replay viewer: 13 frames, pixels pinned" "FAIL - the build"
 	grep Error /tmp/odin-face.log | head -5
 	fails=$((fails + 1))
 fi
