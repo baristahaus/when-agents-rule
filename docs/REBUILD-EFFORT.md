@@ -39,11 +39,11 @@ or marked unverified** (an unverified claim is a future retraction — this repo
 retracted a test count, a tool list, a file path and a whole harness that never existed);
 **corrected in place, with the date**, where the next reader will land.
 
-## 1. Where the effort stands — measured 5 October 2026
+## 1. Where the effort stands — measured 8 October 2026
 
-### 1.1 The gates, all green (run today)
+### 1.1 The gates, all green (measured 8 October 2026)
 
-`./spike/gates.sh`, eight gates, zero red — run locally, with the compiler at
+`./spike/gates.sh`, ten gates, zero red — run locally, with the compiler at
 `dev-2026-09` (CI is off this repo since the owner's decision the same day;
 `docs/ci-disabled/` records the decision and keeps both workflow files):
 
@@ -53,12 +53,24 @@ retracted a test count, a tool list, a file path and a whole harness that never 
 | 2 | keyed vectors `#a9b8bccd` / `#9fd153da` | ok — the RNG transcription is exact |
 | 2b | node counts 98/784/40/20 (the base, pre-clearance) | ok — nothing was dropped |
 | 2d | coast table, `f32` **bit patterns** | ok — the noise lattice and wobble match |
-| 2e | map lines, **four conditions** | byte-identical, re-measured 5 Oct 2026 after the re-record: `golden medium 4` 48,718 B (941 nodes); `alpha easy 2` 63,621 B; `alpha hard 3` 14,831 B; `beta medium 4` 48,586 B |
+| 2e | map lines, **four conditions** | byte-identical, re-measured 8 Oct 2026: `golden medium 4` 48,718 B (941 nodes); `alpha easy 2` 63,621 B; `alpha hard 3` 14,831 B; `beta medium 4` 48,586 B — content unchanged by the b1081 merge (the spectator recorder keeps the even circle) |
 | 3 | no FMA, even forced | ok — 0 fused, 9 multiplies at `-o:aggressive -microarch:x86-64-v4 -target-features:fma` |
 | 4 | `odin check -vet -vet-unused -vet-shadowing -vet-tabs -strict-style` | ok — no diagnostics |
-| 5 | the golden corpus | ok — the fixtures are the pinned bytes and the states oracle regenerates |
-| 6 | turn-1 state view, 8 lines | ok — 45,840 bytes byte-identical, gate 6 (measured 5 Oct) |
-| 7 | leak tracker | ok — mem.Tracking_Allocator named and proven, gate 7 (measured 5 Oct) |
+| 5 | the golden corpus | ok — re-recorded 8 Oct 2026 at the b1081 rules (streams and states oracle changed; the map files did not), all pins hold |
+| 6 | turn-1 state view, 8 lines | ok — byte-identical at the b1081 rules, now on the jittered arena layout (measured 8 Oct) |
+| 7 | leak tracker | ok — mem.Tracking_Allocator named and proven |
+
+### 1.1b The whole match — P0 closed (8 October 2026)
+
+`spike/match` (7,118 lines) replays the whole recorded corpus byte-identically at the
+merged b1081 rules: `golden/stream-1m` (3,106,232 B), `-5m` (15,908,429 B) and `-10m`
+(34,678,838 B), every record of all four seats — the rule brain, the 250 ms discovery
+beat with `detectContacts`, the worker tick, production, research, battles, notices,
+the per-seat unit memories, and the stream serialization. The b1081 absorption cost the
+core two rule changes (the b1055 scout cost, the b1060 farthest-seeing explorer pick)
+and the b1076 arena layout in the turn-1 engine (the seeded spawn stream, home discs,
+the scatter exclusion, the shifted stone/gold scatter). P0(a), P0(b) and P0(c) are all
+green; the milestone ladder's next rung is P1, the trace.
 
 ### 1.2 The corpus — the treaty, pinned and regenerating
 

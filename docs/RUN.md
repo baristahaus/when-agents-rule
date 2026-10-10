@@ -88,28 +88,32 @@ P0–P4). Where each one stands:
 
 | Milestone | What it is | Status | What remains |
 |---|---|---|---|
-| **P0 (a)** the map line | the map builder, byte-identical | **green** — 4 conditions, the true 800-world, clearance included | — |
-| **P0 (b)** the turn-1 state view | the tick and the per-seat observation | **green** — 8 lines, 45,840 bytes (gate 6) | — |
-| **the rule brain** | the 250 ms discovery beat, the decisions (`js/ai.js`) | **not started** | the first *behaviour* the port must agree on, not a projection of state; transcribed from the JS spec's functions |
-| **the enemy memories** | enemy-unit memory (b1041/42), enemy-building memory | **not started** (not transcribed anywhere yet — the JS port's header says so) | required by the first gate where seats meet rivals; the contacts gate needs them first |
-| **P0 (c)** the state sequence | the one-minute stream byte-identical in Odin | **not started — but the target is now real** | the corpus was re-recorded 5 Oct 2026 with the fixed recorder: `golden/stream-1m.jsonl`, 604 records, 3.1 MB, an ALIVE match (the old corpus was a frozen world — the recorder's clearScene bug, CORE-REPLAN §16). Transcribing it needs: the rule brain, the full tick (movement, harvesting, training, construction, research, exploration, the discovery beat), the notice texts, and the stream serialization |
-| **P1** the trace | the daemon, the event stream, the match folder, the redaction at export, the LLM seats | **not started** | a headless 4-seat match writes a folder: `transcript.jsonl` (schema v1), `events.jsonl` (same seed → empty diff), `traces/` with raw usage, exports with no key/endpoint/cost. This is where the arena-per-match + `mem.Tracking_Allocator` memory discipline lands — the shape gate 7 was proven for |
+| **P0 (a)** the map line | the map builder, byte-identical | **green** — 4 conditions, the true 800-world, clearance included (gate 2e) | — |
+| **P0 (b)** the turn-1 state view | the tick and the per-seat observation | **green** — 8 lines, byte-identical at the b1081 rules (gate 6), now on the jittered arena layout | — |
+| **the rule brain** | the 250 ms discovery beat, the decisions (`js/ai.js`) | **green** — ported in `spike/match` and pinned by the whole-match streams | — |
+| **the enemy memories** | enemy-unit memory (b1041/42), enemy-building memory | **green** — note/sweep per state build, the beat's detectContacts, first-contact gating (gameStats.opponents), ported in `spike/match` | — |
+| **P0 (c)** the state sequence | the whole-match stream byte-identical in Odin | **green** — `spike/match` replays `golden/stream-1m`, `-5m` and `-10m` byte for byte at the merged b1081 rules, plus the four map lines; measured 8 Oct 2026 | — |
+| **P1** the trace | the daemon, the event stream, the match folder, the redaction at export, the LLM seats | **in flight** | a headless 4-seat match writes a folder: `transcript.jsonl` (schema v1), `events.jsonl` (same seed → empty diff), `traces/` with raw usage, exports with no key/endpoint/cost. The simulation core is done — what P1 adds is the daemon shell around it, the folder writer, and the seat slot where the rule brain sits today becoming an LLM seat. This is where the arena-per-match + `mem.Tracking_Allocator` memory discipline lands — the shape gate 7 was proven for |
 | **P2** the face | the webview shell, the renderer, playable and recordable on Win/macOS/Linux | **not started** | 60 fps on a mid desktop, the Playwright suite green, the browser question re-decided (the revisit trigger is the first real shim cost) |
 | **P3/P4** the eyes, the arena | the analyzer, the hosted serve, the spectator feed | **not started; scope is an owner call** | §4's still-open product calls: P3/P4 scope, the mesh set, the name |
 
-**The order of work** (from `docs/REBUILD-EFFORT.md` §5 item 5, now the only remaining
-line in the effort record's list): the rule brain → then P0(c) → then P1 per the
-proposal. The enemy memories land with or just before the rule-brain gate, because the
-first contact between seats is exactly where they become required.
+**Known dormant gaps** (8 Oct 2026, after the b1081 absorption): the four new
+civilizations (Rome, Vikings, Maya), the 1200 map, the raid/farm civ bonuses and the
+b1076 arena layout outside the recorded conditions are **not transcribed** in Odin —
+the corpus does not exercise them, so the gates cannot see them. They surface as new
+gate work the day a corpus records them; nothing else blocks P1.
+
+**The order of work**: P0 closed 8 October 2026. Next: P1 per the proposal — the
+daemon, the folder, the determinism gate — then P2.
 
 **What "used as is" means at each point:**
 
-- **Today:** the Odin core is used as a *gate holder* — any change to the port, the
-  toolchain, or the rules is proven against the reference in seconds. As a match engine
-  it cannot be used: there is nothing to run a match with yet.
-- **P0(c) green:** the Odin core replays a whole recorded minute byte-identically —
-  a second oracle exists, and the JS spec port retires to provenance (its stated end
-  date).
+- **Today:** the Odin core replays whole recorded matches byte-identically (P0 green,
+  8 Oct 2026) — any change to the port, the toolchain, or the rules is proven against
+  the reference in seconds, and a second full oracle (5m and 10m) stands beside the 1m.
+- **P0(c) green (reached):** the Odin core replays whole recorded matches byte-identically
+  — the JS spec port (`tools/trace-states-port.cjs`) retires to provenance per its stated
+  end date; `spike/turn1` stays as the fast gate-6 holder.
 - **P1 green — the first real "used as is":** a headless 4-seat match with model seats
   runs and writes its folder, deterministically, with redacted exports. This is the
   sandbox eval, native, no browser.
