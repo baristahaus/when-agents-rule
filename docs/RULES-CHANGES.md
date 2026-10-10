@@ -39,6 +39,386 @@ tree's own work is the Odin core, held to these rules by the byte-exact golden c
 record of that effort is `docs/REBUILD-EFFORT.md`, the design is `docs/DESIGN_SPEC.md` §14
 and `docs/REBUILD_PROPOSAL.md`.
 
+## Build 1081: the patrol's start declared, and five tests from a contributor (8 October 2026)
+
+**No rules change; a contract fix and tests.** From pull request #3 by baristahaus, written against build 1054 and brought onto this build by hand: the parts that still apply, with two tests adjusted to later decisions.
+
+**The contract.**
+- `ordersInProgress[].from` is declared in `game-state-schema.json`. The rules have put a patrol's origin there all along (`js/standing-orders.js`, patrol mode only), so a model can read the whole route. A reader built from the contract would never have learned it exists.
+- `to` and `from` both say they hold exactly two numbers (`minItems`/`maxItems` 2). `items: integer` alone accepts a one-number array and leaves a missing z.
+- `tests/lib/schema-check.cjs` checks the two length keywords, and `tests/contract.test.cjs` asserts they bite.
+
+**New tests:**
+- `host-classifier.test.cjs`: which hosts count as private, the check in `js/boot.js` that hides the API-key screens on a public copy. It covers the lookalikes, such as `127.0.0.1.attacker.example` and `172.32.x`, and the `?full=1` opt-out.
+- `state-contract.test.cjs`: the newest shipped sample emits every field the schema requires, and nothing it does not declare.
+- `shipped-files.test.cjs`: every script `index.html` loads exists, carries a version tag and is loaded once, and no `js/` file goes unused.
+- `roster-advancement.test.cjs`: the unit upgrade paths and the training tables agree. Two of its tests were adjusted here:
+  - the scout cavalry is excepted, because it stays a scout by design (b1055);
+  - the advancement table covers all seven civilizations.
+
+**Not taken:**
+- `match-determinism.test.cjs` duplicates `tests/rng.test.cjs`.
+- The pull request's changelog entry and build number referred to build 1054.
+
+## Build 1080: the large map by default (7 October 2026)
+
+**Default change.** asp67: "it works very well".
+- A new arena or campaign is played on the 1200 map unless a size was chosen and saved. The picker lists Large first.
+- A replay still rebuilds the size its transcript names, and one that names none was played on 800.
+- The Bench realm stays on 800, so its baselines and golden traces keep their meaning. The showcase stays on 800 too.
+
+**One more refusal coded.** `move_units` with neither coordinates nor a tile now reports `moveNeedsCoords`, as the same mistake already did elsewhere. Seen on 7 October, a model wrote its coordinates into the reason and sent none. The Bench could not tell that from a harness fault.
+
+## Build 1079: a formation faces its front at rest (7 October 2026)
+
+**Look only.** Found by asp67: a standing formation and the way its men face fell apart.
+
+A formation is laid out along its line of march, but a unit kept facing its last step once it stopped. Forming up close by, those last steps are sideways shuffles into the slots. Now a unit remembers its formation's front while it marches in formation, turns to it in place once it stands, and forgets it when a plain move order takes it elsewhere. A fight still turns it to its enemy.
+
+**Measured** in the browser, an arena seat forming a line six units off: the six faced 18-157 degrees off the front before, and 0 after. On a long march they already arrived facing the front.
+
+## Build 1078: buildings drawn in batches (7 October 2026)
+
+**Performance only; nothing changes on screen.** Found by asp67: some of the new buildings caused lag.
+
+**The cause:** every part of a building was its own draw call, and twice a frame with the shadow pass. Most models have 5-59 parts, but the Colosseum has 225, so one of them cost as much as a small town.
+
+**The fix:** a finished building is now drawn the way units already were, as one merged mesh per material (texture, owner colour, authored tint, blending). Each model is built once and cached. Sites under construction keep their parts, because the growing shell needs its own.
+
+**Measured** in a headless browser:
+
+| Scene | Draw entries for buildings | Renderer time per frame |
+|---|---|---|
+| Roman Iron-age showcase | 619 → 137 | |
+| Same, plus 16 Colosseums in view | 4251 → 281 | 6.84 → 2.68 ms |
+
+A GPU pays driver time per draw call on top of that. A pixel diff of the showcase, old against new, shows the same picture.
+
+## Build 1077: the Maya scout, and what scouts are for (7 October 2026)
+
+**Prompt change (agents-rule-v107) and a unit rename.** asp67's question: how does a model know that scouts and cavalry are faster and see farther? It did not. The state lists a unit only by its id and cost, and the prompt said nothing about speed or sight.
+
+- **The prompt now says so**, as asp67 worded it: "Cavalry and scouts see further than other units (22.5 against 15); scouts and cavalry are also the fastest units." It is one fact of the world among the others. The system prompt's tripwire went from 2450 to 2480 tokens for it.
+- **The Maya's walking scout is `scout`**, shown as "Scout" (German "Kundschafter"). It was `spotter`. Its id now names its job, as `scout_cavalry`'s does. Its research is still `scouting`, now described as "Unlocks the scout at the barracks".
+- **Older transcripts** that name a `spotter` still draw it with its parrot.
+
+## Build 1076: jittered spawns, identical homes (7 October 2026)
+
+**Rules change (the arena's map layout).** asp67's aims, on both map sizes:
+- The WAR Platform's spawn layout, so no model can work out where its rivals start.
+- Every seat starting from the same ground.
+
+**The layout** is ported from the Platform (`platform/server/spawns.cjs` → `TerrainManager.arenaSpawns`):
+- The whole layout turns by a random angle, and its centre moves up to 25 off the map's.
+- Each seat's angle moves up to 4 degrees, and its distance (290-320) up to 12.
+- Which seat gets which place is shuffled.
+- A layout where one seat's rivals are more than 12% nearer, rank for rank, than another's is drawn again.
+- Everything scales with the map, and it is drawn from the map seed on its own stream, so a replay rebuilds it.
+
+**Every seat's home is identical to the pixel.** A disc around each Town Center, with the area of one map tile (radius about 58), takes in the Town Center's whole sight (40).
+- The scatter that falls inside it is left out; its draws are still taken, so the rest of the map lands where it always did.
+- One tile's normal count of food and wood is laid out instead, at one shared set of offsets turned with each seat's bearing to the map centre. Each copy must stand on land, or no seat gets it.
+- Stone and gold already kept 95 away from every Town Center, and now follow each seat's offset (the Platform's shifted rotation), so they too are identical.
+
+**Measured** over 25 seeds × 4 seats, as food bushes within Town Center sight at the start, gap between seats in one match:
+
+| Setting | Before | After |
+|---|---|---|
+| Summer | 2.4 | 0 |
+| Winter | 1.2 | 0 |
+| Desert | 0.9 | 0 |
+
+The amounts are unchanged, as asp67 asked: in the desert about half of all starts still see no food, but then every seat in that match sees none.
+
+**Not changed:** the campaign keeps its even circle. Transcripts record `spawnLayout`, so the analyzer rebuilds older matches on their circle and new ones on their layout.
+
+**Golden trace:** opening-economy was re-recorded (its map moved).
+
+## Build 1075: the Vikings in brown-grey (7 October 2026)
+
+**Look only.** At asp67's request, the Vikings' colour is a dark brown-grey (0x5e5248), like weathered wool and iron, instead of cyan. Tunics, shields, the Royal hall's shield row, the lineup chips and the buildings' accent all follow it.
+
+## Build 1074: academy doors (7 October 2026)
+
+**Look only.** Found by asp67: the academies' doors had the same fault as the Maya house's. The door trim measures from the ground, but the academy doors stand on a plinth, so every culture's trim lay across the doorway: pediments, lintels, torii beams, arches, posts.
+
+- **Iron age:** the trim now sits over the door, on top of the 0.8-high stylobate.
+  - On a door this wide the Roman arch springs a little lower, so its crown stays under the eaves.
+  - The Roman houses' arches are unchanged.
+- **Bronze age:** no trim. The columned porch is that academy's entrance, and under the porch roof there is no room for a trim over the door. Set over the door, pediments, arches and posts went through the porch roof.
+
+## Build 1073: Maya stairs and the Iron-age house door (7 October 2026)
+
+**Look only.** Found by asp67:
+
+**Stairs instead of ramps.** The Maya Town Centers and temple had a ramp up the front, laid at the wrong angle. All of them, El Castillo included, now have a flight of real steps. Each step is a solid block from the ground to its tread.
+- Each flight stands out in front of the terraces, as the Maya built them. A flight laid against the base would have had the stepped terraces poking through it.
+- El Castillo keeps its balustrades along the same line.
+
+**The Iron-age Maya house door.** The house stands on a platform in the Iron age, but its lintel was placed for a door on the ground, so it lay across the doorway. It now sits over the door.
+
+## Build 1072: horses of many coats (7 October 2026)
+
+**Look only.** asp67: every horse wore the same tan.
+
+Horses now wear one of five coats from the beards' palette: the old tan, bay, black, grey-white and chestnut.
+- The coat is picked per rider, like hair, from its stable identity, so a horse keeps its coat through redraws, age-ups and replays.
+- A black horse has a black mane and tail, and a grey one a white mane and tail.
+- Egypt's chariot horse is included.
+
+## Build 1071: the Persian Town Center's roof (7 October 2026)
+
+**Look only.** Found by asp67: the Bronze-age Persian Town Center's red roof sat low on its box, and the gold finial floated 0.8 above its tip. The roof now stands on a short drum, and its tip meets the finial. The Iron-age Town Center and the temple were already built this way.
+
+## Build 1070: Rome in red, behind the scutum (7 October 2026)
+
+**Look only; no rules change.** asp67: make the Romans more obviously Roman.
+
+- **Colour:** the civilization's colour is a deep Roman red (0x8b1e1e) instead of Tyrian purple. It is less than half as bright as Persia's tomato red, so the two stay apart. Tunics, crests, the lineup chips and the buildings' accent follow it.
+- **Shield:** Roman soldiers carry the scutum, a tall curved rectangle in the owner's colour with a gold edge, a gold boss, and gold wings above and below it. Everyone else keeps the round shield.
+
+## Build 1069: houses of their own for the four originals (7 October 2026)
+
+**Look only; no rules change.** Greece, Egypt, Persia and Yamato built the shared timber hut in the Bronze age and the shared plaster box in the Iron age. Only the palette and the door trim told them apart. Each now has its own pair:
+- **Greeks:** a whitewashed house on a stone footing under a low tiled gable, with a columned porch and an amphora. Then a Cycladic white cube with a flat roof, a smaller cube on top, an outside stair, and door and shutters in the owner's colour.
+- **Egyptians:** battered mudbrick with a reed sun shelter on the flat roof. Then two storeys with a roof-terrace parapet, a gold band, and a date palm by the door.
+- **Persians:** a mudbrick cube under a dome with a glazed band. Then a house with a badgir (a windcatcher tower) and a glazed dome.
+- **Yamato:** a minka on posts with a veranda, a paper door, and a steep thatched hip-and-gable roof with crossed finials. Then a machiya of dark timber with paper screens, two tiled roofs, and the noren in the owner's colour.
+
+## Build 1068: a scarlet macaw, and Maya plumes in colour (7 October 2026)
+
+**Look only.** asp67's notes, with a photo of a scarlet macaw for the parrot:
+
+**The parrot is a scarlet macaw:**
+- Each wing is three flat triangles: red coverts at the shoulder, a yellow band, then long blue flight feathers.
+- The tail is a long red point over broader blue outer feathers.
+- The team-coloured tail is gone, so the bird is all macaw.
+
+**Maya plumes in colour:**
+- A worker wears one bright green plume.
+- A single-plumed soldier (militia and the other first-rank units, the spotter among them) wears one red plume.
+- The many-plumed (soldiers of rank and the priest) wear a fan of red, green, yellow and blue.
+
+## Build 1067: the parrot flies beside its spotter (7 October 2026)
+
+**Look only.** asp67's notes on b1066:
+- **The wings are flat triangles,** smaller than b1066's ovals: a broad one at the shoulder and a narrow, pointed one behind it for the tip.
+- **No more circling.** When the spotter walks, the parrot lifts off and keeps pace beside it: 1.1 out on its left, at the same height as before (about 4.6), facing the way it walks, its wings beating. It lands back on the shoulder when the spotter stands.
+
+## Build 1066: the parrot's wings (7 October 2026)
+
+**Look only.** asp67's notes on b1065:
+- **A quarter smaller in flight:** drawn 1.275 times its size instead of 1.7. Perched, it keeps its size.
+- **Two real wings, bright green, one on each side.** Each is a broad inner wing with swept-back primaries. Folded, they lie flat along the body; in flight they swing out about 70 degrees and beat. b1065 had one small gold wing.
+
+## Build 1065: the spotter's parrot takes flight (7 October 2026)
+
+**Look only; no rules change.** asp67's idea: the parrot marks the spotter from afar.
+
+- **While the spotter walks,** the macaw rises off its shoulder over about a second. It circles 1.8 out and about 4.6 up, banked along its path, wing beating, and is drawn 1.7 times larger so it reads at a playing zoom.
+- **When the spotter stops,** the parrot glides back down to the shoulder.
+- **How it works:** the bird has two bones of its own, the body and the wing. The renderer eases the lift per unit, and the replay's still frames keep it perched.
+
+## Build 1064: the Maya grow maize (7 October 2026)
+
+**Look only; no rules change.** asp67's suggestion: the Maya's fields grew wheat, as everyone's but Yamato's did.
+
+They now grow maize. Each plant is a tall stalk with broad leaves arching out, a cob on its side and a tassel on top. The stalk and leaves are green, and the cob and tassel are the yellow tips.
+- The plants stand taller and further apart than the grains: 7 rows of 8 in the Iron age, small clumps in the Bronze age.
+- Romans and Vikings keep wheat, and Yamato keeps rice.
+
+## Build 1063: temples of their own (7 October 2026)
+
+**Look only; no rules change.** Found by asp67: the new civilizations' temples fell through to the generic sanctuary. That is a columned portico, which reads as a copy of the Greek temple.
+
+- **Romans:** a round temple of Vesta. A podium with steps carries a ring of twelve columns around the round cella, under a conical tiled roof with a gold finial.
+- **Vikings:** a hof. A stave-built hall with stacked shingle roofs and dragon heads, the sacred ash beside it, and an altar stone before it.
+- **Maya:** a temple pyramid in the Tikal manner. Five narrow, steep terraces, a stair, the shrine and its high roof comb, so it stays distinct from the Maya's wide, low Town Center platform.
+
+## Build 1062: the Roman door (7 October 2026)
+
+**Look only; no rules change.** Found by asp67 in the showcase.
+
+The Roman door trim of b1061 set a solid white disc on the lintel. It covered the doorway and reached up into the roof.
+- It is now a real arch: two pilasters carry seven stones, with a keystone, over a round-topped opening.
+- The arch is sized from the door, so it fits the house, the insula and the academy alike.
+- The Roman house door now stands on the ground, under the arch, in both ages.
+
+## Build 1061: the new civilizations look like themselves (7 October 2026)
+
+**Look only; no rules change.** Found by asp67 in the civilization showcase.
+
+**The Colosseum had its floor on the roof.** It was built from solid drums with the sand laid on top. It is now a ring of arcaded wall segments, with seating stepping down to an arena floor at ground level.
+
+**The showcase showed the Maya with riders and a stable.**
+- It built a fixed list of buildings and paraded a fixed list of shared units.
+- Now it builds only what the civilization can build: the Maya have no stable.
+- It shows every unit the civilization fields at that age, its own included. That is new for all seven: hoplites, samurai, legionaries, spotters.
+
+**Town Centers, houses and academies were plain copies** with a different palette. In the Bronze and Iron ages, each new civilization now has its own:
+- **Romans:**
+  - Town Center: a domus around an atrium in the Bronze age, a castrum with gate towers and a domed principia in the Iron age.
+  - House: a tiled cottage, then a two-storey insula.
+  - Academy: a basilica library with an apse.
+  - Door: an arch.
+- **Vikings:**
+  - Town Center: a turf longhouse with crossed gables, then a ring fort with a palisade around the hall.
+  - House: a turf house.
+  - Academy: a steep rune-masters' hall inside a ring of runestones.
+  - Door: carved crossing posts.
+- **Maya:**
+  - Town Center: a council house on a stepped platform, then a palace with a corbel vault and a roof comb.
+  - House: a stucco na under a tall thatch.
+  - Academy: an observatory dome.
+  - Door: a corbel lintel.
+- **Stone and Neolithic:** the huts stay shared, as for the originals. Each civilization has a small marker: a standard, a shield or a stela.
+
+## Build 1060: the Maya (7 October 2026)
+
+**A seventh civilization, with no horses at all.** The Maya cannot train scout cavalry, cavalry or heavy cavalry, and have no horseback research, so they cannot build a stable.
+
+**Their first scout walks** (asp67's design):
+- **The spotter** is trained at the barracks from the Neolithic: 60 HP, 3 attack, speed 1.9, for 130 food.
+- It sees 22.5, as far as a rider, and carries a parrot on its shoulder to show it.
+- **It sits behind its own research, Scout trails:** 150 food / 100 wood / 50 gold at the Town Center, in the Neolithic. That is horseback's price plus the 50 gold the others pay for their stable. The Maya build no stable, so the gold is paid here.
+
+**Bonus, Maize farming:** farms give 30% more food. The farm depletes by the base amount; the extra is food it did not have to give, so a field lasts just as long. Every civilization without the bonus multiplies by exactly 1.
+
+**Own units:**
+- **Jaguar warrior** (barracks, Bronze): 110 HP, 14 attack, speed 1.2, for 90 food / 20 wood / 40 gold.
+- **Plumed archer** (archery range, Bronze): 60 HP, 9 attack, range 13, speed 1.2, for 80 food / 40 wood / 30 gold.
+
+**Own techs:**
+- Obsidian blades (Stone age, Town Center, needs barracks): infantry +3 attack.
+- Scout trails: the spotter's gate, above.
+- Maya calendar (Neolithic, academy): Town Center +25% training speed.
+- Cotton armour (Bronze, academy): all military +15 HP. Iron working requires it.
+
+**Wonder:** El Castillo, nine terraces with a stair up the front and the temple on top.
+
+**A unit can now sit behind a research of its own** (`requiresTech` on the unit). Every path that trains reads it:
+- The model's train command answers `[ERROR] spotter needs the research "scouting" first` and names the call. The outcome code is `unitNeedsTech`, classed as a constraint.
+- The model's unit list shows the spotter under `units.blocked` with `blockedBy: ["tech"]` and `requiresTech`. No other unit's entry changes.
+- The player's train menu shows it locked, naming the research.
+- The rule-based AI skips it.
+
+**Explore's automatic pick** is now the farthest-seeing idle soldier, taking the first of equals. It was "the first rider, else the first soldier": the same pick while only riders saw farther. Now the spotter is chosen too.
+
+**Look:**
+- Feathers instead of iron: soldiers wear a fan of plumes on a gold band and no helmet. Everyone else wears one plume on a cloth band, and priests wear a tall headdress.
+- The Maya are clean-shaven.
+- Buildings are white stucco under palm thatch, and the civilization's colour is jade green.
+
+**The rule-based AI trains** jaguar warriors and plumed archers. It never fills a barracks with spotters, because a scout is not a soldier.
+
+## Build 1059: the Vikings (7 October 2026)
+
+**A sixth civilization, on the same pattern as the others.**
+
+**Bonus, Raid:** every soldier (infantry, cavalry and ranged) does 25% more damage to buildings. It stacks with Fire Arrows. Workers and priests do not get it. The multiplier is new rule code, and every civilization without the bonus multiplies by exactly 1, as before.
+
+**Own units:**
+- **Berserker** (barracks, Bronze age): 90 HP, 15 attack, speed 1.3, for 70 food / 20 wood / 30 gold. The hardest blow of its age for its price, on the thinnest hide.
+- **Axe thrower** (archery range, Neolithic): 60 HP, 9 attack, range 6, for 60 food / 40 wood. Half the archer's reach for half again its blow.
+
+**Own techs:**
+- Mead hall (Stone age, Town Center, needs barracks): infantry +3 attack.
+- Runestones (Neolithic, academy): all units +20% sight.
+- Shield wall (Bronze, academy): infantry +20 HP.
+- Chain mail (Bronze, academy): all military +15 HP. Iron working requires it.
+
+**Wonder:** the Royal hall, a long turf-roofed hall with dragon-head gables and a row of shields in the owner's colour.
+
+**Look:**
+- Soldiers wear an iron cap with a nose guard, and no horns. Everyone else wears a wool cap.
+- Hair is blond or brown.
+- Buildings are tarred timber under turf, and the civilization's colour is cyan.
+
+**The rule-based AI trains** berserkers, and axe throwers until the Iron-age bows outrank them.
+
+## Build 1058: the Romans (7 October 2026)
+
+**A fifth civilization, playable in every arena seat.** Built on the pattern the four originals share: one bonus, two own units, four own techs (one of them +15 HP for all military), iron working, and the shared 15,500 Wonder.
+
+**Bonus, Engineering:** villagers build 30% faster.
+
+**Own units:**
+- **Legionary** (barracks, Bronze age): 150 HP, 12 attack, speed 1.0, for 90 food / 30 stone / 40 gold. A warrior with 30 more health for 30 more resources.
+- **Equites** (stable, Bronze age): 130 HP, 12 attack, speed 2.1, for 110 food / 45 gold. They take the shared cavalry's place: a little lighter, quicker and cheaper. The Iron-age heavy cavalry stays shared.
+
+**Own techs:**
+- Aqueduct (Stone age, Town Center, needs farm): villagers gather +15%.
+- Roman roads (Neolithic, academy): all military +10% speed.
+- Testudo (Bronze, academy): infantry +20 HP.
+- Lorica segmentata (Bronze, academy): all military +15 HP. Iron working requires it.
+
+**Wonder:** the Colosseum, three arcaded tiers around an open arena floor.
+
+**Look:** soldiers wear the galea's crest across the helmet, and everyone else a laurel band. Romans are clean-shaven. Buildings are travertine under terracotta, and the civilization's colour is Tyrian purple.
+
+**The rule-based AI trains** legionaries and equites.
+
+**The four originals are unchanged,** and they stay the default arena lineup.
+
+## Build 1057: a large map, as a match option (7 October 2026)
+
+**New option; the 800 map is unchanged.** The setup screen has a map size beside the difficulty:
+- **Standard:** 800 × 800 in 7 × 7 tiles, the map every match so far was played on.
+- **Large:** 1200 × 1200 in 11 × 11 tiles.
+
+**The large map has more tiles of the same size.** A tile is still about 114 units across, and an exploration cell about 18. Labels run A–K and 1–11.
+
+**What grows with it:**
+- The island: shore at 617 instead of 417. The coast keeps its wobble, and the ground's patches keep their size.
+- The spawn circle: 476 from the centre instead of 306. Two seats start 952 apart instead of 612, four about 673 instead of 433, so marches take about 1.5 times as long.
+- Food and wood: the same count per tile, so the map has 121/49 times as many.
+- Stone and gold: scaled by the same factor, so they stay as dense (stone 40 → 99, gold 18 → 44 on easy). Each seat's share is still identical.
+- The camera's zoom-out limit (520 → 780), so the whole island still fits.
+
+**What a model is told:**
+- The prompt says "a square {{mapSize}}x{{mapSize}} map", so 800x800 or 1200x1200 (prompt version agents-rule-v106).
+- The explore tool no longer names "A-G, row 1-7"; it says a column letter, then a row number.
+- Errors and the state already took the grid from the match.
+
+**Transcripts** record `exploreTiles` next to `mapSize`. The analyzer and the replay rebuild the size a transcript names; older transcripts are all 800.
+
+**Measured** in the browser with four rule-based seats on the large map: about 72 frames a second. The ground texture is 2048 instead of 1024, because WebGL1 cannot mipmap any size that is not a power of two; at 1536 the whole ground drew black.
+
+## Build 1056: ready for more civilizations (7 October 2026)
+
+**Rule-based AI change; no rules change for models.** Five places knew only the four civilizations by name. Each would have broken quietly once a fifth arrives.
+
+**The rule-based AI now trains a civilization's own units.**
+- Its picks named shared units only. Greece never trained a hoplite or a phalanx, Yamato never a samurai, and Egypt's stable chose the scout over its chariot.
+- A civilization's own unit now wins when it belongs to at least the same age as the shared pick, and only when it can be paid for at once. A barracks waiting for a hoplite's stone and gold would otherwise train nothing.
+- Persia is unchanged: its own units replace shared ones and were already picked.
+- This changes how the Greek, Yamato and Egyptian baselines play.
+
+**Egypt's and Greece's building HP bonus is read from data.** `buildingMaxHealth` matched the bonus by its name ("Pyramide", "Akropolis"). The bonus now carries `buildingHealth` (1.5 and 1.3); the values are unchanged.
+
+**An unknown civilization's academy is no longer Yamato's.** The Iron academy's last branch was Yamato's torii and lantern, so any other civilization would have built them. Yamato now has its own branch; the fallback is a plain portico with a band in the player's colour.
+
+**The UI takes its civilizations from the data.**
+- Names, colours, the default arena slots, the showcase list and the analyzer's building test no longer list the four by hand.
+- The Wonder check uses each Wonder's `isWonder` flag instead of a list of four types.
+- **Visible change:** the lineup chips now wear the colour the army wears on the map. Greece's chips were green against blue units, Yamato's purple against pink, Persia's crimson against tomato red.
+
+**Two tests could not see what they checked.** The hold-mode test read the keys of the unique-unit array (`0`, `1`, ...), so it never checked a unique unit. The Wonder text test asserted exactly four.
+
+## Build 1055: the scout costs no gold, and stays a scout (7 October 2026)
+
+**Rules change; `units.js` and `buildings.js` changed.** asp67's design: the scout cavalry is every civilization's first scout. It is cheap, weak and far-seeing, and meant to find gold and stone before a seat has mined any. Egypt has it too, beside its chariot, which is the fighter.
+
+**The price was 100 food and 30 gold; it is now 150 food and 80 wood.**
+- Every seat starts with 50 gold, and the stable costs exactly 50 (horseback costs none).
+- With a 30-gold scout, the intended opening needed 80 gold: a seat had to mine gold before it could ride out to find it.
+
+**The scout no longer becomes cavalry at the Iron age.**
+- It stays a scout all match.
+- Egypt and Greece cannot train cavalry, but their scouts became cavalry anyway.
+
+**Its vision is unchanged:** 22.5, as for all cavalry, against 15 for everything else. That is what makes the later horseback units worth their price.
+
 ## Build 1054: producing needs a free population slot (4 October 2026)
 
 **Rules change (elimination); `game.js` changed.**

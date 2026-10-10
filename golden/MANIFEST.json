@@ -1,9 +1,9 @@
 {
-  "note": "Byte-exact reference corpus of the rules at parent build 1040. Map lines re-recorded twice: 2026-10-04 (four conditions) and again 2026-10-05, when the recorder's missing terrain size argument was found and fixed \u2014 the first re-recording had generated 200-unit islands with the spawn ring outside the map. The contract of the RULES, not of any port.",
+  "note": "Byte-exact reference corpus of the rules at parent build 1040. Map lines re-recorded twice: 2026-10-04 (four conditions) and again 2026-10-05, when the recorder's missing terrain size argument was found and fixed — the first re-recording had generated 200-unit islands with the spawn ring outside the map. The contract of the RULES, not of any port.",
   "seed": "golden",
   "difficulty": "medium",
   "seats": 4,
-  "build": 1040,
+  "build": 1081,
   "files": {
     "golden/stream-b1040-1m.jsonl": {
       "sha256": "8611ac58fa2726dbc88d48e94c76e373db4d16cb6b9314219d16e18266c41bc8",
@@ -12,11 +12,11 @@
     "golden/turn1-b1040.jsonl": {
       "sha256": "4e015ba9f314609d3f889bed812cb3fd196b3aa23c629f9c2cc8bd62c16872fd",
       "bytes": 21147,
-      "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step \u2014 clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
+      "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step — clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
     },
     "golden/map-line-b1040.json": {
-      "sha256": "eeec4de9f14e18dc4ab1d826a475f53a338619b3bbe6a60cab155fd950dc02a9",
-      "bytes": 48718,
+      "sha256": "172cb885a87247d94b5758bfbdb9f3b7014aaf5f621c290f1c55e0c93f345ca0",
+      "bytes": 58156,
       "note": "the true 800-world map, post Town Center clearance, re-recorded 5 Oct 2026 (the recorder size bug fixed: it had generated a 200-unit island); 941 nodes, golden/medium/4"
     },
     "samples/golden/initial/golden-initial.jsonl": {
@@ -29,37 +29,37 @@
       "note": "turn1-b1040.jsonl with seat ids re-keyed to seat<N>; the form a port compares against, because v1 mints seat ids from Math.random by design"
     },
     "golden/map-alpha-easy-2.json": {
-      "sha256": "2def25d49d471126f13cf1ea41f1a68635a6297da7adb7b29ed053bc70f24e11",
-      "bytes": 63621,
+      "sha256": "423b1943eff5b19ae2e690a7ed95fe1604423f03139f4c0444e5d128c130cc86",
+      "bytes": 75961,
       "note": "easy, 2 seats, re-recorded 5 Oct 2026 at the true 800-world size; tests the multiplier table and rotational rounding at two seats"
     },
     "golden/map-alpha-hard-3.json": {
-      "sha256": "db41ce78b52136777c54f2c58a59399b7d14b3856c52e709ec88ce34f7ffe170",
-      "bytes": 14831,
+      "sha256": "26659b3cc8b5bd817797950cebbdac583b76ecdd7756796750144dec6676aed2",
+      "bytes": 17685,
       "note": "hard, 3 seats, re-recorded 5 Oct 2026 at the true 800-world size; stone is 21 here: round(20/3)=7 per seat, where ceil would say 42"
     },
     "golden/map-beta-medium-4.json": {
-      "sha256": "52218af8ab258ac44a0b46f2420307327c3deffdff0b7127db744301a003c0aa",
-      "bytes": 48586,
+      "sha256": "af27ffa8ab0eb7e562fdbddd62a5f89a41958f4d5f6e44c5461d4511f89415be",
+      "bytes": 57994,
       "note": "medium, 4 seats, different seed, re-recorded 5 Oct 2026 at the true 800-world size; the clearance removes four nodes in this layout"
     },
     "golden/states-b1040-t0-t1.canonical.jsonl": {
-      "sha256": "4dcc74ee2f9d7e648cca9ffc0b70fae42002b27295972aa499a16697aeefbfad",
-      "bytes": 45840,
+      "sha256": "1d2e4fdca6b5228e15092446179d69f785968569865b7abb87db0fb073d0b25a",
+      "bytes": 44932,
       "note": "per-seat state view at t=0 and t=1000 ms, English, ids canonical; regenerate with tools/golden/dump-states.cjs -at 0,1000 piped through canonicalize-states.cjs"
     },
     "golden/stream-1m.jsonl": {
-      "bytes": 3106064,
-      "sha256": "0044b2d7fda3d405e078cb5d6418f1164c53a35a56888bdf31998a39519ee6ab"
+      "bytes": 3106232,
+      "sha256": "1489bd036ec2ea63b22f5f139437b8e5493b8ee2c5b57b148e06c34aa9577db7"
     },
     "golden/stream-5m.jsonl": {
-      "sha256": "065a006f493e9b95d6dc20b830e0b6645da5402fad163d0dba381882467fd650",
-      "bytes": 15908261,
-      "note": "5 minutes, re-recorded 6 Oct 2026 with the cleaned recorder; the second whole-match oracle \u2014 exercises farm depletion/rebuild, farms regen, barracks, an archery_range site, exploration marking and scouts"
+      "sha256": "9a6f81f916a7d3c9d0d7fe407c4aa63ce3ed0ae275b891ffbbaaaa37505c33e8",
+      "bytes": 15908429,
+      "note": "5 minutes, re-recorded 6 Oct 2026 with the cleaned recorder; the second whole-match oracle — exercises farm depletion/rebuild, farms regen, barracks, an archery_range site, exploration marking and scouts"
     },
     "golden/stream-10m.jsonl": {
-      "sha256": "9a477775dfcdb76fc940668be1106c68686de357f21985da24dc120a5e5512aa",
-      "bytes": 34678670,
+      "sha256": "6d56b0ac32cf1a390340ccd333d1d92a3310a74f94d35cd10fef5ab264bce795",
+      "bytes": 34678838,
       "note": "ten-minute medium 4-seat stream, the full corpus: enemy memory, battles, threats and orders all exercised through a raid and a defense"
     }
   },

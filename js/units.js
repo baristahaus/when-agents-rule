@@ -85,10 +85,13 @@ const UNIT_DEFS = {
         tier: 'iron',
         description: 'Elite Fernkampf-Einheit'
     },
+    // The first scout (asp67, b1055): every seat starts with 50 gold, which pays for the
+    // stable; the scout itself costs none, so a seat can ride out to find gold and stone
+    // before it has mined any. At 100 food and 30 gold the opening needed 80 gold.
     scout_cavalry: {
         id: 'scout_cavalry',
         name: 'Aufklärungskavallerie',
-        cost: { food: 100, wood: 0, stone: 0, gold: 30 },
+        cost: { food: 150, wood: 80, stone: 0, gold: 0 },
         health: 100,
         speed: 2.2,
         attack: 8,
@@ -226,6 +229,9 @@ function createUnit(type, x, z, owner, civilization, age) {
         health: unitDef.health,
         maxHealth: unitDef.health,
         speed: unitDef.speed,
+        // A unit that sees farther by nature (b1060: the Maya's spotter, as far as a
+        // rider). Researched sight adds to it as to everyone's.
+        ...(unitDef.visionBonus ? { visionBonus: unitDef.visionBonus } : {}),
         attack: unitDef.attack,
         range: unitDef.range,
         unitType: unitDef.type,
@@ -284,8 +290,9 @@ function buildingMaxHealth(buildingDef, civ, age) {
     // believed was carrying +30% and wrote so in its closing statement. The
     // descriptions now name the exception.
     if (buildingDef.type === 'wonder') return Math.max(50, buildingDef.health);
-    const healthMultiplier = (civ && civ.bonus && civ.bonus.name === 'Pyramide') ? 1.5 :
-                             (civ && civ.bonus && civ.bonus.name === 'Akropolis') ? 1.3 : 1.0;
+    // Read from the bonus's own data (b1056). It was matched by the bonus's NAME
+    // ('Pyramide', 'Akropolis'), and the multiplier the bonus sets was never read.
+    const healthMultiplier = (civ && civ.bonus && civ.bonus.buildingHealth) || 1.0;
     const idx = Math.max(0, BUILDING_AGE_ORDER.indexOf(age));
     return Math.max(50, Math.round(buildingDef.health * WarMath.powInt(1.5, idx) * healthMultiplier / 50) * 50);
 }

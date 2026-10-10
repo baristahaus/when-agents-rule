@@ -115,7 +115,7 @@ class OpenAIAIManager {
             ['repair_building', 'Send workers to repair a damaged building. Omit the coordinates to repair the most damaged one.',
              Object.assign({ count: I('How many workers. Default 1, max 5.') }, XZ), []],
             ['explore', 'Send a unit to scout a map tile.',
-             { tile: S('Tile label from map.exploration, e.g. "C5" — column A-G, row 1-7.'),
+             { tile: S('Tile label from map.exploration, e.g. "C5" — column letter, then row number.'),
                unitType: S('Which unit type to send. Optional.'),
                unitIds: { type: 'array', items: { type: 'integer' }, description: 'Exact unit ids to send. Optional.' } }, ['tile']],
             ['move_units', 'Persistent movement order. Nearby combat interrupts march/guard/patrol; survivors regroup and resume. Scout never initiates combat. Incoming damage overrides all modes: fighters retaliate together, towers first; mobile threats obey chase limits. Regroup and resume afterward.',
@@ -2703,6 +2703,10 @@ class OpenAIAIManager {
                 mapSeed: (this.game.terrain && this.game.terrain.seed) || null,
                 difficulty: this.game.difficulty || null,
                 mapSize: (this.game.terrain && this.game.terrain.size) || null,
+                exploreTiles: this.game.EXPLORE_TILES || null,
+                // b1076: the arena's jittered starting layout with identical homes. Absent
+                // in older transcripts, which were all played on the even circle.
+                spawnLayout: (this.game.terrain && this.game.terrain.jitteredSpawns) ? 'jittered' : 'circle',
                 turnBased: !!this.turnBased,
                 roundTimeoutMs: this.turnBased ? this.roundTimeoutMs() : null,
                 // Lockstep: world milliseconds per round (the world is frozen while seats
@@ -3805,6 +3809,9 @@ class OpenAIAIManager {
             const def = (typeof getUnitDefFor === 'function') ? getUnitDefFor(ai.civilization, u.id) : null;
             const blockedBy = [];
             // Structural gates first, money last — the order the executor reports them.
+            // A unit's own research first of all (b1060: the Maya's spotter).
+            const gate = def && def.requiresTech;
+            if (gate && !(ai.researchedTechs && ai.researchedTechs[gate])) blockedBy.push('tech');
             if (!ageReached(u.age)) blockedBy.push('age');
             if (!standing(u.at)) blockedBy.push('host');
             // Units are the only thing that consumes population; buildings never do,
@@ -3813,7 +3820,7 @@ class OpenAIAIManager {
             if (atPopCap) blockedBy.push('pop');
             if (tooPoor(def && def.cost)) blockedBy.push('cost');
             (host[u.age] = host[u.age] || []).push({
-                id: u.id, cost: costOf(def && def.cost), blockedBy
+                id: u.id, cost: costOf(def && def.cost), blockedBy, ...(gate ? { requiresTech: gate } : {})
             });
         });
 
@@ -4233,7 +4240,8 @@ class OpenAIAIManager {
     // stores THIS text (ui.getArenaDefaultPrompt delegates here), per-slot edits
     // override it, and buildSystemPrompt() falls back to it — so the prompt the
     // user reads in the textarea is exactly the prompt the harness serves.
-    // Placeholders resolved at match time: {{civilization}}, {{bonus}}, {{players}}.
+    // Placeholders resolved at match time: {{civilization}}, {{bonus}}, {{players}},
+    // {{mapSize}} (b1057: 800 or 1200).
     // {{terrain}} (the preset's summer/winter/desert brief) is still SUBSTITUTED, so a
     // hand-edited prompt may use it, but the default no longer spends tokens on it.
     //
@@ -4257,7 +4265,7 @@ class OpenAIAIManager {
     }
 
     static defaultSystemPrompt() {
-        return `You ARE {{civilization}}, one of {{players}} rival commanders in a real-time strategy game on a square 800x800 map. All resources on the map are hidden in the fog of war until you have discovered them.
+        return `You ARE {{civilization}}, one of {{players}} rival commanders in a real-time strategy game on a square {{mapSize}}x{{mapSize}} map. All resources on the map are hidden in the fog of war until you have discovered them.
 Every other player is your enemy. No human plays for you: you command by issuing actions. Your unique bonus: {{bonus}}.
 
 ${OpenAIAIManager.VICTORY_PARAGRAPH}
@@ -4266,6 +4274,7 @@ The LAST message carries your CURRENT state as JSON; decide from it and issue on
 
 - You never SEE a fight; it happens between your turns. "battles" reports each engagement, cumulative: both sides' composition, damage dealt to units and to buildings, priests' healing, and losses. Losing produces no error, so this is the only place you learn what beat you.
 - Priests never fight. They march with an attack and heal wounded units from the back on their own.
+- Cavalry and scouts see further than other units (22.5 against 15); scouts and cavalry are also the fastest units.
 - Idle military auto-defend your home between turns, so you need not micro every raid. Auto-defense only repels; it never wins the game.
 - "enemyUnits" is your memory of rival units: "visible": true is in sight now; "visible": false is how and where you LAST SAW it, "secondsAgo". It may have moved, been hurt or died since — you were not watching. "sightedAt" is where it came into your sight, so from there to x,z is the way it was going. A remembered unit leaves this list when you look at its spot again and it is not there; it is forgotten only when you see it die or your units kill it. Workers carry "carrying": empty, food, wood, stone, gold, or unknown, as last seen. The list holds the 50 most recent.
 - "enemyBuildings" lists every rival building you have found. "visible": true is in sight now; "visible": false is remembered as you last saw it, and its health, or whether it still stands, may have changed since.
@@ -4388,6 +4397,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
             .replace(/\{\{civilization\}\}/g, ai.civilization)
             .replace(/\{\{bonus\}\}/g, intoModelLang(civ?.bonus?.description) || 'None')
             .replace(/\{\{players\}\}/g, String(players || 2))
+            .replace(/\{\{mapSize\}\}/g, String((this.game && this.game.terrain && this.game.terrain.size) || 800))
             .replace(/\{\{terrain\}\}/g, terrain)
             + fallbackHint + langDirective;
     }
@@ -6360,6 +6370,10 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                         : `[ERROR] "${params.tile}" is not a map tile. Use a COLUMN LETTER then a ROW NUMBER: A-${lastCol} and 1-${T}, e.g. "C5", or give "targetX" and "targetZ".`;
                     if (at && !/^\[ERROR\]/.test(actionResult)) actionResult += ` (centre of tile ${String(params.tile).trim().toUpperCase()})`;
                 } else {
+                    // Coded (b1080): it was one of the harness's uncoded refusals, so the Bench
+                    // could not tell it from a harness fault. Seen 7 Oct: a model wrote its
+                    // coordinates into the reason and sent none.
+                    this.outcome('log.out.moveNeedsCoords', {});
                     actionResult = `[ERROR] move_units requires "targetX" and "targetZ" parameters, or a "tile" label from map.exploration.`;
                 }
                 break;
@@ -6826,6 +6840,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
                 ? ` Pass just "${stripped}" — "units.trainable" groups ids under the age they need; the age is not part of the id.`
                 : '';
             return `[ERROR] Unknown unit type "${unitType}".${catNote}${parenNote} ${this.trainableListString(ai)} See "units.trainable" and "units.blocked" for the age each one needs.`;
+        }
+
+        // Its own research before anything else (b1060): the first step of the chain.
+        const gate = typeof unitTechMissing === 'function' ? unitTechMissing(ai, unitType) : null;
+        if (gate) {
+            this.outcome('log.out.unitNeedsTech', { unitType, tech: gate });
+            return `[ERROR] ${unitType} needs the research "${gate}" first: research_tech {"techId": "${gate}"}. Then it trains at its building like any other unit.`;
         }
 
         const ageOrder = ['stone', 'neolithic', 'bronze', 'iron'];
@@ -8341,9 +8362,13 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
         // Priests are excluded from the auto-pick: a healer wandering the dark
         // alone is a wasted (and soon dead) medic. Explicit unitType still wins.
         const idleMilitary = ai.units.filter(u => u.type !== 'worker' && u.unitType !== 'support' && !this.isInCombat(u) && notSentYet(u));
-        const cav = idleMilitary.find(u => u.unitType === 'cavalry');
-        if (cav) return cav;
-        if (idleMilitary.length) return idleMilitary[0];
+        // The farthest-seeing idle soldier, the first of equals (b1060). That was "the
+        // first rider, else the first soldier", the same pick while only riders saw
+        // farther; the Maya's spotter walks and sees as far.
+        const sight = u => (this.game && this.game.unitVision) ? this.game.unitVision(u) : (u.unitType === 'cavalry' ? 22.5 : 15);
+        let far = null;
+        for (const u of idleMilitary) if (!far || sight(u) > sight(far)) far = u;
+        if (far) return far;
 
         const idleWorker = ai.units.find(u => u.type === 'worker' && this.game.isIdleWorker(u) && notSentYet(u));
         if (idleWorker) return idleWorker;
@@ -9074,7 +9099,7 @@ matchSpeed: Only "slowestUnit", and only on move_units and attack_target. Allows
 
         const t = this.parseTile(raw, T);
         if (!t) {
-            this.outcome('log.out.exploreBadTile', { tile: String(raw) });
+            this.outcome('log.out.exploreBadTile', { tile: String(raw), lastCol, rows: T });
             return `[ERROR] "${raw}" is not a map tile. Use a COLUMN LETTER then a ROW NUMBER: A-${lastCol} and 1-${T}, e.g. "C5" (not "5C", and not coordinates). The tiles and how much of each you have seen are in "map.exploration".`;
         }
 

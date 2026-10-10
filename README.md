@@ -34,11 +34,11 @@ It's a hands-on testbed, not a benchmark — see [Disclaimers](#-disclaimers). W
 
 <div align="center">
 
-| A growing settlement | An army on the march |
+| A town in winter | An archer raid |
 |:---:|:---:|
-| ![A developed settlement during the recorded arena match](Screenshots/Settlement.png) | ![Persian troops moving through an enemy settlement](Screenshots/Formations.png) |
+| ![GLM 5.3's Egyptian town in the snow, its own notes on the economy floating over its buildings](Screenshots/WinterTown.jpg) | ![DeepSeek V4.1's Yamato archers razing GLM 5.3's Egyptian base, with DeepSeek's plan and both models' notes on screen](Screenshots/ArcherRaid.jpg) |
 
-<sub><i>From economy to conquest: still frames from the same live match. These settlements and armies were built and commanded by the competing models.</i></sub>
+<sub><i>From economy to conquest, in Episodes 9 and 10: the notes floating over units and buildings are the models' own reasons for what they ordered there. These settlements and armies were built and commanded by the competing models.</i></sub>
 
 </div>
 
@@ -144,9 +144,9 @@ For left-button-only campaign navigation, open the minimap's camera-options chev
 
 <div align="center">
 
-![Greek village with a watchtower, troops, workers and civic buildings](Screenshots/GreekVillage.png)
+![The whole island from above while Claude Sonnet 5.5's Greeks hold a Wonder, 9:50 from victory](Screenshots/WonderHeld.jpg)
 
-<sub><i>A Greek village at ground level: troops gather beside the watchtower while workers move among homes, the temple and the town center.</i></sub>
+<sub><i>Episode 12 from above: Claude Sonnet 5.5's Greeks hold a Wonder with 9:50 left on its clock, while the other three seats are spread across the island.</i></sub>
 
 </div>
 
@@ -187,9 +187,9 @@ Load a `match-*.jsonl` and you get:
 - **Visible camera controls.** Open Camera for a whole-map overview, selection focus, reset, zoom, and rotation. Manual camera input turns automatic following off. These controls are also available in live play.
 - **Click anything** to inspect it. Remembered enemy positions render translucent and say when they were last seen, so a stale sighting never looks like a live one.
 
-**Eight real matches ship with the game**, in `samples/`, with every plan, command and reasoning block in them. No key, no endpoint, nothing to configure: the analyzer only ever reads a file. `samples/index.json` lists them with their models, tempo and result.
+**Eleven real matches ship with the game**, in `samples/`, with every plan, command and reasoning block in them. No key, no endpoint, nothing to configure: the analyzer only ever reads a file. `samples/index.json` lists them with their models, tempo and result.
 
-Direct match links open the viewer with a specific catalogue entry loaded: [Episode 6](https://asp67.github.io/when-agents-rule/?match=match-20260907-120324), [Episode 7](https://asp67.github.io/when-agents-rule/?match=match-20260909-211941) and [Episode 8](https://asp67.github.io/when-agents-rule/?match=match-20261001-200050). Use `?match=` followed by the entry's `matchId`; unknown IDs show a loading error rather than a different match.
+Direct match links open the viewer with a specific catalogue entry loaded: [Episode 6](https://asp67.github.io/when-agents-rule/?match=match-20260907-120324), [Episode 7](https://asp67.github.io/when-agents-rule/?match=match-20260909-211941), [Episode 8](https://asp67.github.io/when-agents-rule/?match=match-20261001-200050), [Episode 9](https://asp67.github.io/when-agents-rule/?match=match-20261003-234407), [Episode 10](https://asp67.github.io/when-agents-rule/?match=match-20261004-120750) and [Episode 12](https://asp67.github.io/when-agents-rule/?match=match-20261005-194200). Use `?match=` followed by the entry's `matchId`; unknown IDs show a loading error rather than a different match.
 
 - `2026-07-26_opus5-grok4.5-gpt-oss_36min.jsonl` — 271 turns, **turn-based** (60 s a round). Opus 5 as Persia, Grok 4.5 as Egypt, and gpt-oss on a single consumer GPU as Yamato. Opus 5 wins.
 - `2026-08-09_kimi-k3-gemma4-qwen3.8-ornith9b_25min.jsonl` — 490 turns, **real time**, nobody waiting for anybody. Kimi K3 as Yamato, a local Gemma 4 26B as the Greeks, Qwen 3.8 Max as Persia, and a 9B quant on a desktop GPU as Egypt. Kimi K3 wins, having issued three commands a turn to the others' one.
@@ -202,6 +202,12 @@ Direct match links open the viewer with a specific catalogue entry loaded: [Epis
 - `2026-09-09_gemini3.8-deepseek-v4-gpt5.6-qwen3.8_121min.jsonl` — Episode 7, **The Cartographers and the Procession**: 723 turns over 121:23, **turn-based** (180 s rounds), on a snow map. Gemini 3.8 Flash as Egypt, DeepSeek v4 Flash Pro as the Greeks, GPT 5.6 Luna as Persia, and local Qwen3.8 Flash Next as Yamato. The transcript follows worker travel calculations, the marching armies, the Wonder countdown and the search for the last town centre, with all four closing statements.
 
 - `2026-10-01_glm5.3-space-bunny-deepseek-v4-mimo-v2.6_70min.jsonl` — Episode 8, **Fighting Blind**: 419 turns over 69:59, **real time**, four seats on easy. GLM5.3 Flash, running locally on a DGX Spark, plays Egypt; space-bunny-alpha, an OpenRouter stealth model, the Greeks; DeepSeek V4 Flash, Persia; MiMo V2.6 Flash, Yamato. The bunny builds a second town centre beside its gold, MiMo follows its gold carriers there and burns it at 16:26, GLM takes the capital half a minute later, and the Greeks are out at 18:20. GLM repairs its forward town centre from nine percent under fire, completes a Pyramid at 59:34 and holds it, winning on 4753 power against 1746, 106 and 74. MiMo's last worker, five gold short of a new town centre, builds a house and a barracks instead and sends a single militia at the Wonder. All four closing statements are included.
+
+- `2026-10-03_glm5.3-space-bunny-mimo-v2.6-deepseek-v4.1_80min.jsonl` — Episode 9, **Chasing Ghosts**, the rematch: 529 turns over 80:16, **real time**, on medium (Winter Valley), build 1049 — the first build in which a seat remembers the enemy units it has seen, each with how many seconds ago. GLM5.3 Flash (local) plays Egypt, space-bunny the Greeks, MiMo V2.6 Flash Persia, and DeepSeek, now V4.1 Flash, Yamato. The bunny researches farms on its first turn and loses two armies to DeepSeek's tower at C4; GLM spots a Greek worker carrying gold and takes the mine; DeepSeek razes the Greek capital and the bunny is out at 36:09. GLM raises a Pyramid at 1:08:13 and holds it, winning on 5804 power against 1917, 1565 and 109. MiMo loses eleven turns to the output limit. All four closing statements are included.
+
+- `2026-10-04_glm5.3-space-bunny-mimo-v2.6-deepseek-v4.1_38min.jsonl` — Episode 10, **The Map Reader**: 555 turns over 37:46, **real time**, on hard (Desert), build 1053, same seats. DeepSeek V4.1 Flash finds the Greek capital at 6:39, reasons out the plus-sign layout of the four capitals at 15:19 and sees both other capitals at 15:54; no other model sees an enemy building before 24:54, and two never do. The bunny's single tower stops fifteen militia, then stands at one percent for five quiet minutes; the Greeks are out at 17:50. GLM marches its army into the empty north-west corner while DeepSeek's archers raze its home, and DeepSeek wins last one standing at 37:10 on 4720 power against 96, 38 and 7. All four closing statements are included.
+
+- `2026-10-05_gpt6.1-sol-claude-sonnet5.5-deepseek-v4.1-glm5.3_99min.jsonl` — Episode 12, **Same Clock**: 469 turns over 99:16, **turn based** (every round, all four get the same report and up to three minutes to answer), on easy, build 1054. Two frontier models join the two cheap champions: Claude Sonnet 5.5 plays the Greeks, GPT-6.1 Sol Egypt, DeepSeek V4.1 Flash Persia and GLM5.3 Flash (local) Yamato. Claude reaches the Iron Age first and raises an Akropolis without towers; DeepSeek razes it 62 seconds later. GLM loses its whole base, rebuilds at B2 with 5 gold to spare, raises a Shrine inside a ring of four towers and holds it, winning on 4502 power against 3516, 1978 and 108. GPT sends exactly one order on 83 of its 87 turns. All four closing statements are included.
 
 Nothing is interpolated between snapshots. Replay runs no simulation, so recorded units stay at their recorded coordinates, overlaps included. They arrive seconds to minutes apart depending on the seat, so every frame is a moment the file actually attests to — and each turn shows how stale the other seats' pictures are.
 

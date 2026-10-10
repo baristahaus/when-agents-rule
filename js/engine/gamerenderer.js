@@ -30,7 +30,8 @@
     //
     // Raising it also lengthens the wheel's zoom-out in play, which is the point: the
     // cap is what a reader hits when they try to see the whole board and cannot.
-    const MIN_HALF = 10, MAX_HALF = 520;
+    // 520 on the 800 map; a larger island scales it (b1057), so the whole map still fits.
+    const MIN_HALF = 10, maxHalf = () => 520 * TexGen.TERRAIN_WORLD / 1000;
     // A director close-up frames one unit (b1010): closer than the user may zoom.
     const CLOSE_MIN_HALF = 0.8;
     // Shared by worker lanterns and settlement lights (including their housings).
@@ -44,9 +45,8 @@
     // The island's dimensions, owned by TexGen (which paints the coast from them).
     // The ground plane spans them, the surf ribbon follows them, and TerrainManager
     // clamps units against them — readers of one fact, which must not drift.
-    const TERRAIN_SEED = TexGen.TERRAIN_SEED,
-          TERRAIN_WORLD = TexGen.TERRAIN_WORLD,
-          TERRAIN_LAND = TexGen.TERRAIN_LAND;
+    // Read live, not captured at load (b1057): the island's size follows the match's map.
+    const TERRAIN_SEED = TexGen.TERRAIN_SEED;
     const BSCALE = 0.78;         // engine building set → game footprint scale
     // Wonders are drawn 1.5x (the rules' Game.WONDER_SCALE, which this file cannot read:
     // the Platform viewer loads the renderer without game.js). Keep the two equal.
@@ -233,7 +233,7 @@
         }
 
         _buildTextures(theme) {
-            if (this._theme === theme && this.tex) return;
+            if (this._theme === theme && this._texWorld === TexGen.TERRAIN_WORLD && this.tex) return;
             // The set being replaced has to be freed, or it leaks wholesale. The renderer is
             // built with 'summer' before any map exists, and the theme actually used comes
             // from the difficulty (medium → winter, hard → desert) in setTerrain — so on
@@ -258,13 +258,18 @@
                 }
             }
             this._theme = theme;
+            this._texWorld = TexGen.TERRAIN_WORLD;
+            // At least one texel per world unit, as on the 800 map (1024 over 1000 units),
+            // rounded UP to a power of two: WebGL1 cannot mipmap any other size, and an
+            // unmipmapped 1536 drew the whole ground black (b1057).
+            const texScale = Math.pow(2, Math.ceil(Math.log2(TexGen.TERRAIN_WORLD / 1000)));
             const gl = this.gl;
             const canopyBase = theme === 'winter' ? [58, 92, 66]
                 : (theme === 'desert' ? [110, 116, 62] : [83, 108, 61]);
             const T = (c, o) => GLCore.createTextureFromCanvas(gl, c, o);
             this.tex = {
-                coast: T(TexGen.coastMask(), { clamp: true }),
-                terrain: T(TexGen.terrain(theme, TERRAIN_SEED, 1024, TERRAIN_WORLD, TERRAIN_LAND), { clamp: true }),
+                coast: T(TexGen.coastMask(Math.round(512 * texScale)), { clamp: true }),
+                terrain: T(TexGen.terrain(theme, TERRAIN_SEED, Math.round(1024 * texScale), TexGen.TERRAIN_WORLD, TexGen.TERRAIN_LAND), { clamp: true }),
                 groundDetail: T(TexGen.groundDetail(theme)),
                 worldBark: T(TexGen.worldSurface('bark',theme,44)),
                 worldFoliage: T(TexGen.worldSurface('foliage',theme,55)),
@@ -290,6 +295,7 @@
                 field_furrows: T(TexGen.field(144, 128, 'furrows')),
                 crop_rice: T(TexGen.crop('rice', 145), { clamp: true }),
                 crop_wheat: T(TexGen.crop('wheat', 146), { clamp: true }),
+                crop_maize: T(TexGen.crop('maize', 147), { clamp: true }),   // the Maya's (b1064)
                 shadow: T(TexGen.shadowBlob(), { clamp: true }),
                 mote: T(TexGen.softMote(), { clamp: true }),
                 cloth: T(TexGen.cloth(155)),
@@ -299,6 +305,10 @@
                 hairBlond: T(TexGen.solid(170,128,58)),
                 hairWhite: T(TexGen.solid(214,209,195)),
                 mouth: T(TexGen.solid(83,37,31)),
+                feather: T(TexGen.solid(206,42,34)),   // the Maya spotter's macaw (b1060)
+                featherGreen: T(TexGen.solid(52,201,72)),   // green plumes (b1066)
+                featherYellow: T(TexGen.solid(250,196,36)),  // the macaw's wing band, plumes (b1068)
+                featherBlue: T(TexGen.solid(38,84,204)),     // its flight feathers, plumes (b1068)
                 leather: T(TexGen.leather(177)),
                 iron: T(TexGen.iron(188)),
                 white: T(TexGen.solid(), { clamp: true }),
@@ -372,7 +382,7 @@
         _zoomFromPosition() {
             const p = this.camera.position, t = this.cameraTarget;
             const dist = Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z) || 100;
-            this._halfH = Math.max(MIN_HALF, Math.min(MAX_HALF, dist * HALF_PER_DIST));
+            this._halfH = Math.max(MIN_HALF, Math.min(maxHalf(), dist * HALF_PER_DIST));
         }
 
         // Every path that moves the look-at point — drag-pan, WASD, the action cam,
@@ -393,7 +403,7 @@
         // height (lookY), and follows its subject tightly: at that frame a unit walking
         // at the usual easing would leave the picture in under a second.
         applyPose(shot, deltaTime) {
-            const want = Math.max(shot.closeup ? CLOSE_MIN_HALF : MIN_HALF, Math.min(MAX_HALF, shot.halfH));
+            const want = Math.max(shot.closeup ? CLOSE_MIN_HALF : MIN_HALF, Math.min(maxHalf(), shot.halfH));
             const lookY = shot.lookY || 0;
             if (shot.cut) {
                 // The cut IS the feature. No travel, no ease, no sailing
@@ -434,7 +444,7 @@
             if (h > 1e-6) this._yaw = Math.atan2(dx, dz);
             this._pitch = Math.min(1.2, Math.atan2(eye[1] - ly, h));
             const dist = Math.hypot(h, eye[1] - ly);
-            this._halfH = Math.max(CLOSE_MIN_HALF, Math.min(MAX_HALF, dist * Math.tan(10 * Math.PI / 180)));
+            this._halfH = Math.max(CLOSE_MIN_HALF, Math.min(maxHalf(), dist * Math.tan(10 * Math.PI / 180)));
         }
 
         // Which way a unit is drawn facing (radians about Y; +Z turned by it). The
@@ -511,11 +521,11 @@
         // The half-height that fits the island's coastline, with a little sea around it, at
         // this pitch on this screen. Also the auto camera's overview (b1047).
         wholeMapHalf(pitch) {
-            const coast = TERRAIN_LAND + (TexGen.COAST_WOBBLE || 0) / 2;
+            const coast = TexGen.TERRAIN_LAND + (TexGen.COAST_WOBBLE || 0) / 2;
             const extent = coast * 2 * 1.10;   // outermost shore, plus sea to sit in
             const aspect = (this.W || 1) / (this.H || 1);
             const need = Math.max(extent * Math.sin(pitch), extent / aspect) / 2;
-            return Math.max(MIN_HALF, Math.min(MAX_HALF, need * 1.06));
+            return Math.max(MIN_HALF, Math.min(maxHalf(), need * 1.06));
         }
 
         moveCameraTo(x, z) {
@@ -553,7 +563,7 @@
             } else if (action === 'turnLeft' || action === 'turnRight') {
                 this._yaw += (action === 'turnLeft' ? -1 : 1) * Math.PI / 4;
             }
-            this._halfH = Math.max(MIN_HALF, Math.min(MAX_HALF, this._halfH));
+            this._halfH = Math.max(MIN_HALF, Math.min(maxHalf(), this._halfH));
             this._clampTarget();
         }
 
@@ -582,7 +592,7 @@
         // to sit at -2, which put five of its seven units up on dry beach.
         _coastRibbonMesh(seg = 480, width = 7, inset = 3) {
             const wob = TexGen.coastSampler(TERRAIN_SEED);
-            const target = TERRAIN_LAND + inset;
+            const target = TexGen.TERRAIN_LAND + inset;
             // The wobble depends on where we land, so the radius is implicit. Solve
             // by BISECTION: dist(r) = r + wobble(r) is strictly increasing, because
             // the wobble's slope stays under 1 across a noise cell. Fixed-point
@@ -594,8 +604,8 @@
                 let lo = target - TexGen.COAST_WOBBLE, hi = target + TexGen.COAST_WOBBLE;
                 for (let i = 0; i < 18; i++) {
                     const mid = (lo + hi) / 2;
-                    const d = mid + wob((mid * px) / TERRAIN_WORLD + 0.5,
-                                        (mid * pz) / TERRAIN_WORLD + 0.5);
+                    const d = mid + wob((mid * px) / TexGen.TERRAIN_WORLD + 0.5,
+                                        (mid * pz) / TexGen.TERRAIN_WORLD + 0.5);
                     if (d < target) lo = mid; else hi = mid;
                 }
                 return (lo + hi) / 2;
@@ -637,7 +647,7 @@
                 : (terrain.difficulty === 'hard' ? 'desert' : 'summer');
             this._buildTextures(theme);
             this._ground = {
-                buf: this._buf('gridPlane', [TERRAIN_WORLD, 1, 1]),
+                buf: this._buf('gridPlane', [TexGen.TERRAIN_WORLD, 1, 1]),
                 tex: this.tex.terrain, model: M().identity(), material: 1
             };
             // Open sea under everything, far past anything the camera can reach, so
@@ -891,8 +901,10 @@
             const bdef = (typeof getTeamBadge === 'function') ? getTeamBadge(unit.seat) : null;
             const badge = this._badgeTints(unit.seat, tint);
             const options={civ:unit.civilization,unit:unit.type,badge:bdef?bdef.shape:null,
-                variant:EngineUnits.appearanceVariant(unit.civilization,unit._appearanceId ?? unit.handle ?? unit.id ?? '')};
-            const modelKey=JSON.stringify([engineType,options.civ,options.unit,options.badge,options.variant]);
+                variant:EngineUnits.appearanceVariant(unit.civilization,unit._appearanceId ?? unit.handle ?? unit.id ?? ''),
+                // A rider's horse gets its own coat (b1072), from the same stable identity.
+                coat:engineType==='cavalry'&&EngineUnits.coatVariant?EngineUnits.coatVariant(unit._appearanceId ?? unit.handle ?? unit.id ?? ''):0};
+            const modelKey=JSON.stringify([engineType,options.civ,options.unit,options.badge,options.variant,options.coat]);
             if(!this._unitModels) this._unitModels=new Map();
             if(!this._unitModels.has(modelKey)) {
                 const batches=EngineUnits.batches(EngineUnits.parts(engineType,options));
@@ -926,6 +938,25 @@
             this._composeBuilding(building);
         }
 
+        // A building model's parts grouped by material (texture, owner colour, authored
+        // tint, blending) and merged into one mesh per group, once per model (b1078).
+        _buildingBatches(modelKey, parts) {
+            if (!this._buildingModels) this._buildingModels = new Map();
+            if (this._buildingModels.has(modelKey)) return this._buildingModels.get(modelKey);
+            const groups = new Map();
+            for (const p of parts) {
+                const key = JSON.stringify([p.tex, !!p.team, p.tint || null, !!p.blend]);
+                if (!groups.has(key)) groups.set(key, { texName: p.tex, team: !!p.team, tint: p.tint || null, blend: !!p.blend, parts: [] });
+                groups.get(key).parts.push(p);
+            }
+            const batches = [...groups.values()].map(g => ({
+                buf: GLCore.createMeshBuffers(this.gl, EngineMesh.mergeParts(g.parts)),
+                texName: g.texName, team: g.team, tint: g.tint, blend: g.blend, count: g.parts.length
+            }));
+            this._buildingModels.set(modelKey, batches);
+            return batches;
+        }
+
         _composeBuilding(building) {
             const m3 = M();
             const civ = (typeof getCivilization === 'function') ? getCivilization(building.civilization) : null;
@@ -938,7 +969,7 @@
                     m3.translation(building.x, 0, building.z),
                     m3.rotationY(building.rotationY || 0)),
                 m3.scaling(bs, bs, bs));
-            let parts, shellIdx = -1;
+            let parts, shellIdx = -1, modelKey = null;
             if (building.underConstruction) {
                 // The rising shell previews the FINAL height — it used to top out
                 // at waist height while the progress said 100%, which read as the
@@ -959,6 +990,7 @@
                 const known = EngineBuildings.TYPES.indexOf(building.type) >= 0;
                 const type = known ? building.type : (building.isWonder ? 'wonder' : 'house');
                 parts = EngineBuildings.parts(type, { age: building.age, civ: building.civilization });
+                modelKey = `${type}|${building.age}|${building.civilization}`;
             }
             const eb = { opaque: [], blended: [], shell: null, world, bs };
             const grassFoot = this._meshFootprint(parts, `${building.type}|${building.age}|${building.civilization}|${!!building.underConstruction}`);
@@ -968,7 +1000,17 @@
             // Where a fire can sit: inside the walls, below the roof line (Cinematic).
             building._fireBox = { ex: (grassFoot.ex*ca + grassFoot.ez*sa)*bs, ez: (grassFoot.ex*sa + grassFoot.ez*ca)*bs,
                 ey: (grassFoot.ey || 4)*bs };
-            parts.forEach((p, i) => {
+            if (modelKey) {
+                // A finished building is drawn in BATCHES (b1078): its parts merged into one
+                // mesh per material, as units are, cached per model. Each part used to be its
+                // own draw call, twice a frame with the shadow pass, and the Colosseum alone
+                // has 225 of them.
+                for (const g of this._buildingBatches(modelKey, parts)) {
+                    const entry = { buf: g.buf, tex: this.tex[g.texName], tint: g.team ? tint : (g.tint || this.WHITE),
+                        model: world, base: m3.identity() };
+                    (g.blend ? eb.blended : eb.opaque).push(entry);
+                }
+            } else parts.forEach((p, i) => {
                 const entry = {
                     buf: this._buf(p.kind, p.args), tex: this.tex[p.tex],
                     tint: p.team ? tint : (p.tint || this.WHITE), // authored cultural finishes; flags retain player colors
@@ -1499,7 +1541,7 @@
             // Manual zoom is a manual camera action — hand control back to the user.
             if (typeof game !== 'undefined' && game && game.spectatorMode && game.disableActionCam) game.disableActionCam();
             const factor = e.deltaY > 0 ? 1.12 : (1 / 1.12);
-            this._halfH = Math.max(MIN_HALF, Math.min(MAX_HALF, this._halfH * factor));
+            this._halfH = Math.max(MIN_HALF, Math.min(maxHalf(), this._halfH * factor));
         }
 
         // One finger pans in either mode, tap inspects/selects. A stationary
@@ -1563,7 +1605,7 @@
             if (this._pinch && e.touches.length >= 2) {
                 const p = this._pinch, now = this._touchPair(e);
                 if (p.dist > 0 && now.dist > 0) {
-                    this._halfH = Math.max(MIN_HALF, Math.min(MAX_HALF, this._halfH * (p.dist / now.dist)));
+                    this._halfH = Math.max(MIN_HALF, Math.min(maxHalf(), this._halfH * (p.dist / now.dist)));
                 }
                 // Turning and tilting each stay locked until the gesture clearly asks
                 // for them. Two fingers are never perfectly steady, so without the
@@ -1969,6 +2011,19 @@
                         this._unitDir.set(u, dir);
                     }
                 }
+                // A formation faces its front at rest (b1079). It is laid out along its line
+                // of march, but each man kept facing his last step -- often sideways into his
+                // slot -- once it stopped, so the block stood one way and its men looked
+                // another. The front is remembered while the unit marches in formation and
+                // forgotten when a plain move order takes it elsewhere.
+                if (u.formationAxis) ue.restDir = Math.atan2(u.formationAxis.x, u.formationAxis.z);
+                else if (u.isMoving) ue.restDir = null;
+                if (!facingTarget && !u.isMoving && ue.restDir != null) {
+                    let d = ue.restDir - dir;
+                    while (d > Math.PI) d -= Math.PI * 2;
+                    while (d < -Math.PI) d += Math.PI * 2;
+                    if (Math.abs(d) > 1e-3) { dir += d * Math.min(1, dt * 6); this._unitDir.set(u, dir); }
+                }
                 this._unitPrev.set(u, { x: u.x, z: u.z });
                 // Strides follow the ground actually covered (a jump -- a respawn, a seek
                 // in a replay -- is not a stride).
@@ -1988,6 +2043,14 @@
                 const pose = EngineUnits.pose(ue.type, anim, still ? 0 : tSec, ue.phase, {
                     strike: fighting ? (still ? 0.5 : ((u.attackTimer || 0) / 1000) % 1) : null,
                     stride: still ? 0 : ue.stride });
+                // The Maya spotter's parrot (b1065): up and circling while its spotter
+                // walks, back on the shoulder when it stands -- about a second each way.
+                if (ue.hasParrot === undefined) ue.hasParrot = ue.entries.some(e => e.bone === 'parrot');
+                if (ue.hasParrot) {
+                    const want = !still && u.isMoving ? 1 : 0, lift = ue.parrotLift ?? want;
+                    ue.parrotLift = want > lift ? Math.min(want, lift + dt * 0.9) : Math.max(want, lift - dt * 0.9);
+                    Object.assign(pose.mats, EngineUnits.parrotPose(ue.parrotLift, still ? 0 : tSec, ue.phase));
+                }
                 const spin = m3.rotationY(dir);
                 const world = m3.multiply(m3.translation(u.x, pose.bob, u.z), spin);
                 const flat = m3.multiply(m3.translation(u.x, 0, u.z), spin);

@@ -199,12 +199,23 @@ const UNIT_UPGRADE_PATHS = {
     // Infantry (barracks)
     militia: { neolithic: 'militia', bronze: 'warrior', iron: 'warrior' },
     warrior: { bronze: 'warrior', iron: 'champion' },
-    // Cavalry (stable)
-    scout_cavalry: { bronze: 'scout_cavalry', iron: 'cavalry' },
+    // Cavalry (stable). The scout stays a scout all match (asp67, b1055): it is the
+    // early-game scout, not a fighter, and it became cavalry at the Iron age -- for
+    // Egypt and Greece cavalry they cannot even train.
     cavalry: { iron: 'heavy_cavalry' },
     // Ranged (archery_range)
     archer: { bronze: 'archer', iron: 'crossbowman' }
 };
+
+// A unit that needs a research of its own before it can be trained (b1060: the Maya's
+// spotter, behind "scouting"). Every train path asks: the models' executor and their
+// unit list, the rule-based AI, the player's train menu and command. Null when the
+// unit has no such gate or the owner has researched it.
+function unitTechMissing(owner, unitId) {
+    const def = (typeof getUnitDefFor === 'function' && owner) ? getUnitDefFor(owner.civilization, unitId) : null;
+    const tech = def && def.requiresTech;
+    return tech && !(owner.researchedTechs && owner.researchedTechs[tech]) ? tech : null;
+}
 
 function getTrainOptionsForBuilding(buildingType, age, civilization) {
     const tiers = BUILDING_TRAIN_TIERS[buildingType];

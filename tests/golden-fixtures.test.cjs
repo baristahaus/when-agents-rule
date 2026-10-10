@@ -146,7 +146,7 @@ test('the one-minute stream is the alive-world corpus (sha-pinned, regenerable)'
   // manual ledger row in MERGE-STATE.MD (a 60 s recorder run, too heavy for every test);
   // what this test enforces is the pin and the alive-world shape.
   const f = G('stream-1m.jsonl');
-  assert.equal(sha256(f), '0044b2d7fda3d405e078cb5d6418f1164c53a35a56888bdf31998a39519ee6ab',
+  assert.equal(sha256(f), '1489bd036ec2ea63b22f5f139437b8e5493b8ee2c5b57b148e06c34aa9577db7',
     'the alive-world stream changed -- a golden move that needs a MERGE-STATE line, not a quiet hash update');
   const recs = fs.readFileSync(f, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
   assert.equal(recs.length, 604, '1 match + 1 map + 120 snaps + 480 turn records + results + timeline');

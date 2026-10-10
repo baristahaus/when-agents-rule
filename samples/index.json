@@ -384,6 +384,156 @@
    ],
    "bytes": 8420352,
    "default": false
+  },
+  {
+   "file": "2026-10-03_glm5.3-space-bunny-mimo-v2.6-deepseek-v4.1_80min.jsonl",
+   "matchId": "match-20261003-234407",
+   "date": 1791063847444,
+   "duration": "80:16",
+   "turns": 529,
+   "outcome": "wonder",
+   "seed": "rmusx64xgkt4u",
+   "difficulty": "medium",
+   "turnBased": false,
+   "promptVersion": "agents-rule-v105",
+   "build": 1049,
+   "winner": "DGX GLM5.3 Flash",
+   "players": [
+    {
+     "seat": 0,
+     "name": "DGX GLM5.3 Flash",
+     "model": "GLM5.3",
+     "civ": "Egyptians",
+     "power": 5804,
+     "winner": true
+    },
+    {
+     "seat": 3,
+     "name": "O deepseek-v4.1-flash",
+     "model": "deepseek/deepseek-v4.1-flash",
+     "civ": "Yamato",
+     "power": 1917,
+     "winner": false
+    },
+    {
+     "seat": 2,
+     "name": "O mimo-v2.6 flash",
+     "model": "xiaomi/mimo-v2.6-flash",
+     "civ": "Persians",
+     "power": 1565,
+     "winner": false
+    },
+    {
+     "seat": 1,
+     "name": "O space-bunny",
+     "model": "stealth/space-bunny-alpha",
+     "civ": "Greeks",
+     "power": 109,
+     "winner": false
+    }
+   ],
+   "bytes": 11826708,
+   "default": false
+  },
+  {
+   "file": "2026-10-04_glm5.3-space-bunny-mimo-v2.6-deepseek-v4.1_38min.jsonl",
+   "matchId": "match-20261004-120750",
+   "date": 1791108470470,
+   "duration": "37:46",
+   "turns": 555,
+   "outcome": "last_standing",
+   "seed": "rmutnqk4fnnyb",
+   "difficulty": "hard",
+   "turnBased": false,
+   "promptVersion": "agents-rule-v105",
+   "build": 1053,
+   "winner": "O deepseek-v4.1-flash",
+   "players": [
+    {
+     "seat": 3,
+     "name": "O deepseek-v4.1-flash",
+     "model": "deepseek/deepseek-v4.1-flash",
+     "civ": "Yamato",
+     "power": 4720,
+     "winner": true
+    },
+    {
+     "seat": 0,
+     "name": "DGX GLM5.3 Flash",
+     "model": "GLM5.3",
+     "civ": "Egyptians",
+     "power": 96,
+     "winner": false
+    },
+    {
+     "seat": 2,
+     "name": "O mimo-v2.6 flash",
+     "model": "xiaomi/mimo-v2.6-flash",
+     "civ": "Persians",
+     "power": 38,
+     "winner": false
+    },
+    {
+     "seat": 1,
+     "name": "O space-bunny",
+     "model": "stealth/space-bunny-alpha",
+     "civ": "Greeks",
+     "power": 7,
+     "winner": false
+    }
+   ],
+   "bytes": 10553595,
+   "default": false
+  },
+  {
+   "file": "2026-10-05_gpt6.1-sol-claude-sonnet5.5-deepseek-v4.1-glm5.3_99min.jsonl",
+   "matchId": "match-20261005-194200",
+   "date": 1791222121908,
+   "duration": "99:16",
+   "turns": 469,
+   "outcome": "wonder",
+   "seed": "rmuvjehoy37wk",
+   "difficulty": "easy",
+   "turnBased": true,
+   "promptVersion": "agents-rule-v105",
+   "build": 1054,
+   "winner": "DGX GLM5.3 Flash",
+   "players": [
+    {
+     "seat": 3,
+     "name": "DGX GLM5.3 Flash",
+     "model": "GLM5.3",
+     "civ": "Yamato",
+     "power": 4502,
+     "winner": true
+    },
+    {
+     "seat": 1,
+     "name": "O claude-sonnet-5.5",
+     "model": "anthropic/claude-sonnet-5.5",
+     "civ": "Greeks",
+     "power": 3516,
+     "winner": false
+    },
+    {
+     "seat": 2,
+     "name": "O deepseek-v4.1-flash",
+     "model": "deepseek/deepseek-v4.1-flash",
+     "civ": "Persians",
+     "power": 1978,
+     "winner": false
+    },
+    {
+     "seat": 0,
+     "name": "O gpt-6.1-sol",
+     "model": "openai/gpt-6.1-sol",
+     "civ": "Egyptians",
+     "power": 108,
+     "winner": false
+    }
+   ],
+   "bytes": 10785605,
+   "default": false
   }
  ]
 }

@@ -97,10 +97,11 @@
     EngineUnits.appearanceVariant = (civ,identity='') => {
         let hash=0;
         for(const char of String(identity)) hash=(hash*31+char.charCodeAt(0))>>>0;
-        return hash%(civ==='greek'?3:civ==='yamato'?2:1);
+        return hash%(civ==='greek'?3:civ==='yamato'||civ==='viking'?2:1);
     };
     const hairMaterial = o => o.civ==='greek' ? ['hairBlack','hairBrown','hairBlond'][(o.variant||0)%3]
-        : o.civ==='yamato' ? ['hairBrown','hairWhite'][(o.variant||0)%2] : 'hairBlack';
+        : o.civ==='yamato' ? ['hairBrown','hairWhite'][(o.variant||0)%2]
+        : o.civ==='viking' ? ['hairBlond','hairBrown'][(o.variant||0)%2] : 'hairBlack';
 
     // Large faces with a visible mouth under the moustache. These are stylized
     // cultural silhouettes, not ceremonial regalia or a historical uniform.
@@ -121,6 +122,9 @@
             for(const side of [-1,1]) oval(p,hair,x+side*.052*s,y-.050*s,z+.203*s,
                 .061*s,.022*s,.030*s,{rz:side*-.22});
             oval(p,hair,x,y-.194*s,z+.13*s,.082*s,.110*s,.074*s);
+        } else if(o.civ==='roman'||o.civ==='maya') {
+            // Clean-shaven (b1058, the Maya b1060): only the jaw's shadow, no beard.
+            oval(p,'skin',x,y-.15*s,z+.11*s,.15*s,.07*s,.09*s);
         } else if(o.civ==='egyptian') {
             // Short, rounded natural chin growth; no long square royal false beard.
             oval(p,hair,x,y-.183*s,z+.115*s,.080*s,.075*s,.078*s);
@@ -154,7 +158,7 @@
         y+=S(.075); // brow clears the eyes; the shell still overlaps the skull
         const dome=(tex,team=false)=>part(p,'dome',[1,16],tex,
             {x,y:y+S(.045),z,sx:S(.253),sy:S(.24),sz:S(.235),team});
-        if(military && civ!=='egyptian') {
+        if(military && civ!=='egyptian' && civ!=='maya') {   // the Maya fight under feathers, not iron (b1060)
             dome('iron');
             oval(p,'iron',x,y-S(.085),z-S(.17),S(.20),S(.16),S(.075));
             part(p,'cylinder',[S(.252),S(.255),S(.055),16],'iron',{x,y:y+S(.044),z});
@@ -181,6 +185,28 @@
             } else if(kind==='priest') part(p,'cylinder',[S(.065),S(.15),S(.29),10],'bark',{x,y:y+S(.18),z});
             // Brim at head centre + .11: just above the .085-high eyebrows.
             else part(p,'cylinder',[S(.025),S(.37),S(.18),16],'thatch',{x,y:y+S(.125),z});
+        } else if(civ==='maya') {
+            // Feathers (b1060, coloured b1068 by asp67): a worker wears one bright green
+            // plume, a single-plumed soldier one red, and the many-plumed -- soldiers of
+            // rank and the priest -- a fan of red, green, yellow and blue.
+            part(p,'cylinder',[S(.232),S(.236),S(.05),12],military?'gold':'cloth',{x,y:y+S(.05),z,team:!military});
+            const fan=military||kind==='priest';
+            const plumes=fan?[-.45,-.15,.15,.45]:[0];
+            const colours=fan?['feather','featherGreen','featherYellow','featherBlue']:[kind==='worker'?'featherGreen':'feather'];
+            plumes.forEach((a,i)=>part(p,'box',[S(.05),S(fan?.42:.28),S(.025)],colours[i],
+                {x:x+Math.sin(a)*S(.16),y:y+S(.26),z:z-S(.12),rz:-a}));
+        } else if(civ==='viking') {
+            // A plain iron cap with a nose guard -- no horns (b1059); a wool cap otherwise.
+            if(military) part(p,'box',[S(.05),S(.17),S(.04)],'iron',{x,y:y-S(.07),z:z+S(.24)});
+            else if(kind==='priest') dome('cloth',true);
+            else part(p,'dome',[1,12],'leather',{x,y:y+S(.06),z,sx:S(.24),sy:S(.17),sz:S(.23)});
+        } else if(civ==='roman') {
+            // The galea's transverse crest for soldiers; a laurel band otherwise (b1058).
+            if(military) {
+                part(p,'dome',[1,16],'cloth',{x,y:y+S(.24),z,sx:S(.33),sy:S(.18),sz:S(.05),team:true});
+                part(p,'box',[S(.36),S(.035),S(.06)],'gold',{x,y:y+S(.24),z});
+            } else if(kind==='priest') dome('cloth',true);
+            else part(p,'cylinder',[S(.232),S(.236),S(.04),12],'foliage',{x,y:y+S(.06),z});
         } else if(civ==='persian') {
             // Unarmored heads need a lower cap; the military cap rests on its helmet.
             const lift=military?.24:.16;
@@ -228,36 +254,47 @@
     // Symmetric horse anatomy around +Z. The neck, head, muzzle, ears and
     // bridle all share one pivot; paired legs begin straight beneath the body.
     const HORSE_HIP_Y=.88, HORSE_HALF_STANCE=.18, HORSE_LEG_BOTTOM=.05;
-    const horse = (p,tier) => {
+    // Horse coats (b1072), from the beards' palette: the tan the horses all wore, bay,
+    // black, grey and chestnut. Picked per unit like hair (EngineUnits.coatVariant):
+    // the same handle keeps its horse through redraws, age-ups and replays.
+    const HORSE_COATS = ['leather', 'hairBrown', 'hairBlack', 'hairWhite', 'hairBlond'];
+    EngineUnits.coatVariant = (identity='') => {
+        let hash=7;
+        for(const char of String(identity)) hash=(hash*131+char.charCodeAt(0))>>>0;
+        return hash%HORSE_COATS.length;
+    };
+    const horse = (p,tier,coatIndex=0) => {
+        const coat=HORSE_COATS[coatIndex]||'leather';
         shadow(p,1.05);
-        oval(p,'leather',0,.90,0,.32,.34,.62);
-        oval(p,'leather',0,.94,.44,.29,.32,.31);
-        oval(p,'leather',0,.92,-.44,.30,.32,.31);
+        oval(p,coat,0,.90,0,.32,.34,.62);
+        oval(p,coat,0,.94,.44,.29,.32,.31);
+        oval(p,coat,0,.92,-.44,.30,.32,.31);
         const leg=(x,z,bone)=>{
             // Bury the entire top rim in the chest/rump, including at full
             // stride. Keep the hoof end at its original height on the ground.
-            part(p,'cylinder',[.075,.060,HORSE_HIP_Y-HORSE_LEG_BOTTOM,9],'leather',
+            part(p,'cylinder',[.075,.060,HORSE_HIP_Y-HORSE_LEG_BOTTOM,9],coat,
                 {x,y:(HORSE_HIP_Y+HORSE_LEG_BOTTOM)/2,z,bone});
-            oval(p,'leather',x,.33,z,.078,.095,.082,{bone});
+            oval(p,coat,x,.33,z,.078,.095,.082,{bone});
             oval(p,'bark',x,.085,z+.018,.090,.075,.125,{bone});
         };
         leg(-HORSE_HALF_STANCE,.44,'legFL');leg(HORSE_HALF_STANCE,.44,'legFR');
         leg(-HORSE_HALF_STANCE,-.44,'legBL');leg(HORSE_HALF_STANCE,-.44,'legBR');
-        oval(p,'leather',0,1.19,.55,.18,.35,.23,{rx:.38,bone:'head'});
-        oval(p,'leather',0,1.48,.84,.17,.20,.29,{rx:.38,bone:'head'});
-        oval(p,'leather',0,1.36,1.07,.14,.115,.18,{rx:.12,bone:'head'});
+        oval(p,coat,0,1.19,.55,.18,.35,.23,{rx:.38,bone:'head'});
+        oval(p,coat,0,1.48,.84,.17,.20,.29,{rx:.38,bone:'head'});
+        oval(p,coat,0,1.36,1.07,.14,.115,.18,{rx:.12,bone:'head'});
         for(const side of [-1,1]) {
             oval(p,'hairBlack',side*.152,1.52,.91,.019,.023,.026,{bone:'head'});
             oval(p,'hairBlack',side*.087,1.38,1.214,.022,.015,.017,{bone:'head'});
-            part(p,'cylinder',[0,.052,.19,8],'leather',{x:side*.10,y:1.70,z:.70,rx:-.13,bone:'head'});
+            part(p,'cylinder',[0,.052,.19,8],coat,{x:side*.10,y:1.70,z:.70,rx:-.13,bone:'head'});
             // Bridle cheeks connect skull and muzzle; entirely on the head bone.
             part(p,'box',[.022,.032,.32],'bark',{x:side*.144,y:1.43,z:1.01,rx:.35,bone:'head'});
         }
         oval(p,'mouth',0,1.33,1.238,.082,.009,.008,{bone:'head'});
-        oval(p,'bark',0,1.30,.40,.050,.27,.11,{rx:.38,bone:'head'});
+        const mane=coat==='hairBlack'?'hairBlack':coat==='hairWhite'?'hairWhite':'bark';
+        oval(p,mane,0,1.30,.40,.050,.27,.11,{rx:.38,bone:'head'});
         // A short forelock, rooted between the ears, replaces the detached mane bar.
-        oval(p,'bark',0,1.66,.77,.062,.075,.105,{bone:'head'});
-        part(p,'cylinder',[.065,.030,.47,8],'bark',{y:.77,z:-.79,rx:-2.9});
+        oval(p,mane,0,1.66,.77,.062,.075,.105,{bone:'head'});
+        part(p,'cylinder',[.065,.030,.47,8],mane,{y:.77,z:-.79,rx:-2.9});
         part(p,'box',[.45,.07,.46],'cloth',{y:1.21,z:.02,team:true});
         if(tier>=2) part(p,'box',[.24,.075,.29],'leather',{y:1.25});
         if(tier>=3) {
@@ -275,7 +312,7 @@
             const p = [];
             humanoid(p, o);
             shoulders(p,'leather');   // caps the sleeve, whose top read as a flat disc
-            headgear(p, o.civ, 'civil', 0, 1.49, 0);
+            headgear(p, o.civ, o.civ === 'maya' ? 'worker' : 'civil', 0, 1.49, 0);   // the Maya's workers wear green (b1068)
             held(p,'axe','armR',[.37,.77,.045],q=>{
                 part(q,'cylinder',[.028,.028,.55,8],'wood',{y:.09});
                 part(q,'box',[.065,.18,.25],'iron',{y:.33,z:.08});
@@ -299,9 +336,24 @@
                 cape(p);
                 // Convex shield: rim, painted face and raised boss follow the left arm.
                 const shieldX=-.43, shieldY=.99;
+                if(o.civ==='roman') {
+                    // The scutum (b1070): a tall curved rectangle in the owner's colour,
+                    // gold-edged, a gold boss, and the gold wings above and below it.
+                    const L={bone:'armL'};
+                    part(p,'box',[.30,.92,.05],'gold',{x:shieldX,y:.93,z:.20,...L});                 // the edge
+                    part(p,'box',[.26,.86,.05],'cloth',{x:shieldX,y:.93,z:.225,team:true,...L});     // the face
+                    for(const side of [-1,1]) {   // the curve: side panels swept back
+                        part(p,'box',[.13,.92,.05],'gold',{x:shieldX+side*.19,y:.93,z:.17,ry:side*.5,...L});
+                        part(p,'box',[.11,.86,.05],'cloth',{x:shieldX+side*.185,y:.93,z:.19,ry:side*.5,team:true,...L});
+                    }
+                    oval(p,'gold',shieldX,.93,.27,.075,.075,.045,L);                                  // the boss
+                    for(const dy of [-1,1]) for(const side of [-1,1])   // the wings
+                        part(p,'box',[.025,.24,.02],'gold',{x:shieldX+side*.05,y:.93+dy*.22,z:.255,rz:side*dy*.55,...L});
+                } else {
                 oval(p,'iron',shieldX,shieldY,.19,.29,.37,.085,{bone:'armL'});
                 oval(p,'cloth',shieldX,shieldY,.23,.247,.319,.072,{bone:'armL',team:true});
                 oval(p,'iron',shieldX,shieldY,.29,.075,.075,.045,{bone:'armL'});
+                }
                 held(p,'sword','armR',[.37,.77,.045],q=>{
                     part(q,'cylinder',[.036,.036,.20,8],'leather',{});
                     part(q,'box',[.26,.055,.075],'iron',{y:.12});
@@ -358,7 +410,7 @@
                 // a standing, helmeted spearman. Rider and cart are rigid; the
                 // horse keeps its leg/head bones so the trot reads normally.
                 const p = [];
-                horse(p, 1);
+                horse(p, 1, o.coat || 0);
                 part(p, 'disc', [0.7, 12], 'shadow', { y: 0.05, z: -1.15, blend: true });
                 part(p, 'cylinder', [0.035, 0.035, 0.86, 5], 'bark', { y: 0.34, z: -1.15, rz: Math.PI / 2 }); // axle
                 part(p, 'cylinder', [0.34, 0.34, 0.08, 10], 'wood', { x: -0.42, y: 0.34, z: -1.15, rz: Math.PI / 2 });
@@ -388,7 +440,7 @@
             }
             const tier = o.tier || 2;
             const p = [];
-            horse(p, tier);
+            horse(p, tier, o.coat || 0);
             // A seated pelvis meets the saddle. Thighs wrap outward and forward
             // to the knees; calves hang outside the horse, with boots facing +Z.
             part(p, 'cylinder', [0.19, 0.22, 0.46, 12], 'cloth', { y: 1.47, team: true });
@@ -435,7 +487,9 @@
         militia: 1, warrior: 2, champion: 3,
         archer: 1, crossbowman: 2, elite_archer: 3,
         scout_cavalry: 1, cavalry: 2, heavy_cavalry: 3,
-        slinger: 1, hoplite: 2, phalanx: 3, samurai: 3, archer_ship: 1
+        slinger: 1, hoplite: 2, phalanx: 3, samurai: 3, archer_ship: 1,
+        legionary: 3, equites: 2, berserker: 3, axe_thrower: 1,
+        scout: 1, spotter: 1, jaguar_warrior: 3, plumed_archer: 2   // spotter: its id until b1077, in older transcripts
     };
 
     // Limb pivots per type (unit-local space, before facing/world transforms).
@@ -456,11 +510,63 @@
     // opts.civ ('greek' | 'egyptian' | 'yamato' | 'persian') picks the cultural
     // headgear/accents; opts.unit (specific id like 'champion') picks the tier
     // dressing. Omit both for the generic look (engine-test).
+    // The Maya's spotter carries a parrot on its left shoulder (asp67's idea, b1060):
+    // the far sight, explained. A scarlet macaw with a gold wing and a long tail in
+    // the owner's colour, perched on the shoulder (1.23) beside the head (1.49).
+    // Its own bones (b1065): 'parrot' moves the bird, 'parrotWing' flaps the wing on
+    // top of that -- it takes off and circles high over the spotter while it walks,
+    // and settles back on the shoulder when it stops (EngineUnits.parrotPose).
+    EngineUnits.PARROT_SEAT = [-.40, 1.42, -.03];
+    // A wing on each side (b1066), hinged at the shoulder of the bird. Folded, each lies
+    // flat along the body and tapers down and back; in flight it swings out about the
+    // bird's long axis and beats.
+    const PARROT_WING_ROOT_L = [-.49, 1.50, -.03], PARROT_WING_ROOT_R = [-.31, 1.50, -.03];
+    const parrot = p => {
+        const bone = 'parrot';
+        oval(p,'feather',-.40,1.42,-.03,.09,.13,.09,{bone});                // body
+        oval(p,'feather',-.40,1.58,.03,.075,.075,.075,{bone});              // head
+        part(p,'cylinder',[0,.03,.08,6],'white',{x:-.40,y:1.57,z:.12,rx:Math.PI/2,bone});   // beak
+        for (const [side, b] of [[-1, 'parrotWing'], [1, 'parrotWingR']]) {   // the wings, bright green
+            const x = -.40 + side * .095;
+            // A scarlet macaw's wing in three flat triangles (b1068, after asp67's photo):
+            // red coverts at the shoulder, a yellow band, long blue flight feathers. Each
+            // layer a little further in, so the longer one shows past the shorter. A
+            // prism [thickness, base, length] turned point-down is a flat triangular plate.
+            part(p,'prism',[.012,.13,.11],'feather',{x:x+side*.012,y:1.50,z:-.04,rx:Math.PI-.3,bone:b});
+            part(p,'prism',[.012,.12,.17],'featherYellow',{x,y:1.49,z:-.06,rx:Math.PI-.35,bone:b});
+            part(p,'prism',[.012,.09,.29],'featherBlue',{x:x-side*.012,y:1.48,z:-.09,rx:Math.PI-.45,bone:b});
+        }
+        // The tail: a long red point over broader blue outer feathers.
+        part(p,'prism',[.02,.06,.34],'feather',{x:-.40,y:1.34,z:-.08,rx:Math.PI-.3,bone});
+        part(p,'prism',[.015,.11,.24],'featherBlue',{x:-.40,y:1.34,z:-.09,rx:Math.PI-.3,bone});
+    };
+    // Where the parrot is: `lift` 0 on the shoulder, 1 in full flight, eased between by
+    // the renderer. In flight it keeps pace beside the spotter, 1.1 out on its left and
+    // about 4.6 up, facing the way it walks, the wings beating, drawn 1.275x so it reads
+    // at a playing zoom (b1067: b1065 circled the spotter, which was too much).
+    // Unit-local, so it turns with its spotter.
+    EngineUnits.PARROT_FLIGHT = [-1.1, 4.6, 0.2];
+    EngineUnits.parrotPose = (lift, t, phase = 0) => {
+        const m3 = M(), k = lift * lift * (3 - 2 * lift), [sx, sy, sz] = EngineUnits.PARROT_SEAT;
+        const [fx, fy, fz] = EngineUnits.PARROT_FLIGHT;
+        const tx = fx, ty = fy + Math.sin(t * 2.3 + phase) * 0.15, tz = fz;
+        const grow = 1 + 0.275 * k;   // 1.275x in flight (b1066: was 1.7x)
+        const body = m3.multiply(m3.translation(sx + (tx - sx) * k, sy + (ty - sy) * k, sz + (tz - sz) * k),
+            m3.multiply(m3.rotationX(0.15 * k), m3.multiply(m3.scaling(grow, grow, grow), m3.translation(-sx, -sy, -sz))));
+        // Spread out to the side (about 70 degrees from folded), beating around it.
+        const open = (1.25 + Math.sin(t * 16 + phase) * 0.6) * k;
+        return {
+            parrot: body,
+            parrotWing: m3.multiply(body, m3.rotateAround(m3.rotationZ(-open), ...PARROT_WING_ROOT_L)),
+            parrotWingR: m3.multiply(body, m3.rotateAround(m3.rotationZ(open), ...PARROT_WING_ROOT_R))
+        };
+    };
     EngineUnits.parts = (type, opts) => {
         const o = { ...opts };
         if (o.tier == null) o.tier = TIER[o.unit] || (type === 'ranged' ? 1 : 2);
         const b = builders[type];
         const parts=b ? b(o) : [];
+        if (o.unit === 'scout' || o.unit === 'spotter') parrot(parts);   // 'spotter' until b1077
         if(o.badge)for(const p of parts)if(p.capePaint)p.badgePaint=p.capePaint;
         return parts;
     };

@@ -53,7 +53,7 @@ class Game {
         // for the models as a 7×7 tile grid of 6×6 cells per tile (see
         // markExploration / explorationSummary).
         this.EXPLORE_GRID = 42;
-        this.EXPLORE_TILES = 7;
+        this.EXPLORE_TILES = 7;   // both set per match by applyMapSize (b1057)
         this.gameSpeed = 1;
         this.lastFrameTime = 0;
         this.clock = Game.newClock();
@@ -367,18 +367,10 @@ class Game {
         this.player.buildingHealthMultiplier = 1;
 
         // Calculate spawn positions (one per arena participant, 2–4)
-        const mapSize = 800;
-        const halfSize = mapSize / 2 - 40;
+        const mapSize = this.applyMapSize((spec && spec.mapSize) || (this.ui.setupMapSize && this.ui.setupMapSize()));
         const numPlayers = setup.length;
+        // Filled once the map seed is known (b1076): the layout is drawn from it.
         const spawnPositions = [];
-        for (let i = 0; i < numPlayers; i++) {
-            const angle = (i / numPlayers) * Math.PI * 2 - Math.PI / 2;
-            const radius = halfSize * 0.85;
-            spawnPositions.push({
-                x: WarMath.cos(angle) * radius,
-                z: WarMath.sin(angle) * radius
-            });
-        }
 
         // Regenerate the map FIRST (with the chosen difficulty) so resource counts
         // reflect it and the per-TC clearResourcesNear below acts on fresh nodes.
@@ -391,6 +383,11 @@ class Game {
         // match is reproducible and every transcript carries the seed that made it.
         this.terrain.seed = (spec && spec.seed) || (this.ui.setupSeed && this.ui.setupSeed()) || Game.mintSeed();
         this.mapSeed = this.terrain.seed;
+        // WAR Platform's jittered layout and every seat's identical home (b1076, see
+        // TerrainManager.arenaSpawns / homeDiscs). Stone and gold follow each seat's
+        // offset (scatterShifted), so they stay identical too.
+        spawnPositions.push(...TerrainManager.arenaSpawns(this.terrain.seed, numPlayers, mapSize));
+        this.terrain.jitteredSpawns = true;
         // What this match IS, kept so Rematch can play it again -- same seats, same map,
         // same tempo. The harness reads the round mode from here rather than from the
         // setup screen, which a Quick match does not use.
@@ -398,6 +395,7 @@ class Game {
             setup: JSON.parse(JSON.stringify(setup)),
             seed: this.terrain.seed,
             difficulty: this.difficulty,
+            mapSize,
             turnBased: spec ? !!spec.turnBased : !!(this.ui.turnBasedEnabled && this.ui.turnBasedEnabled()),
             // World milliseconds per round, or null: lockstep is an option of turn-based.
             lockstepSliceMs: Game.lockstepSliceMs(spec ? spec.lockstepSliceMs : (this.ui.lockstepSliceMs && this.ui.lockstepSliceMs())),
@@ -573,7 +571,7 @@ class Game {
 
         // Calculate spawn positions for all players
         // In spectator mode: 4 AI players only. In standard mode: 1 human + numAI
-        const mapSize = 800;
+        const mapSize = this.applyMapSize(visualShowcase ? 800 : (this.ui.setupMapSize && this.ui.setupMapSize()));
         const halfSize = mapSize / 2 - 40; // Offset from edge
         const totalPlayers = this.spectatorMode ? numAI : (1 + numAI);
         const spawnPositions = [];
@@ -598,6 +596,7 @@ class Game {
         // generator needs the spawns before it runs (they are already computed above).
         if (visualShowcase) spawnPositions[0] = { x: 0, z: -348 };
         this.terrain.spawns = spawnPositions;
+        this.terrain.jitteredSpawns = false;   // the campaign keeps its even circle (b1076: the arena's is jittered)
         this._battles = []; // fresh match, no carried-over engagements
         this.resetTimeline();  // ...and a fresh graph
         this.terrain.generateTerrain();
@@ -915,6 +914,30 @@ class Game {
     // hash, and every unit and building as four one-byte hashes -- where it stands, its
     // health, its orders and targets, its timers and cargo -- so a replay can name the
     // entity and the kind of field. FNV-1a: a diagnostic, not a seal (stateHash is that).
+    // The two map sizes (b1057). 800 is the map every match was played on until now:
+    // 7x7 tiles of ~114 units, each 6x6 exploration cells. 1200 keeps the tile and the
+    // cell the same size and has more of them, 11x11 -- so the island grows, and what a
+    // tile, a cell, a food bush per tile mean stays what it was.
+    static get MAP_SIZES() { return { 800: { tiles: 7, grid: 42 }, 1200: { tiles: 11, grid: 66 } }; }
+    static mapSizeOf(v) { const n = Number(v); return Game.MAP_SIZES[n] ? n : 800; }
+    // What a new arena or campaign is played on when the setup has no choice saved
+    // (b1080, asp67: "it works very well"). mapSizeOf keeps 800 for anything unnamed --
+    // a replay names its size, and older transcripts were all 800.
+    static get DEFAULT_MAP_SIZE() { return 1200; }
+    // Size the world for a match, before its map is generated or its fog is made:
+    // the island (TexGen), the terrain's size and tile grid, and the exploration grid.
+    applyMapSize(value) {
+        const size = Game.mapSizeOf(value), p = Game.MAP_SIZES[size];
+        if (typeof TexGen !== 'undefined' && TexGen.setMapSize) TexGen.setMapSize(size);
+        this.terrain.size = size;
+        this.terrain.numTiles = size / this.terrain.gridSize;
+        this.terrain.tiles = p.tiles;
+        this.EXPLORE_GRID = p.grid;
+        this.EXPLORE_TILES = p.tiles;
+        this.mapSize = size;
+        return size;
+    }
+
     stateDigest() {
         const fnv = s => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
         const hex = (n, w) => n.toString(16).padStart(8, '0').slice(-w);
@@ -1316,10 +1339,12 @@ class Game {
         const a = attacker.unitType;
         const targetIsBuilding = (target.type && BUILDING_DEFS[target.type]) || target.isWonder;
         if (targetIsBuilding) {
-            if (a === 'infantry') return 1.5;
-            if (a === 'cavalry') return 1.0;
+            // A civilization's raid bonus (the Vikings', b1059) on top, soldiers only.
+            const raid = (a === 'infantry' || a === 'cavalry' || a === 'ranged') ? 1 + this.raidBonusOf(attacker) : 1;
+            if (a === 'infantry') return 1.5 * raid;
+            if (a === 'cavalry') return 1.0 * raid;
             // Fire Arrows (academy, iron age): +30% of this against buildings.
-            if (a === 'ranged') return 0.5 * (1 + this.rangedBuildingBonusOf(attacker));
+            if (a === 'ranged') return 0.5 * (1 + this.rangedBuildingBonusOf(attacker)) * raid;
             return 0.5; // workers/support
         }
         const t = target.unitType;
@@ -3102,6 +3127,14 @@ class Game {
             return;
         }
 
+        // A unit behind a research of its own (b1060).
+        const gate = typeof unitTechMissing === 'function' ? unitTechMissing(this.player, unitType) : null;
+        if (gate) {
+            const tech = getCivilization(this.player.civilization).techTree[gate];
+            this.ui.showErrorMessage(t('msg.unitNeedsTech', { tech: tech ? tg(tech.name) : gate }));
+            return;
+        }
+
         // Buildings (finished) that can train this unit.
         const trainers = this.player.buildings.filter(b => {
             if (b.underConstruction) return false;
@@ -4831,6 +4864,12 @@ class Game {
             : (this.aiManager && this.aiManager.aiPlayers.find(a => a.id === unit.owner));
         return (owner && owner.rangedBuildingBonus) || 0;
     }
+    // A civilization bonus against buildings for every soldier (b1059, the Vikings' Raid).
+    raidBonusOf(unit) {
+        const owner = !unit ? null : unit.owner === 'player' ? this.player
+            : (this.aiManager && this.aiManager.aiPlayers.find(a => a.id === unit.owner));
+        return (owner && owner.raidBonus) || 0;
+    }
 
     getOwner(entity) {
         if (entity.owner === 'player') return this.player;
@@ -5089,11 +5128,14 @@ class Game {
                 if (unit.harvestTimer >= harvestTime) {
                     // Collect resource - store it on the worker, don't add to resources yet
                     const resourceType = unit.harvestTarget.type;
-                    const amount = 10 * (owner.workerHarvestBonus || 1);
+                    const base = 10 * (owner.workerHarvestBonus || 1);
+                    // A farm bonus (the Maya's maize, b1060) is food the farm did not have
+                    // to give: the farm depletes by the base, the worker carries more.
+                    const amount = unit.harvestTarget.isFarm ? base * (1 + (owner.farmBonus || 0)) : base;
                     
                     // If harvesting from a farm, reduce farm's food amount
                     if (unit.harvestTarget.isFarm && unit.harvestTarget.farmRef) {
-                        unit.harvestTarget.farmRef.foodAmount = Math.max(0, unit.harvestTarget.farmRef.foodAmount - amount);
+                        unit.harvestTarget.farmRef.foodAmount = Math.max(0, unit.harvestTarget.farmRef.foodAmount - base);
                     } else if (unit.harvestTarget.amount !== undefined) {
                         // Finite nodes: deplete by what was taken. When empty, drop the
                         // node (mesh removed; node kept in place so fog indices hold).
@@ -5381,8 +5423,9 @@ class Game {
                     const harvestTime = 2000;
 
                     if (unit.harvestTimer >= harvestTime) {
-                        const amount = 10 * (owner.workerHarvestBonus || 1);
-                        farm.foodAmount = Math.max(0, farm.foodAmount - amount);
+                        const base = 10 * (owner.workerHarvestBonus || 1);
+                        const amount = base * (1 + (owner.farmBonus || 0));   // maize (b1060), as above
+                        farm.foodAmount = Math.max(0, farm.foodAmount - base);
                         
                         unit.carryingResource = true;
                         unit.carryingResourceType = 'food';
@@ -6225,12 +6268,13 @@ class Game {
             if (ai._eliminated && !ai._cleared) this.clearEliminatedSeat(ai);
         });
 
-        const wonderTypes = ['pyramid', 'akropolis', 'firetemple', 'shrine'];
         const required = this.wonderHoldMs();
         let wonderHolder = null;
         players.forEach(ai => {
             if (ai._eliminated) { ai._wonderHold = 0; return; }
-            const hasWonder = ai.buildings.some(b => (b.isWonder || wonderTypes.includes(b.type)) && !b.underConstruction);
+            // isWonder, set on every Wonder by createBuilding: the list of the four Wonder
+            // types beside it was redundant, and blind to any new civilization's (b1056).
+            const hasWonder = ai.buildings.some(b => b.isWonder && !b.underConstruction);
             if (hasWonder) {
                 ai._wonderHold = (ai._wonderHold || 0) + deltaTime;
                 if (ai._wonderHold >= required) wonderHolder = ai;

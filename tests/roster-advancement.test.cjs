@@ -76,8 +76,12 @@ test('the shared roster closes on itself', () => {
     const shared = JSON.parse(vm.runInContext(`JSON.stringify(
         [...new Set(Object.values(BUILDING_TRAIN_TIERS).flatMap(byAge =>
             Object.values(byAge).flat()))])`, scope));
+    // Units that stay what they are by design, each with its reason. The scout cavalry is
+    // every civilization's first scout and stays a scout all match (asp67, b1055): its Iron-age
+    // upgrade into cavalry was removed as an oversight, not forgotten.
+    const BY_DESIGN = { scout_cavalry: 'the scout stays a scout (b1055)' };
     const stuck = shared
-        .filter(id => producible.out[id] && producible.out[id].age < AGES.length - 1 && !PATHS[id])
+        .filter(id => producible.out[id] && producible.out[id].age < AGES.length - 1 && !PATHS[id] && !BY_DESIGN[id])
         .map(id => `${id} (trainable from ${AGES[producible.out[id].age]})`);
     assert.deepEqual(stuck, [], 'a veteran of these can never advance again: ' + stuck.join(', '));
 });
@@ -104,11 +108,16 @@ test('veteran advancement differs by civilization — recorded, not endorsed', (
         Object.fromEntries(Object.entries(CIVILIZATIONS).map(([civ, c]) => [civ,
             (c.uniqueUnits || []).map(u => u.id + (UNIT_UPGRADE_PATHS[u.id] ? ' ADVANCES' : ''))]))
     )`, scope));
+    // Romans, Vikings and Maya (b1058-b1060) own distinct unit types too, so their units stay
+    // as recruited like the Egyptian, Greek and Yamato ones.
     assert.deepEqual(table, {
         egyptian: ['priest', 'slinger', 'horse_carriage'],
         greek: ['hoplite', 'phalanx'],
         persian: ['archer ADVANCES', 'cavalry ADVANCES', 'heavy_cavalry'],
         yamato: ['samurai', 'archer_ship'],
+        roman: ['legionary', 'equites'],
+        viking: ['berserker', 'axe_thrower'],
+        maya: ['scout', 'jaguar_warrior', 'plumed_archer'],
     });
 });
 
