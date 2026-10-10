@@ -15,8 +15,8 @@
       "note": "legacy capture: near the opening state (unit positions match t=0) but NOT reproducible from today's reference at any whole step — clock, population, map/nodes/nearestNodes differ; kept for provenance, not the port oracle"
     },
     "golden/map-line-b1040.json": {
-      "sha256": "172cb885a87247d94b5758bfbdb9f3b7014aaf5f621c290f1c55e0c93f345ca0",
-      "bytes": 58156,
+      "sha256": "eeec4de9f14e18dc4ab1d826a475f53a338619b3bbe6a60cab155fd950dc02a9",
+      "bytes": 48718,
       "note": "the true 800-world map, post Town Center clearance, re-recorded 5 Oct 2026 (the recorder size bug fixed: it had generated a 200-unit island); 941 nodes, golden/medium/4"
     },
     "samples/golden/initial/golden-initial.jsonl": {
@@ -29,18 +29,18 @@
       "note": "turn1-b1040.jsonl with seat ids re-keyed to seat<N>; the form a port compares against, because v1 mints seat ids from Math.random by design"
     },
     "golden/map-alpha-easy-2.json": {
-      "sha256": "423b1943eff5b19ae2e690a7ed95fe1604423f03139f4c0444e5d128c130cc86",
-      "bytes": 75961,
+      "sha256": "2def25d49d471126f13cf1ea41f1a68635a6297da7adb7b29ed053bc70f24e11",
+      "bytes": 63621,
       "note": "easy, 2 seats, re-recorded 5 Oct 2026 at the true 800-world size; tests the multiplier table and rotational rounding at two seats"
     },
     "golden/map-alpha-hard-3.json": {
-      "sha256": "26659b3cc8b5bd817797950cebbdac583b76ecdd7756796750144dec6676aed2",
-      "bytes": 17685,
+      "sha256": "db41ce78b52136777c54f2c58a59399b7d14b3856c52e709ec88ce34f7ffe170",
+      "bytes": 14831,
       "note": "hard, 3 seats, re-recorded 5 Oct 2026 at the true 800-world size; stone is 21 here: round(20/3)=7 per seat, where ceil would say 42"
     },
     "golden/map-beta-medium-4.json": {
-      "sha256": "af27ffa8ab0eb7e562fdbddd62a5f89a41958f4d5f6e44c5461d4511f89415be",
-      "bytes": 57994,
+      "sha256": "52218af8ab258ac44a0b46f2420307327c3deffdff0b7127db744301a003c0aa",
+      "bytes": 48586,
       "note": "medium, 4 seats, different seed, re-recorded 5 Oct 2026 at the true 800-world size; the clearance removes four nodes in this layout"
     },
     "golden/states-b1040-t0-t1.canonical.jsonl": {

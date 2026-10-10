@@ -77,6 +77,10 @@ m_abs :: proc(v: f64) -> f64 {
 	return v + 0
 }
 
+m_max :: proc(a, b: f64) -> f64 {
+	return a > b ? a : b
+}
+
 // V8's Math.hypot, two-term: normalised by the largest term. With two terms the
 // Kahan compensation is exactly zero, so this straight line gives V8's bits.
 m_inf : f64 = transmute(f64)u64(0x7ff0000000000000) // +inf, the fdlibm INF (this core:math ships no inf constant)
@@ -732,7 +736,7 @@ std_unit_defs : [11]unit_def = {
 	{id = "archer", cost = {60, 30, 0, 0}, health = 40, speed = 1, u_type = "ranged", tier = "neolithic"},
 	{id = "crossbowman", cost = {100, 40, 20, 30}, health = 60, speed = 0.9, u_type = "ranged", tier = "iron"},
 	{id = "elite_archer", cost = {150, 60, 30, 50}, health = 80, speed = 1.1, u_type = "ranged", tier = "iron"},
-	{id = "scout_cavalry", cost = {100, 0, 0, 30}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic"},
+	{id = "scout_cavalry", cost = {150, 80, 0, 0}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic"},
 	{id = "cavalry", cost = {120, 0, 0, 50}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze"},
 	{id = "heavy_cavalry", cost = {180, 0, 50, 80}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron"},
 	{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1, u_type = "support", tier = "bronze"},
@@ -960,7 +964,10 @@ terrain_draw :: proc(st: ^u32) -> f64 {
 
 // scatterEqual(type, total, amount): the 7x7 grid, equal per tile. The nodes
 // array and the stream are threaded by pointer (see terrain_draw above).
-terrain_scatter_equal :: proc(t: ^terrain, usable: f64, tile: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
+// b1076: what the scatter drops into a home disc is left out (its draws still
+// taken, so the rest of the map lands where it always did), and the disc's own
+// share is laid out apart afterwards (placeHome).
+terrain_scatter_equal :: proc(t: ^terrain, usable: f64, tile: f64, st: ^u32, ntype: i32, total: f64, amount: f64, homes: []home, seed: string, taken: ^[256][2]f64, n_taken: ^int) {
 	per := f64(math.max(1, math.floor((total / 49) + 0.5)))
 	for tx := 0; tx < 7; tx += 1 {
 		for tz := 0; tz < 7; tz += 1 {
@@ -970,22 +977,145 @@ terrain_scatter_equal :: proc(t: ^terrain, usable: f64, tile: f64, st: ^u32, nty
 			for i := 0; i < cast(int)(per); i += 1 {
 				x := x0 + inset + terrain_draw(st)*(tile - inset*2)
 				z := z0 + inset + terrain_draw(st)*(tile - inset*2)
+				at_home := false
+				for h := 0; h < len(homes); h += 1 {
+					if m_hypot(x - homes[h].x, z - homes[h].z) < homes[h].r {
+						at_home = true
+						break
+					}
+				}
+				if at_home {
+					continue
+				}
 				t.nodes[t.n_nodes] = rnode{ntype, x, z, amount}
 				t.n_nodes += 1
 			}
 		}
 	}
+	place_home(t, ntype, cast(int)(per), amount, homes, seed, taken, n_taken)
+}
+
+// homeDiscs (b1076): a disc around each Town Center with the area of one map
+// tile (radius tile/sqrt(pi), ~58), which takes in the Town Center's whole
+// sight (40). Only for the arena's jittered layout.
+home :: struct {
+	x, z, r, a: f64,
+}
+
+home_discs :: proc(spawns: [4][2]f64, n: int, size: f64) -> ([4]home, int) {
+	homes: [4]home
+	usable := size - 80
+	tile := usable / 7
+	r := tile / math.sqrt(math.PI)
+	for i := 0; i < n; i += 1 {
+		homes[i] = home{spawns[i][0], spawns[i][1], r, m_atan2(spawns[i][1], spawns[i][0])}
+	}
+	return homes, n
+}
+
+// placeHome (b1076): one tile's count, at one shared set of offsets turned with
+// each seat's bearing to the map centre, from the type's own stream. The scatter
+// there is taken out, so the map keeps its totals (to a few nodes).
+place_home :: proc(t: ^terrain, ntype: i32, per: int, amount: f64, homes: []home, seed: string, taken: ^[256][2]f64, n_taken: ^int) {
+	if len(homes) == 0 {
+		return
+	}
+	// WarRng.hashSeed(seed + '|home|' + type): the seat's map seed first.
+	buf: [64]u8
+	copy(buf[0:len(seed)], seed)
+	copy(buf[len(seed):len(seed)+6], "|home|")
+	tn := len(seed) + 6
+	tn += home_type_name(ntype, buf[tn:])
+	st := hash_seed(string(buf[:tn]))
+	if st == 0 {
+		st = 11
+	}
+	rnd :: proc(st: ^u32) -> f64 {
+		return f64(mulberry_next(st)) / 4294967296.0
+	}
+	CLEAR := f64(16) // past the Town Center's own clearance (12.5)
+	R := homes[0].r - 3
+	for k := 0; k < per; k += 1 {
+		for tries := 0; tries < 400; tries += 1 {
+			// Uniform by area over the ring CLEAR..R.
+			rr := math.sqrt(CLEAR*CLEAR + rnd(&st) * (R*R - CLEAR*CLEAR))
+			th := rnd(&st) * 2 * math.PI
+			ox := m_cos(th) * rr
+			oz := m_sin(th) * rr
+			near := false
+			for o := 0; o < n_taken^; o += 1 {
+				if m_hypot(taken[o][0] - ox, taken[o][1] - oz) < 3.2 {
+					near = true
+					break
+				}
+			}
+			if near {
+				continue
+			}
+			off := true
+			for h := 0; h < len(homes); h += 1 {
+				px := homes[h].x + ox * m_cos(homes[h].a) - oz * m_sin(homes[h].a)
+				pz := homes[h].z + ox * m_sin(homes[h].a) + oz * m_cos(homes[h].a)
+				if !on_land(px, pz, t.size) || m_max(m_abs(px), m_abs(pz)) > t.size/2 - 12 {
+					off = false
+					break
+				}
+				for s := 0; s < len(homes); s += 1 {
+					if m_hypot(px - homes[s].x, pz - homes[s].z) < CLEAR {
+						off = false
+						break
+					}
+				}
+				if !off {
+					break
+				}
+			}
+			if !off {
+				continue
+			}
+			taken[n_taken^][0] = ox
+			taken[n_taken^][1] = oz
+			n_taken^ += 1
+			for h := 0; h < len(homes); h += 1 {
+				px := homes[h].x + ox * m_cos(homes[h].a) - oz * m_sin(homes[h].a)
+				pz := homes[h].z + ox * m_sin(homes[h].a) + oz * m_cos(homes[h].a)
+				t.nodes[t.n_nodes] = rnode{ntype, px, pz, amount}
+				t.n_nodes += 1
+			}
+			break
+		}
+	}
+}
+
+// the resource-type name the home stream key carries ('food' / 'wood')
+home_type_name :: proc(ntype: i32, buf: []u8) -> int {
+	if ntype == 0 {
+		copy(buf[0:4], "food")
+		return 4
+	}
+	copy(buf[0:4], "wood")
+	return 4
+}
+
+// isWalkable: inside the shoreline along the point's own chebyshev ray.
+on_land :: proc(x, z, size: f64) -> bool {
+	_ = size
+	return m_max(m_abs(x), m_abs(z)) <= land_limit(x, z)
 }
 
 // scatterRotational(type, total, amount): k nodes in one sector, rotated onto
-// every other. The arena's spawns are the ideal circle, so the plain
-// rotation runs (the shifted variant needs a jittered caller, which the
-// arena is not).
-terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0: f64, sector: f64, st: ^u32, ntype: i32, total: f64, amount: f64) {
+// every other. b1076: with jittered spawns the rotation no longer applies — the
+// shifted variant lays the node out in the ideal layout, rotates it about the
+// spawns' own centre, then shifts each seat's copy by its spawn offset.
+terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0: f64, sector: f64, st: ^u32, ntype: i32, total: f64, amount: f64, jittered: bool) {
 	per := f64(math.max(1, math.floor((total / 4) + 0.5)))
 	R := size/2 - 40    // same usable radius the grid's box spans
 	rMin := f64(60)      // nothing on the map's navel
 	KEEP_OUT := f64(95)  // no stone/gold this close to ANY Town Center
+	if jittered && !spawns_symmetric(spawns, sector) {
+		terrain_scatter_shifted(t, spawns, sector, st, ntype, cast(int)(per), amount, R, rMin, KEEP_OUT)
+		return
+	}
 	for i := 0; i < cast(int)(per); i += 1 {
 		r: f64 = rMin
 		ang: f64 = a0
@@ -1017,6 +1147,134 @@ terrain_scatter_rotational :: proc(t: ^terrain, size: f64, spawns: [4][2]f64, a0
 // The four Town Centers clear whatever node sits within clearance + 3 of
 // their spawn, in seat order (resourceClearance('town_center') = 5 + 4.5);
 // the survivor list is the node space every later read (and the fixtures) uses.
+// spawnLayout (b1076): the ideal circle through the spawns — centre, mean
+// radius, the first spawn's bearing, each spawn's slot by ANGLE (the Platform
+// shuffles which seat gets which place), and its offset from that ideal point.
+// Null (no layout) when two spawns land in one sector.
+spawn_layout :: proc(spawns: [4][2]f64, n: int, sector: f64) -> (f64, f64, f64, [4]int, [4][2]f64, bool) {
+	cx, cz := f64(0), f64(0)
+	for i := 0; i < n; i += 1 {
+		cx += spawns[i][0]
+		cz += spawns[i][1]
+	}
+	cx /= f64(n)
+	cz /= f64(n)
+	rho := f64(0)
+	for i := 0; i < n; i += 1 {
+		rho += m_hypot(spawns[i][0] - cx, spawns[i][1] - cz)
+	}
+	rho /= f64(n)
+	a0 := m_atan2(spawns[0][1] - cz, spawns[0][0] - cx)
+	TAU := math.PI * 2
+	slot: [4]int
+	dev: [4][2]f64
+	for i := 0; i < n; i += 1 {
+		a := m_atan2(spawns[i][1] - cz, spawns[i][0] - cx) - a0
+		norm := m_mod(a, TAU)
+		if norm < 0 {
+			norm += TAU
+		}
+		slot[i] = (cast(int)(m_round2(norm / sector))) %% n
+	}
+	for i := 0; i < n; i += 1 {
+		for j := i + 1; j < n; j += 1 {
+			if slot[i] == slot[j] {
+				return 0, 0, 0, slot, dev, false // not one spawn per sector: no layout
+			}
+		}
+	}
+	for i := 0; i < n; i += 1 {
+		dev[i][0] = spawns[i][0] - (cx + m_cos(a0 + f64(slot[i]) * sector) * rho)
+		dev[i][1] = spawns[i][1] - (cz + m_sin(a0 + f64(slot[i]) * sector) * rho)
+	}
+	return cx, cz, a0, slot, dev, true
+}
+
+// spawnsSymmetric: no layout, or a layout whose centre and deviations are zero
+// (the ideal circle itself).
+spawns_symmetric :: proc(spawns: [4][2]f64, sector: f64) -> bool {
+	cx, cz, _, _, dev, ok := spawn_layout(spawns, 4, sector)
+	EPS := 1e-6
+	if !ok {
+		return true
+	}
+	if m_abs(cx) >= EPS || m_abs(cz) >= EPS {
+		return false
+	}
+	for i := 0; i < 4; i += 1 {
+		if m_abs(dev[i][0]) >= EPS || m_abs(dev[i][1]) >= EPS {
+			return false
+		}
+	}
+	return true
+}
+
+// scatterShifted (b1076): lay the node out in the ideal layout, rotate it about
+// the spawns' own centre, then shift each seat's copy by exactly that seat's
+// spawn offset. Every copy must clear the keep-out around EVERY Town Center and
+// stay on the usable disc; a node with no spot that suits every seat alike is
+// left out for all of them.
+terrain_scatter_shifted :: proc(t: ^terrain, spawns: [4][2]f64, sector: f64, st: ^u32, ntype: i32, per: int, amount: f64, R, rMin, KEEP_OUT: f64) {
+	n := 4
+	cx, cz, a0, slot, dev, ok := spawn_layout(spawns, n, sector)
+	if !ok {
+		return
+	}
+	SLACK, SHORE := f64(25), f64(15)
+	copies :: proc(q: int, r, ang, sec, ccx, ccz: f64, slot: [4]int, dev: [4][2]f64) -> ([4][2]f64) {
+		out: [4][2]f64
+		for p := 0; p < q; p += 1 {
+			a := ang + f64(slot[p]) * sec
+			out[p][0] = ccx + m_cos(a) * r + dev[p][0]
+			out[p][1] = ccz + m_sin(a) * r + dev[p][1]
+		}
+		return out
+	}
+	for i := 0; i < per; i += 1 {
+		have := false
+		pts: [4][2]f64
+		for tries := 0; tries < 200 && !have; tries += 1 {
+			u := terrain_draw(st)
+			r := math.sqrt(rMin*rMin + u*(R*R - rMin*rMin))
+			t2 := a0 + (terrain_draw(st) - 0.5) * sector
+			c := copies(n, r, t2, sector, cx, cz, slot, dev)
+			fits := true
+			for p := 0; p < n; p += 1 {
+				qx, qz := c[p][0], c[p][1]
+				d := m_hypot(qx, qz)
+				if d < rMin || d > R + SLACK || m_max(m_abs(qx), m_abs(qz)) > land_limit(qx, qz) - SHORE {
+					fits = false
+					break
+				}
+				for s := 0; s < n; s += 1 {
+					if m_hypot(qx - spawns[s][0], qz - spawns[s][1]) < KEEP_OUT {
+						fits = false
+						break
+					}
+				}
+				if !fits {
+					break
+				}
+			}
+			if fits {
+				pts = c
+				have = true
+			}
+		}
+		if have {
+			for p := 0; p < n; p += 1 {
+				t.nodes[t.n_nodes] = rnode{ntype, pts[p][0], pts[p][1], amount}
+				t.n_nodes += 1
+			}
+		}
+	}
+}
+
+// Math.mod that can go negative before the caller normalises.
+m_mod :: proc(a, b: f64) -> f64 {
+	return a - math.floor(a / b) * b
+}
+
 terrain_clear_near :: proc(t: ^terrain, x: f64, z: f64, radius: f64) {
 	j := 0
 	for i := 0; i < t.n_nodes; i += 1 {
@@ -1030,7 +1288,7 @@ terrain_clear_near :: proc(t: ^terrain, x: f64, z: f64, radius: f64) {
 	t.n_nodes = j
 }
 
-t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
+t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64, jittered: bool) -> terrain {
 	coast_lat_build()
 	coast_limit_table()
 
@@ -1048,11 +1306,18 @@ t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
 		st = 42
 	}
 
+	homes, n_homes := home_discs(spawns, 4, size)
+	if !jittered {
+		n_homes = 0
+	}
+	taken: [256][2]f64
+	n_taken := 0
+
 	// medium: food 196 x 0.5, wood 784 x 1, stone 40 x 1, gold 18 (no mods entry).
-	terrain_scatter_equal(&t, usable, tile, &st, 0, 196*0.5, 500)         // food
-	terrain_scatter_equal(&t, usable, tile, &st, 1, 784*1.0, 300)         // wood
-	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 2, 40*1.0, 1000) // stone
-	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 3, 18, 2000)     // gold
+	terrain_scatter_equal(&t, usable, tile, &st, 0, 196*0.5, 500, homes[:n_homes], seed, &taken, &n_taken)  // food
+	terrain_scatter_equal(&t, usable, tile, &st, 1, 784*1.0, 300, homes[:n_homes], seed, &taken, &n_taken)  // wood
+	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 2, 40*1.0, 1000, jittered) // stone
+	terrain_scatter_rotational(&t, size, spawns, a0, sector, &st, 3, 18, 2000, jittered)     // gold
 	for s in 0 ..< 4 {
 		terrain_clear_near(&t, spawns[s][0], spawns[s][1], 9.5 + 3)
 	}
@@ -1060,9 +1325,123 @@ t_terrain :: proc(size: f64, seed: string, spawns: [4][2]f64) -> terrain {
 	return t
 }
 
+// b1076: the arena's jittered layout (TerrainManager.arenaSpawns, WAR Platform's
+// spawns.cjs ported). The whole layout turns by a random angle and its centre moves
+// up to 25 off the map's; each seat's angle moves up to 4 degrees and its distance
+// up to 12; which seat gets which place is shuffled. A layout where one seat's
+// rivals are more than 12% nearer, rank for rank, than another's is drawn again.
+// Drawn from the map seed on its own stream (WarRng.stream(hashSeed(seed+'|spawn'),7)).
+arena_spawns :: proc(seed: string, count: int, size: f64) -> [4][2]f64 {
+	n := count
+	if n < 1 {
+		n = 1
+	}
+	unit := size / f64(800)
+	// WarRng.stream(hashSeed(seed + '|spawn'), 7)
+	buf: [64]u8
+	copy(buf[0:len(seed)], seed)
+	copy(buf[len(seed):len(seed)+6], "|spawn")
+	st := hash_seed(string(buf[:len(seed)+6]))
+	if st == 0 {
+		st = 7
+	}
+	rnd :: proc(st: ^u32) -> f64 {
+		return f64(mulberry_next(st)) / 4294967296.0
+	}
+	sp: [4][2]f64
+	for attempt := 0; attempt < 128; attempt += 1 {
+		angle := rnd(&st) * 2 * math.PI
+		radius := (290 + rnd(&st) * 30) * unit
+		cx := (rnd(&st) - 0.5) * 50 * unit
+		cz := (rnd(&st) - 0.5) * 50 * unit
+		points: [4][2]f64
+		for i := 0; i < n; i += 1 {
+			a := angle + f64(i) * 2 * math.PI / f64(n) + (rnd(&st) - 0.5) * 0.14
+			r := radius + (rnd(&st) - 0.5) * 24 * unit
+			points[i][0] = m_round2((cx + m_cos(a) * r) * 100) / 100
+			points[i][1] = m_round2((cz + m_sin(a) * r) * 100) / 100
+		}
+		out := false
+		for i := 0; i < n; i += 1 {
+			if m_max(m_abs(points[i][0]), m_abs(points[i][1])) > size / 2 - 40 * unit {
+				out = true
+				break
+			}
+		}
+		if !out && n > 1 {
+			// spread: per rank, the widest gap between seats' rank-th nearest rival
+			// ratio; a layout past 1.12 is drawn again.
+			rows: [4][3]f64
+			for i := 0; i < n; i += 1 {
+				k := 0
+				for j := 0; j < n; j += 1 {
+					if j == i {
+						continue
+					}
+					rows[i][k] = m_hypot(points[i][0] - points[j][0], points[i][1] - points[j][1])
+					k += 1
+				}
+				// sort the row
+				for a := 1; a < k; a += 1 {
+					v := rows[i][a]
+					b := a - 1
+					for b >= 0 && rows[i][b] > v {
+						rows[i][b+1] = rows[i][b]
+						b -= 1
+					}
+					rows[i][b+1] = v
+				}
+			}
+			for rank := 0; rank < n - 1; rank += 1 {
+				hemax, hmin := rows[0][rank], rows[0][rank]
+				for i := 1; i < n; i += 1 {
+					if rows[i][rank] > hemax {
+						hemax = rows[i][rank]
+					}
+					if rows[i][rank] < hmin {
+						hmin = rows[i][rank]
+					}
+				}
+				if hemax / hmin > 1.12 {
+					out = true
+					break
+				}
+			}
+		}
+		if out {
+			continue
+		}
+		// Fisher-Yates over which seat gets which place
+		i := n - 1
+		for i > 0 {
+			j := int(math.floor(rnd(&st) * f64(i + 1)))
+			points[i], points[j] = points[j], points[i]
+			i -= 1
+		}
+		for i := 0; i < n; i += 1 {
+			sp[i] = points[i]
+		}
+		return sp
+	}
+	// Never reached in practice; the even circle the arena used before.
+	half := size / 2 - 40
+	for i := 0; i < n; i += 1 {
+		a := f64(i) / f64(n) * math.PI * 2 - math.PI / 2
+		sp[i][0] = m_cos(a) * half * 0.85
+		sp[i][1] = m_sin(a) * half * 0.85
+	}
+	return sp
+}
+
+// Math.round to two decimals as arenaSpawns stores its points.
+m_round2 :: proc(x: f64) -> f64 {
+	return math.floor(x + 0.5)
+}
+
 // The arena's spawn circle: (i/4) * 2pi - pi/2 on a 306-unit radius, in WarMath
-// (game.js:373-381; halfSize = 400 - 40, radius = 0.85 x that).
-arena_spawns :: proc() -> [4][2]f64 {
+// (game.js:373-381; halfSize = 400 - 40, radius = 0.85 x that). Kept for the
+// symmetric caller the campaign would be; the arena now jitters (above).
+arena_spawns_circle :: proc() -> [4][2]f64 {
 	sp: [4][2]f64
 	half := f64(400) - 40
 	radius := half * 0.85
@@ -2994,13 +3373,13 @@ main :: proc() {
 	if len(os.args) < 2 {
 		return
 	}
-	spawns := arena_spawns()
+	spawns := arena_spawns("golden", 4, f64(800))
 	g: game_state
 	// The map size is 800 (the port's makeTerrain: size 800; TERRAIN_WORLD 1000
 	// is TexGen's noise world, which the port does not have at all — its coast
 	// tables are dead weight here). The bounds, the scatter grid and the
 	// exploration cells all derive from this number.
-	g.terrain = t_terrain(f64(800), "golden", spawns)
+	g.terrain = t_terrain(f64(800), "golden", spawns, true)
 	setup(&g, spawns)
 
 	j := new(jw)

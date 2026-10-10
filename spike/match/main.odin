@@ -736,7 +736,7 @@ std_unit_defs : [11]unit_def = {
 	{id = "archer", cost = {60, 30, 0, 0}, health = 40, speed = 1, u_type = "ranged", tier = "neolithic", attack = 6.0, range = 12.0 },
 	{id = "crossbowman", cost = {100, 40, 20, 30}, health = 60, speed = 0.9, u_type = "ranged", tier = "iron", attack = 12.0, range = 13.5 },
 	{id = "elite_archer", cost = {150, 60, 30, 50}, health = 80, speed = 1.1, u_type = "ranged", tier = "iron", attack = 16.0, range = 15.0 },
-	{id = "scout_cavalry", cost = {100, 0, 0, 30}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic", attack = 8.0, range = 0.5 },
+	{id = "scout_cavalry", cost = {150, 80, 0, 0}, health = 100, speed = 2.2, u_type = "cavalry", tier = "neolithic", attack = 8.0, range = 0.5 },
 	{id = "cavalry", cost = {120, 0, 0, 50}, health = 140, speed = 2, u_type = "cavalry", tier = "bronze", attack = 12.0, range = 0.5 },
 	{id = "heavy_cavalry", cost = {180, 0, 50, 80}, health = 200, speed = 1.8, u_type = "cavalry", tier = "iron", attack = 18.0, range = 0.5 },
 	{id = "priest", cost = {50, 0, 0, 30}, health = 60, speed = 1, u_type = "support", tier = "bronze", attack = 3.0, range = 10.5 },
@@ -5917,6 +5917,12 @@ explore_map :: proc(g: ^game_state, s: ^seat) {
 				if w.is_moving || w.is_attacking {
 					continue
 				}
+					// The farthest-seeing idle soldier, the first of equals (b1060):
+					// it was "the first rider, else the first soldier".
+					if scout < 0 || unit_vision(w) > unit_vision(&s.units[scout]) {
+						scout = u
+					}
+					continue
 			} else {
 				if w.u_type != "worker" {
 					continue
