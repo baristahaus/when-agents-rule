@@ -351,6 +351,7 @@ read_file :: proc(path: string, buf: []byte) -> int {
 	}
 	n := min(len(data), len(buf))
 	copy(buf[:n], data[:n])
+	delete(data)
 	return n
 }
 
@@ -397,6 +398,7 @@ vk_init :: proc(s: ^vk_state) -> bool {
 			break
 		}
 	}
+	delete(qprops)
 	if s.qfam == 0xFFFFFFFF {
 		fmt.println("face: no graphics queue")
 		return false
@@ -420,6 +422,7 @@ vk_init :: proc(s: ^vk_state) -> bool {
 		fmt.println("face: shaders missing — glslc spike/face/shader.vert -o spike/face/shader.vert.spv")
 		return false
 	}
+
 	vsci := vk.ShaderModuleCreateInfo{sType = .SHADER_MODULE_CREATE_INFO, codeSize = vs_n, pCode = cast([^]u32)raw_data(vs_bytes)}
 	if vk.CreateShaderModule(s.device, &vsci, nil, &s.vs_mod) != .SUCCESS {
 		fmt.println("face: vert shader failed")
@@ -479,8 +482,11 @@ vk_init :: proc(s: ^vk_state) -> bool {
 		pMultisampleState = &pms, pColorBlendState = &pcbs,
 		layout = s.pipe_layout, renderPass = s.rp,
 	}
-	if vk.CreateGraphicsPipelines(s.device, vk.PipelineCache({}), 1, &gpci, nil, &s.pipe) != .SUCCESS {
-		fmt.println("face: CreateGraphicsPipelines failed")
+	gp_res := vk.CreateGraphicsPipelines(s.device, vk.PipelineCache({}), 1, &gpci, nil, &s.pipe)
+	delete(vs_bytes)
+	delete(fs_bytes)
+	if gp_res != .SUCCESS {
+		fmt.println("face: CreateGraphicsPipelines failed:", gp_res)
 		return false
 	}
 
@@ -819,11 +825,13 @@ render_frame :: proc(s: ^vk_state, f: ^frame, cam: ^camera) -> []byte {
 	n_world := n
 	hud := fmt.aprintf("TURN {}", f.turn)
 	draw_text(vbuf, &n, hud, 4, 4, 0.9, 0.9, 0.9)
+	delete(hud)
 	civ_tag := [4]string{"E", "G", "P", "Y"}
 	for seat := 0; seat < 4; seat += 1 {
 		line := fmt.aprintf("{} F:{} W:{} S:{} G:{} P:{}/{}", civ_tag[seat], f.res[seat][0], f.res[seat][1], f.res[seat][2], f.res[seat][3], f.pop[seat][0], f.pop[seat][1])
 		col := CIV_COLORS[seat % 4]
 		draw_text(vbuf, &n, line, f32(4 + seat * 190), f32(H - 20), col.r, col.g, col.b)
+		delete(line)
 	}
 	hud_pc := [4]f32{2.0 / f32(W), 2.0 / f32(H), -1, -1}
 	rec_start := time.tick_now()
@@ -893,6 +901,118 @@ vk_shutdown :: proc(s: ^vk_state) {
 // -------------------------------------------------------------------- main
 
 main :: proc() {
+	// the leak discipline the daemon will live by (gate 7's shape): the whole
+	// run under a tracking allocator, the balance named at exit — Odin procs
+	// do not capture, so the body is a called proc, not a deferred block
+	heap := context.allocator
+	tracker: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&tracker, heap)
+	context.allocator = mem.tracking_allocator(&tracker)
+	face_run()
+	context.allocator = heap
+	if tracker.total_allocation_count != tracker.total_free_count {
+		fmt.println("FACE LEAKS:", tracker.total_allocation_count, "allocations vs", tracker.total_free_count, "frees,", tracker.current_memory_allocated, "bytes live")
+		shown := 0
+		for _, entry in tracker.allocation_map {
+			fmt.println("  leaked", entry.size, "bytes at", entry.location.file_path, entry.location.line)
+			shown += 1
+			if shown >= 5 {
+				break
+			}
+		}
+		os.exit(1)
+	}
+	fmt.println("face memory balanced:", tracker.total_allocation_count, "allocations, 0 live")
+}
+
+face_present :: proc(vs: ^vk_state, frames: []frame, lines: []string, max_turn: int, cam: ^camera, png_prefix: string, bench: bool, at_frac: f64, one_turn: int) {
+	sample := [12]int{10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120}
+	f := &frames[1]
+	if bench {
+		// every turn, timed: the ms/frame the milestone's 60 fps needs
+		start := time.tick_now()
+		rendered := 0
+		for turn := 1; turn <= 120; turn += 1 {
+			rows := render_frame(vs, &frames[turn], cam)
+			delete(rows)
+			rendered += 1
+		}
+		e2 := time.tick_now()
+		ns := e2._nsec - start._nsec
+		fmt.println("bench: rendered", rendered, "frames in", f64(ns) / 1e6, "ms —", f64(ns) / 1e6 / f64(rendered), "ms/frame")
+		fmt.println("  submit+gpu wait:", f64(vs.gpu_ns) / 1e6, "ms; read map:", f64(vs.read_ns) / 1e6, "ms")
+		return
+	}
+	if at_frac >= 1 {
+		// the interpolated frame: between floor(at) and floor(at)+1, at the
+		// fraction — the smooth-playback primitive the window's playback uses
+		lo := int(at_frac)
+		hi := lo + 1
+		if hi <= max_turn {
+			frac := at_frac - f64(lo)
+			interpolated: frame
+			interpolated.turn = lo
+			interpolated.fog = frames[hi].fog
+			interpolated.has_fog = frames[hi].has_fog
+			interpolated.res = frames[hi].res
+			interpolated.pop = frames[hi].pop
+			interpolated.n_battles = frames[hi].n_battles
+			interpolated.battles = frames[hi].battles
+			interpolated.nn = frames[lo].nn
+			interpolated.nodes = frames[lo].nodes
+			for i := 0; i < frames[hi].n; i += 1 {
+				be := &frames[hi].ents[i]
+				x, z := be.x, be.z
+				if be.kind == 0 {
+					for j := 0; j < frames[lo].n; j += 1 {
+						ae := &frames[lo].ents[j]
+						if ae.seat == be.seat && ae.kind == be.kind && ae.eid == be.eid && ae.eid != 0 {
+							x = ae.x + (be.x - ae.x) * frac
+							z = ae.z + (be.z - ae.z) * frac
+							break
+						}
+					}
+				}
+				add_entity(&interpolated, x, z, be.kind, be.seat, be.worker, be.eid)
+			}
+			f = &interpolated
+			rows := render_frame(vs, f, cam)
+			fmt.println("frame at", at_frac, "entities", f.n, "fnv1a", fnv(rows))
+			if png_prefix != "" {
+				pp := fmt.aprintf("{}-at{}.ppm", png_prefix, at_frac)
+				write_ppm(pp, rows)
+				delete(pp)
+			}
+			delete(rows)
+			return
+		}
+	}
+	if one_turn > 0 {
+		f = &frames[one_turn]
+		rows := render_frame(vs, f, cam)
+		fmt.println("frame turn", f.turn, "entities", f.n, "battles", f.n_battles, "fnv1a", fnv(rows))
+		if png_prefix != "" {
+			pp := fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn)
+			write_ppm(pp, rows)
+			delete(pp)
+		}
+		delete(rows)
+		return
+	}
+	for si := 0; si < len(sample); si += 1 {
+		f = &frames[sample[si]]
+		rows := render_frame(vs, f, cam)
+		dg := fmt.aprintf("{}{}{}", fnv(rows), "", "")
+			fmt.println("frame turn", f.turn, "entities", f.n, "fnv1a", dg)
+			delete(dg)
+		if png_prefix != "" {
+			write_ppm(fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn), rows)
+		}
+		delete(rows)
+	}
+}
+
+face_run :: proc() {
 	args := os.args
 	path := "golden/stream-1m.jsonl"
 	png_prefix := ""
@@ -1027,78 +1147,11 @@ main :: proc() {
 		json.destroy_value(v)
 	}
 	f := &frames[1]
-	if bench {
-		// every turn, timed: the ms/frame the milestone's 60 fps needs
-		start := time.tick_now()
-		rendered := 0
-		for turn := 1; turn <= 120; turn += 1 {
-			_ = render_frame(&vs, &frames[turn], &cam)
-			rendered += 1
-		}
-		e2 := time.tick_now()
-		ns := e2._nsec - start._nsec
-		fmt.println("bench: rendered", rendered, "frames in", f64(ns) / 1e6, "ms —", f64(ns) / 1e6 / f64(rendered), "ms/frame")
-		fmt.println("  submit+gpu wait:", f64(vs.gpu_ns) / 1e6, "ms; read map:", f64(vs.read_ns) / 1e6, "ms")
-		return
-	}
-	if at_frac >= 1 {
-		// the interpolated frame: between floor(at) and floor(at)+1, at the
-		// fraction — the smooth-playback primitive the window's playback uses
-		lo := int(at_frac)
-		hi := lo + 1
-		if hi <= max_turn {
-			frac := at_frac - f64(lo)
-			interpolated: frame
-			interpolated.turn = lo
-			interpolated.fog = frames[hi].fog
-			interpolated.has_fog = frames[hi].has_fog
-			interpolated.res = frames[hi].res
-			interpolated.pop = frames[hi].pop
-			interpolated.n_battles = frames[hi].n_battles
-			interpolated.battles = frames[hi].battles
-			interpolated.nn = frames[lo].nn
-			interpolated.nodes = frames[lo].nodes
-			for i := 0; i < frames[hi].n; i += 1 {
-				be := &frames[hi].ents[i]
-				x, z := be.x, be.z
-				if be.kind == 0 {
-					for j := 0; j < frames[lo].n; j += 1 {
-						ae := &frames[lo].ents[j]
-						if ae.seat == be.seat && ae.kind == be.kind && ae.eid == be.eid && ae.eid != 0 {
-							x = ae.x + (be.x - ae.x) * frac
-							z = ae.z + (be.z - ae.z) * frac
-							break
-						}
-					}
-				}
-				add_entity(&interpolated, x, z, be.kind, be.seat, be.worker, be.eid)
-			}
-			f = &interpolated
-			rows := render_frame(&vs, f, &cam)
-			fmt.println("frame at", at_frac, "entities", f.n, "fnv1a", fnv(rows))
-			if png_prefix != "" {
-				write_ppm(fmt.aprintf("{}-at{}.ppm", png_prefix, at_frac), rows)
-			}
-			return
-		}
-	}
-	if one_turn > 0 {
-		f = &frames[one_turn]
-		rows := render_frame(&vs, f, &cam)
-		fmt.println("frame turn", f.turn, "entities", f.n, "battles", f.n_battles, "fnv1a", fnv(rows))
-		if png_prefix != "" {
-			write_ppm(fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn), rows)
-		}
-		return
-	}
-	for si := 0; si < len(sample); si += 1 {
-		f = &frames[sample[si]]
-		rows := render_frame(&vs, f, &cam)
-		fmt.println("frame turn", f.turn, "entities", f.n, "fnv1a", fmt.aprintf("{}{}{}", fnv(rows), "", ""))
-		if png_prefix != "" {
-			write_ppm(fmt.aprintf("{}-t{}.ppm", png_prefix, f.turn), rows)
-		}
-	}
+	face_present(&vs, frames, lines, max_turn, &cam, png_prefix, bench, at_frac, one_turn)
+	delete(lines)
+	delete(data)
+	delete(frames)
+	delete(seen)
 }
 
 write_ppm :: proc(path: string, rows: []byte) {
@@ -1116,4 +1169,5 @@ write_ppm :: proc(path: string, rows: []byte) {
 	fmt.fprintln(f, "P6", W, H, 255)
 	os.write(f, rgb)
 	os.close(f)
+	delete(rgb)
 }
