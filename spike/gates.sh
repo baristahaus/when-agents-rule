@@ -318,6 +318,32 @@ else
 	fails=$((fails + 1))
 fi
 
+# Gate 13 - the presented face: the SDL2 window + swapchain under a private
+# X server (xvfb). SKIPs when Xvfb is absent; holds when the window presents
+# frames for six seconds and the run's memory balances.
+if ! command -v Xvfb >/dev/null 2>&1; then
+	say "gate 13  the presented face: window + swapchain" "SKIP — no Xvfb; install xorg-server-xvfb"
+else
+	if "$ODIN" build spike/face -file -out:spike/bin/face >/tmp/odin-face.log 2>&1; then
+		(Xvfb :99 -screen 0 1280x1024x24 >/tmp/gate-xvfb.log 2>&1 &)
+		sleep 1
+		DISPLAY=:99 timeout 8 ./spike/bin/face golden/stream-1m.jsonl --window >/tmp/gate-win.txt 2>&1
+		pkill -f "Xvfb :99" 2>/dev/null
+		if grep -q "window: presented" /tmp/gate-win.txt \
+		   && grep -q "face memory balanced" /tmp/gate-win.txt; then
+			say "gate 13  the presented face: window + swapchain" "ok — $(grep -o 'presented [0-9]* frames' /tmp/gate-win.txt), memory balanced"
+		else
+			say "gate 13  the presented face: window + swapchain" "FAIL"
+			head -6 /tmp/gate-win.txt
+			fails=$((fails + 1))
+		fi
+	else
+		say "gate 13  the presented face: window + swapchain" "FAIL - the build"
+		grep Error /tmp/odin-face.log | head -5
+		fails=$((fails + 1))
+	fi
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else

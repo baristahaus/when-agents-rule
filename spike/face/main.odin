@@ -28,6 +28,7 @@ import "core:time"
 import "core:strings"
 import "core:math"
 import "core:mem"
+import sdl "vendor:sdl2"
 import vk "vendor:vulkan"
 
 W :: 800
@@ -307,6 +308,25 @@ add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32, worker: bool, eid: i32
 }
 
 // ------------------------------------------------------------------ vulkan
+
+win_state :: struct {
+	window:     ^sdl.Window,
+	surface:    vk.SurfaceKHR,
+	extent:     vk.Extent2D,
+	format:     vk.Format,
+	swapchain:  vk.SwapchainKHR,
+	images:     [8]vk.Image,
+	views:      [8]vk.ImageView,
+	fbs:        [8]vk.Framebuffer,
+	n_images:   u32,
+	rp:         vk.RenderPass,
+	pipe:       vk.Pipeline,
+	pipe_layout: vk.PipelineLayout,
+	img_avail:  vk.Semaphore,
+	render_done: vk.Semaphore,
+	present_q:  vk.Queue,
+	pqfam:      u32,
+}
 
 vk_state :: struct {
 	lib:        dynlib.Library,
@@ -1017,6 +1037,7 @@ face_run :: proc() {
 	path := "golden/stream-1m.jsonl"
 	png_prefix := ""
 	bench := false
+	window_mode := false
 	one_turn := -1
 	at_frac := f64(-1)
 	if len(args) >= 2 {
@@ -1042,6 +1063,8 @@ face_run :: proc() {
 			if v, ok := strconv.parse_f64(args[a]); ok {
 				cam.cz = f32(v)
 			}
+		} else if args[a] == "--window" {
+			window_mode = true
 		} else if args[a] == "--bench" {
 			bench = true
 		} else if args[a] == "--at" && a + 1 < len(args) {
@@ -1081,6 +1104,77 @@ face_run :: proc() {
 		os.exit(1)
 	}
 	defer vk_shutdown(&vs)
+	ws: win_state
+	if window_mode {
+		// the presented face: the same renderer, a real (or virtual) display.
+		// The parse-scale work stays; the swapchain's own init follows.
+		if !win_init(&vs, &ws, 1024, 768) {
+			os.exit(1)
+		}
+		frames := make([]frame, 121)
+		seen2 := make([]bool, 121)
+		for line in lines {
+			if len(line) == 0 {
+				continue
+			}
+			v, err := json.parse_string(line)
+			if err != nil {
+				continue
+			}
+			if obj, ok := v.(json.Object); ok {
+				if tv, has := obj["turn"]; has {
+					tn := int(jnum(tv))
+					if tn >= 1 && tn <= 120 {
+						if !seen2[tn] {
+							seen2[tn] = true
+							frames[tn].n = 0
+							frames[tn].n_battles = 0
+							frames[tn].has_fog = false
+							frames[tn].nn = 0
+						}
+						scene_fill(v, &frames[tn])
+						frames[tn].turn = tn
+					} else {
+						if tv2, has := obj["type"]; has {
+							if ts, ok := tv2.(json.String); ok && ts == "map" {
+								if rv, has := obj["resources"]; has {
+									if items, a_ok := rv.(json.Array); a_ok {
+										for item in items {
+											io, ok := item.(json.Object)
+											if !ok {
+												continue
+											}
+											x, z := jnum2(io, "x"), jnum2(io, "z")
+											nt: i32 = 0
+											if ttv, has := io["t"]; has {
+												if tts, ok := ttv.(json.String); ok {
+													nt = node_kind(tts)
+												}
+											}
+											for ti := 1; ti <= 120; ti += 1 {
+												if frames[ti].nn < len(frames[ti].nodes) {
+													frames[ti].nodes[frames[ti].nn] = entity{x = x, z = z, kind = 2 + nt, seat = 0}
+													frames[ti].nn += 1
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			json.destroy_value(v)
+		}
+		win_run(&vs, &ws, frames, &cam)
+		delete(frames)
+		delete(seen2)
+		delete(lines)
+		delete(data)
+		sdl.Quit()
+		return
+	}
 	// the transcript parses ONCE: the scenes for the whole match, the map line
 	// folded into every frame (scene_at's 600-line JSON walk is the slow part;
 	// the GPU must be measured alone)
@@ -1170,4 +1264,357 @@ write_ppm :: proc(path: string, rows: []byte) {
 	os.write(f, rgb)
 	os.close(f)
 	delete(rgb)
+}
+
+// ---- the window: SDL2 surface + swapchain, the replay at 60 fps -----------
+// The increment this box could not verify until Xvfb: the same renderer, the
+// same scene build, presented to a real (virtual) display. Playback runs at
+// 10 turns/s with the interpolation primitive filling the 60 Hz frames.
+win_init :: proc(vs: ^vk_state, w: ^win_state, width, height: i32) -> bool {
+	if sdl.Init(sdl.INIT_VIDEO) != 0 {
+		fmt.println("window: SDL_Init failed:", sdl.GetError())
+		return false
+	}
+	w.window = sdl.CreateWindow("war-face", 100, 100, width, height, sdl.WINDOW_SHOWN | sdl.WINDOW_VULKAN)
+	if w.window == nil {
+		fmt.println("window: CreateWindow failed:", sdl.GetError())
+		return false
+	}
+	// the instance: SDL names the extensions the surface needs
+	n_ext: u32
+	sdl.Vulkan_GetInstanceExtensions(w.window, &n_ext, nil)
+	ext_names: [8]cstring
+	sdl.Vulkan_GetInstanceExtensions(w.window, &n_ext, raw_data(ext_names[:]))
+	app := vk.ApplicationInfo{sType = .APPLICATION_INFO, pApplicationName = "war-face", apiVersion = vk.API_VERSION_1_1}
+	ci := vk.InstanceCreateInfo{sType = .INSTANCE_CREATE_INFO, pApplicationInfo = &app, enabledExtensionCount = n_ext, ppEnabledExtensionNames = raw_data(ext_names[:])}
+	if vk.CreateInstance(&ci, nil, &vs.inst) != .SUCCESS {
+		fmt.println("window: CreateInstance failed")
+		return false
+	}
+	vk.load_proc_addresses_instance(vs.inst)
+	if !sdl.Vulkan_CreateSurface(w.window, vs.inst, &w.surface) {
+		fmt.println("window: CreateSurface failed:", sdl.GetError())
+		return false
+	}
+	// the device: a queue family that both draws and presents
+	n: u32
+	vk.EnumeratePhysicalDevices(vs.inst, &n, nil)
+	devs: [8]vk.PhysicalDevice
+	vk.EnumeratePhysicalDevices(vs.inst, &n, raw_data(devs[:]))
+	vk.GetPhysicalDeviceMemoryProperties(devs[0], &vs.mem_props)
+	vs.phys = devs[0]
+	qn: u32
+	vk.GetPhysicalDeviceQueueFamilyProperties(vs.phys, &qn, nil)
+	qprops := make([]vk.QueueFamilyProperties, int(qn))
+	vk.GetPhysicalDeviceQueueFamilyProperties(vs.phys, &qn, raw_data(qprops))
+	defer delete(qprops)
+	found := false
+	for i := 0; i < int(qn); i += 1 {
+		if .GRAPHICS in qprops[i].queueFlags {
+			sup: b32 = false
+			vk.GetPhysicalDeviceSurfaceSupportKHR(vs.phys, u32(i), w.surface, &sup)
+			if sup {
+				vs.qfam = u32(i)
+				w.pqfam = u32(i)
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		fmt.println("window: no graphics+present queue")
+		return false
+	}
+	prio := f32(1.0)
+	qci := vk.DeviceQueueCreateInfo{sType = .DEVICE_QUEUE_CREATE_INFO, queueFamilyIndex = vs.qfam, queueCount = 1, pQueuePriorities = &prio}
+	ext_c, _ := strings.clone_to_cstring("VK_KHR_swapchain")
+	defer delete(ext_c)
+	ext_names_slice := [1]cstring{ext_c}
+	dci := vk.DeviceCreateInfo{sType = .DEVICE_CREATE_INFO, queueCreateInfoCount = 1, pQueueCreateInfos = &qci, enabledExtensionCount = 1, ppEnabledExtensionNames = cast([^]cstring)&ext_names_slice}
+	if vk.CreateDevice(vs.phys, &dci, nil, &vs.device) != .SUCCESS {
+		fmt.println("window: CreateDevice failed")
+		return false
+	}
+	vk.load_proc_addresses_device(vs.device)
+	vk.GetDeviceQueue(vs.device, vs.qfam, 0, &vs.queue)
+	vk.GetDeviceQueue(vs.device, w.pqfam, 0, &w.present_q)
+	// the swapchain: FIFO, the surface's current extent and format
+	caps := vk.SurfaceCapabilitiesKHR{}
+	vk.GetPhysicalDeviceSurfaceCapabilitiesKHR(vs.phys, w.surface, &caps)
+	w.extent = caps.currentExtent
+	nf: u32
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(vs.phys, w.surface, &nf, nil)
+	fmts := make([]vk.SurfaceFormatKHR, int(nf))
+	vk.GetPhysicalDeviceSurfaceFormatsKHR(vs.phys, w.surface, &nf, raw_data(fmts))
+	w.format = fmts[0].format
+	if nf > 1 {
+		for i := 0; i < int(nf); i += 1 {
+			if fmts[i].format == .B8G8R8A8_UNORM || fmts[i].format == .R8G8B8A8_UNORM {
+				w.format = fmts[i].format
+				break
+			}
+		}
+	}
+	delete(fmts)
+	sci := vk.SwapchainCreateInfoKHR{
+		sType = .SWAPCHAIN_CREATE_INFO_KHR,
+		surface = w.surface, minImageCount = max(2, caps.minImageCount),
+		imageFormat = w.format, imageColorSpace = fmts[0].colorSpace,
+		imageExtent = w.extent, imageArrayLayers = 1,
+		imageUsage = {.COLOR_ATTACHMENT}, imageSharingMode = .EXCLUSIVE,
+		preTransform = caps.currentTransform, compositeAlpha = {.OPAQUE},
+		presentMode = .FIFO, clipped = true,
+	}
+	if vk.CreateSwapchainKHR(vs.device, &sci, nil, &w.swapchain) != .SUCCESS {
+		fmt.println("window: CreateSwapchainKHR failed")
+		return false
+	}
+	vk.GetSwapchainImagesKHR(vs.device, w.swapchain, &w.n_images, nil)
+	vk.GetSwapchainImagesKHR(vs.device, w.swapchain, &w.n_images, raw_data(w.images[:]))
+	// the render pass: PRESENT_SRC at the end
+	att := vk.AttachmentDescription{
+		format = w.format, samples = {._1}, loadOp = .CLEAR, storeOp = .STORE,
+		stencilLoadOp = .DONT_CARE, stencilStoreOp = .DONT_CARE,
+		initialLayout = .UNDEFINED, finalLayout = .PRESENT_SRC_KHR,
+	}
+	att_ref := vk.AttachmentReference{attachment = 0, layout = .COLOR_ATTACHMENT_OPTIMAL}
+	srp := vk.SubpassDescription{pipelineBindPoint = .GRAPHICS, colorAttachmentCount = 1, pColorAttachments = &att_ref}
+	rpci := vk.RenderPassCreateInfo{sType = .RENDER_PASS_CREATE_INFO, attachmentCount = 1, pAttachments = &att, subpassCount = 1, pSubpasses = &srp}
+	if vk.CreateRenderPass(vs.device, &rpci, nil, &w.rp) != .SUCCESS {
+		fmt.println("window: CreateRenderPass failed")
+		return false
+	}
+	// the pipeline: the same shaders, the window's render pass
+	pcr := vk.PushConstantRange{stageFlags = {.VERTEX}, offset = 0, size = 16}
+	plci := vk.PipelineLayoutCreateInfo{sType = .PIPELINE_LAYOUT_CREATE_INFO, pushConstantRangeCount = 1, pPushConstantRanges = &pcr}
+	if vk.CreatePipelineLayout(vs.device, &plci, nil, &w.pipe_layout) != .SUCCESS {
+		fmt.println("window: CreatePipelineLayout failed")
+		return false
+	}
+	bindings := [2]vk.VertexInputAttributeDescription{
+		{location = 0, format = .R32G32_SFLOAT, offset = 0},
+		{location = 1, format = .R32G32B32A32_SFLOAT, offset = 8},
+	}
+	bd := vk.VertexInputBindingDescription{binding = 0, stride = 24, inputRate = .VERTEX}
+	vs_entry := strings.unsafe_string_to_cstring("main")
+	stage_vs := vk.PipelineShaderStageCreateInfo{sType = .SHADER_MODULE_CREATE_INFO, stage = {.VERTEX}, module = vs.vs_mod, pName = vs_entry}
+	stage_fs := vk.PipelineShaderStageCreateInfo{sType = .SHADER_MODULE_CREATE_INFO, stage = {.FRAGMENT}, module = vs.fs_mod, pName = vs_entry}
+	pvis := vk.PipelineVertexInputStateCreateInfo{sType = .PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, vertexBindingDescriptionCount = 1, pVertexBindingDescriptions = &bd, vertexAttributeDescriptionCount = 2, pVertexAttributeDescriptions = raw_data(bindings[:])}
+	ias := vk.PipelineInputAssemblyStateCreateInfo{sType = .PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, topology = .TRIANGLE_LIST}
+	vp := vk.Viewport{width = f32(w.extent.width), height = f32(w.extent.height), maxDepth = 1}
+	sc := vk.Rect2D{extent = w.extent}
+	pvps := vk.PipelineViewportStateCreateInfo{sType = .PIPELINE_VIEWPORT_STATE_CREATE_INFO, viewportCount = 1, pViewports = &vp, scissorCount = 1, pScissors = &sc}
+	prs := vk.PipelineRasterizationStateCreateInfo{sType = .PIPELINE_RASTERIZATION_STATE_CREATE_INFO, polygonMode = .FILL, lineWidth = 1}
+	pms := vk.PipelineMultisampleStateCreateInfo{sType = .PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, rasterizationSamples = {._1}}
+	pcb := vk.PipelineColorBlendAttachmentState{colorWriteMask = {.R, .G, .B, .A}}
+	pcbs := vk.PipelineColorBlendStateCreateInfo{sType = .PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, attachmentCount = 1, pAttachments = &pcb}
+	stages := [2]vk.PipelineShaderStageCreateInfo{stage_vs, stage_fs}
+	gpci := vk.GraphicsPipelineCreateInfo{
+		sType = .GRAPHICS_PIPELINE_CREATE_INFO,
+		stageCount = 2, pStages = raw_data(stages[:]),
+		pVertexInputState = &pvis, pInputAssemblyState = &ias,
+		pViewportState = &pvps, pRasterizationState = &prs,
+		pMultisampleState = &pms, pColorBlendState = &pcbs,
+		layout = w.pipe_layout, renderPass = w.rp,
+	}
+	if vk.CreateGraphicsPipelines(vs.device, vk.PipelineCache({}), 1, &gpci, nil, &w.pipe) != .SUCCESS {
+		fmt.println("window: CreateGraphicsPipelines failed")
+		return false
+	}
+	for i := 0; i < int(w.n_images); i += 1 {
+		sub := vk.ImageSubresourceRange{aspectMask = {.COLOR}, levelCount = 1, layerCount = 1}
+		vci := vk.ImageViewCreateInfo{sType = .IMAGE_VIEW_CREATE_INFO, image = w.images[i], viewType = .D2, format = w.format, subresourceRange = sub}
+		if vk.CreateImageView(vs.device, &vci, nil, &w.views[i]) != .SUCCESS {
+			fmt.println("window: CreateImageView failed")
+			return false
+		}
+		fbci := vk.FramebufferCreateInfo{sType = .FRAMEBUFFER_CREATE_INFO, renderPass = w.rp, attachmentCount = 1, pAttachments = &w.views[i], width = w.extent.width, height = w.extent.height, layers = 1}
+		if vk.CreateFramebuffer(vs.device, &fbci, nil, &w.fbs[i]) != .SUCCESS {
+			fmt.println("window: CreateFramebuffer failed")
+			return false
+		}
+	}
+	sci_sem := vk.SemaphoreCreateInfo{sType = .SEMAPHORE_CREATE_INFO}
+	vk.CreateSemaphore(vs.device, &sci_sem, nil, &w.img_avail)
+	vk.CreateSemaphore(vs.device, &sci_sem, nil, &w.render_done)
+	return true
+}
+
+// win_run: the replay at 60 fps — 10 turns/s, the interpolation primitive
+// filling the frames between whole turns; ESC quits, space pauses, A/D step
+// one turn, W/S zooms.
+win_run :: proc(vs: ^vk_state, w: ^win_state, frames: []frame, cam: ^camera) {
+	vbuf := mem.slice_ptr(cast(^byte)vs.vbuf_ptr, 1 << 20)
+	turn := 1
+	frac := f64(0)
+	paused := false
+	running := true
+	presented := 0
+	last := sdl.GetTicks()
+	for running {
+		ev: sdl.Event
+		for sdl.PollEvent(&ev) {
+			#partial switch ev.type {
+			case .QUIT:
+				running = false
+			case .KEYDOWN:
+				kb := ev.key
+				if kb.keysym.sym == .ESCAPE {
+					running = false
+				} else if kb.keysym.sym == .SPACE {
+					paused = !paused
+				} else if kb.keysym.sym == .A {
+					turn = max(1, turn - 1)
+					frac = 0
+				} else if kb.keysym.sym == .D {
+					turn = min(len(frames) - 2, turn + 1)
+					frac = 0
+				} else if kb.keysym.sym == .W {
+					cam.zoom *= 1.25
+				} else if kb.keysym.sym == .S {
+					cam.zoom = max(0.25, cam.zoom / 1.25)
+				}
+			case:
+			}
+		}
+		if !paused {
+			now := sdl.GetTicks()
+			elapsed := f64(now - last)
+			last = now
+			frac += elapsed / 100.0 // 10 turns/s
+			for frac >= 1 {
+				frac -= 1
+				turn += 1
+				if turn >= len(frames) - 1 {
+					turn = 1
+				}
+			}
+		}
+		// the interpolated scene between `turn` and `turn+1`
+		interpolated: frame
+		interpolated.turn = turn
+		interpolated.fog = frames[turn + 1].fog
+		interpolated.has_fog = frames[turn + 1].has_fog
+		interpolated.res = frames[turn + 1].res
+		interpolated.pop = frames[turn + 1].pop
+		interpolated.n_battles = frames[turn + 1].n_battles
+		interpolated.battles = frames[turn + 1].battles
+		interpolated.nn = frames[turn].nn
+		interpolated.nodes = frames[turn].nodes
+		for i := 0; i < frames[turn + 1].n; i += 1 {
+			be := &frames[turn + 1].ents[i]
+			x, z := be.x, be.z
+			if be.kind == 0 {
+				for j := 0; j < frames[turn].n; j += 1 {
+					ae := &frames[turn].ents[j]
+					if ae.seat == be.seat && ae.kind == be.kind && ae.eid == be.eid && ae.eid != 0 {
+						x = ae.x + (be.x - ae.x) * frac
+						z = ae.z + (be.z - ae.z) * frac
+						break
+					}
+				}
+			}
+			add_entity(&interpolated, x, z, be.kind, be.seat, be.worker, be.eid)
+		}
+		// the vertex stream: the world, then the HUD
+		n := 0
+		draw_quads(vbuf, &n, 0, 0, 430, 0.15, 0.25, 0.5)
+		draw_quads(vbuf, &n, 0, 0, 385, 0.35, 0.55, 0.25)
+		node_cols := [5][3]f32{{0.4, 0.4, 0.4}, {0.8, 0.3, 0.8}, {0.2, 0.45, 0.15}, {0.6, 0.6, 0.65}, {0.95, 0.85, 0.2}}
+		for i := 0; i < interpolated.nn; i += 1 {
+			nd := &interpolated.nodes[i]
+			c := node_cols[nd.kind - 2]
+			draw_quads(vbuf, &n, f32(nd.x), f32(nd.z), 1.6, c.r, c.g, c.b)
+		}
+		if interpolated.has_fog {
+			tile := 800.0 / 7.0
+			for row := 0; row < 7; row += 1 {
+				for col := 0; col < 7; col += 1 {
+					if interpolated.fog[row * 7 + col] < 50 {
+						fcx := f32(-400) + (f32(col) + 0.5) * f32(tile)
+						fcz := f32(-400) + (f32(row) + 0.5) * f32(tile)
+						draw_quads(vbuf, &n, fcx, fcz, f32(tile / 2), 0.02, 0.03, 0.05)
+					}
+				}
+			}
+		}
+		for i := 0; i < interpolated.n; i += 1 {
+			e := &interpolated.ents[i]
+			col := CIV_COLORS[e.seat % 4]
+			if e.kind == 1 {
+				draw_quads(vbuf, &n, f32(e.x), f32(e.z), 7, col.r * 0.7, col.g * 0.7, col.b * 0.7)
+			} else if e.worker {
+				draw_quads(vbuf, &n, f32(e.x), f32(e.z), 1.8, col.r * 0.85, col.g * 0.85, col.b * 0.85)
+			} else {
+				draw_quads(vbuf, &n, f32(e.x), f32(e.z), 3.2, col.r, col.g, col.b)
+			}
+		}
+		for b := 0; b < interpolated.n_battles; b += 1 {
+			bx, bz := f32(interpolated.battles[b][0]), f32(interpolated.battles[b][1])
+			BR, hw := f32(20), f32(1.2)
+			draw_quads(vbuf, &n, bx, bz - BR, hw, 0.9, 0.15, 0.1)
+			draw_quads(vbuf, &n, bx, bz + BR, hw, 0.9, 0.15, 0.1)
+			draw_quads(vbuf, &n, bx - BR, bz, hw, 0.9, 0.15, 0.1)
+			draw_quads(vbuf, &n, bx + BR, bz, hw, 0.9, 0.15, 0.1)
+		}
+		n_world := n
+		hud := fmt.aprintf("TURN {}", interpolated.turn)
+		draw_text(vbuf, &n, hud, 4, 4, 0.9, 0.9, 0.9)
+		delete(hud)
+		civ_tag := [4]string{"E", "G", "P", "Y"}
+		for seat := 0; seat < 4; seat += 1 {
+			line := fmt.aprintf("{} F:{} W:{} S:{} G:{} P:{}/{}", civ_tag[seat], interpolated.res[seat][0], interpolated.res[seat][1], interpolated.res[seat][2], interpolated.res[seat][3], interpolated.pop[seat][0], interpolated.pop[seat][1])
+			col := CIV_COLORS[seat % 4]
+			draw_text(vbuf, &n, line, f32(4 + seat * 190), 4, col.r, col.g, col.b)
+			delete(line)
+		}
+		world := cam.zoom / 420.0
+		pc := [4]f32{world, -world, -(cam.cx * world), (cam.cz * world)}
+		hud_pc := [4]f32{2.0 / f32(w.extent.width), 2.0 / f32(w.extent.height), -1, -1}
+		img: u32
+		if vk.AcquireNextImageKHR(vs.device, w.swapchain, u64(1e9), w.img_avail, vk.Fence({}), &img) != .SUCCESS {
+			continue
+		}
+		vk.ResetCommandBuffer(vs.cmd, {})
+		cbi := vk.CommandBufferBeginInfo{sType = .COMMAND_BUFFER_BEGIN_INFO}
+		vk.BeginCommandBuffer(vs.cmd, &cbi)
+		rpbi := vk.RenderPassBeginInfo{
+			sType = .RENDER_PASS_BEGIN_INFO, renderPass = w.rp, framebuffer = w.fbs[img],
+			renderArea = vk.Rect2D{extent = w.extent},
+		}
+		clear := vk.ClearValue{color = vk.ClearColorValue{float32 = [4]f32{0.08, 0.10, 0.14, 1}}}
+		rpbi.clearValueCount = 1
+		rpbi.pClearValues = &clear
+		vk.CmdBeginRenderPass(vs.cmd, &rpbi, .INLINE)
+		vk.CmdBindPipeline(vs.cmd, .GRAPHICS, w.pipe)
+		vbuf_h := vs.vbuf
+		offsets := [1]vk.DeviceSize{0}
+		vk.CmdBindVertexBuffers(vs.cmd, 0, 1, &vbuf_h, raw_data(offsets[:]))
+		vk.CmdPushConstants(vs.cmd, w.pipe_layout, {.VERTEX}, 0, 16, &pc)
+		vk.CmdDraw(vs.cmd, u32(n_world / 6), 1, 0, 0)
+		vk.CmdPushConstants(vs.cmd, w.pipe_layout, {.VERTEX}, 0, 16, &hud_pc)
+		vk.CmdDraw(vs.cmd, u32((n - n_world) / 6), 1, 0, 0)
+		vk.CmdEndRenderPass(vs.cmd)
+		vk.EndCommandBuffer(vs.cmd)
+		wait_stage := vk.PipelineStageFlags{.COLOR_ATTACHMENT_OUTPUT}
+		si := vk.SubmitInfo{
+			sType = .SUBMIT_INFO,
+			waitSemaphoreCount = 1, pWaitSemaphores = &w.img_avail,
+			pWaitDstStageMask = &wait_stage,
+			signalSemaphoreCount = 1, pSignalSemaphores = &w.render_done,
+			commandBufferCount = 1, pCommandBuffers = &vs.cmd,
+		}
+		vk.QueueSubmit(vs.queue, 1, &si, vk.Fence({}))
+		present := [1]vk.SwapchainKHR{w.swapchain}
+		pci := vk.PresentInfoKHR{
+			sType = .PRESENT_INFO_KHR,
+			waitSemaphoreCount = 1, pWaitSemaphores = &w.render_done,
+			swapchainCount = 1, pSwapchains = raw_data(present[:]),
+			pImageIndices = &img,
+		}
+		vk.QueuePresentKHR(w.present_q, &pci)
+		vk.QueueWaitIdle(w.present_q)
+		presented += 1
+	}
+	fmt.println("window: presented", presented, "frames")
 }
