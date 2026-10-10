@@ -46,6 +46,7 @@ entity :: struct {
 	kind:  i32, // 0 unit, 1 building, 2..6 map node kinds
 	seat:  i32,
 	worker: bool, // units: a villager (smaller mark, as the reference draws its own)
+	eid:    i32, // the record's id: the correspondence key between turns
 }
 
 frame :: struct {
@@ -281,12 +282,16 @@ scene_fill :: proc(v: json.Value, f: ^frame) {
 					worker = true
 				}
 			}
-			add_entity(f, x, z, kind, i32(seat_i), worker)
+							id: i32 = 0
+				if idv, has := io["id"]; has {
+					id = i32(jnum(idv))
+				}
+				add_entity(f, x, z, kind, i32(seat_i), worker, id)
 		}
 	}
 }
 
-add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32, worker: bool) {
+add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32, worker: bool, eid: i32) {
 	// dedupe: the same (kind, rounded position) seen through another seat's
 	// enemy list is the entity this frame already has
 	for i := 0; i < f.n; i += 1 {
@@ -296,7 +301,7 @@ add_entity :: proc(f: ^frame, x, z: f64, kind, seat: i32, worker: bool) {
 		}
 	}
 	if f.n < len(f.ents) {
-		f.ents[f.n] = entity{x = x, z = z, kind = kind, seat = seat, worker = worker}
+		f.ents[f.n] = entity{x = x, z = z, kind = kind, seat = seat, worker = worker, eid = eid}
 		f.n += 1
 	}
 }
@@ -617,6 +622,34 @@ draw_quads :: proc(dst: []byte, n: ^int, x, z, hw: f32, r, g, b: f32) {
 	}
 }
 
+interp_frame :: proc(a, b: ^frame, frac: f64, out: ^frame) {
+	out.n = 0
+	out.nn = a.nn
+	out.nodes = a.nodes
+	out.fog = b.fog
+	out.has_fog = b.has_fog
+	out.res = b.res
+	out.pop = b.pop
+	out.n_battles = b.n_battles
+	out.battles = b.battles
+	for i := 0; i < b.n; i += 1 {
+		be := &b.ents[i]
+		x, z := be.x, be.z
+		// units correspond by (seat, kind, id); buildings snap (they stand)
+		if be.kind == 0 {
+			for j := 0; j < a.n; j += 1 {
+				ae := &a.ents[j]
+				if ae.seat == be.seat && ae.kind == be.kind && ae.eid == be.eid && ae.eid != 0 {
+					x = ae.x + (be.x - ae.x) * frac
+					z = ae.z + (be.z - ae.z) * frac
+					break
+				}
+			}
+		}
+		add_entity(out, x, z, be.kind, be.seat, be.worker, be.eid)
+	}
+}
+
 u32_le :: proc(f: f32) -> u32 {
 	return transmute(u32)f
 }
@@ -865,6 +898,7 @@ main :: proc() {
 	png_prefix := ""
 	bench := false
 	one_turn := -1
+	at_frac := f64(-1)
 	if len(args) >= 2 {
 		path = args[1]
 	}
@@ -890,6 +924,11 @@ main :: proc() {
 			}
 		} else if args[a] == "--bench" {
 			bench = true
+		} else if args[a] == "--at" && a + 1 < len(args) {
+			a += 1
+			if v, ok := strconv.parse_f64(args[a]); ok {
+				at_frac = v
+			}
 		} else if args[a] == "--turn" && a + 1 < len(args) {
 			a += 1
 			if v, ok := strconv.parse_int(args[a]); ok {
@@ -1001,6 +1040,47 @@ main :: proc() {
 		fmt.println("bench: rendered", rendered, "frames in", f64(ns) / 1e6, "ms —", f64(ns) / 1e6 / f64(rendered), "ms/frame")
 		fmt.println("  submit+gpu wait:", f64(vs.gpu_ns) / 1e6, "ms; read map:", f64(vs.read_ns) / 1e6, "ms")
 		return
+	}
+	if at_frac >= 1 {
+		// the interpolated frame: between floor(at) and floor(at)+1, at the
+		// fraction — the smooth-playback primitive the window's playback uses
+		lo := int(at_frac)
+		hi := lo + 1
+		if hi <= max_turn {
+			frac := at_frac - f64(lo)
+			interpolated: frame
+			interpolated.turn = lo
+			interpolated.fog = frames[hi].fog
+			interpolated.has_fog = frames[hi].has_fog
+			interpolated.res = frames[hi].res
+			interpolated.pop = frames[hi].pop
+			interpolated.n_battles = frames[hi].n_battles
+			interpolated.battles = frames[hi].battles
+			interpolated.nn = frames[lo].nn
+			interpolated.nodes = frames[lo].nodes
+			for i := 0; i < frames[hi].n; i += 1 {
+				be := &frames[hi].ents[i]
+				x, z := be.x, be.z
+				if be.kind == 0 {
+					for j := 0; j < frames[lo].n; j += 1 {
+						ae := &frames[lo].ents[j]
+						if ae.seat == be.seat && ae.kind == be.kind && ae.eid == be.eid && ae.eid != 0 {
+							x = ae.x + (be.x - ae.x) * frac
+							z = ae.z + (be.z - ae.z) * frac
+							break
+						}
+					}
+				}
+				add_entity(&interpolated, x, z, be.kind, be.seat, be.worker, be.eid)
+			}
+			f = &interpolated
+			rows := render_frame(&vs, f, &cam)
+			fmt.println("frame at", at_frac, "entities", f.n, "fnv1a", fnv(rows))
+			if png_prefix != "" {
+				write_ppm(fmt.aprintf("{}-at{}.ppm", png_prefix, at_frac), rows)
+			}
+			return
+		}
 	}
 	if one_turn > 0 {
 		f = &frames[one_turn]
