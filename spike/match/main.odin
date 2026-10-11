@@ -7159,6 +7159,8 @@ trace_line :: proc(g: ^game_state, si: int, turn: int) {
 		j_key(j, "usage")
 		if g.seats[si].reply_usage != "" {
 			j_raw(j, g.seats[si].reply_usage)
+			// the raw block bypasses j_val, so the separator is set by hand
+			j.sep = true
 		} else {
 			j_null(j)
 		}
@@ -7764,7 +7766,8 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 					rest := cmds[a:]
 					if ob := sindex(rest, "{"); ob >= 0 {
 						if cb := sindex(rest[ob:], "}"); cb >= 0 {
-							g.seats[si].reply_usage = rest[ob+1:ob+cb]
+							// the braces stay: the trace embeds the block whole
+							g.seats[si].reply_usage = rest[ob:ob+cb+1]
 						}
 					}
 				}

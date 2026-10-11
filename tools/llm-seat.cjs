@@ -111,4 +111,4 @@ sock.on('data', d => {
   }
 });
 sock.on('error', e => { console.log(`seat ${seat}: ${e.message}`); process.exit(1); });
-setTimeout(() => { console.log(`seat ${seat}: timeout`); process.exit(1); }, 120000);
+setTimeout(() => { console.log(`seat ${seat}: timeout`); process.exit(1); }, 2400000);
