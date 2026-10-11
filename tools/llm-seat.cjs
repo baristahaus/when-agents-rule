@@ -60,11 +60,13 @@ async function askModel(state) {
   const body = {
     model,
     messages: [
-      { role: 'system', content: 'You command one seat of a real-time strategy match. Choose a few actions per turn.' },
+      { role: 'system', content: 'You command one seat of a real-time strategy match. Call the provided tools to act. Choose a few actions per turn.' },
       { role: 'user', content: JSON.stringify(state) },
     ],
     tools,
-    tool_choice: 'auto',
+    tool_choice: 'required',
+    max_tokens: 1500,
+    chat_template_kwargs: { enable_thinking: false },
   };
   const started = Date.now();
   const res = await fetch(endpoint, {
@@ -81,6 +83,7 @@ async function askModel(state) {
     return { action: tc.function.name, params };
   });
   const usage = j.usage ? { prompt_tokens: j.usage.prompt_tokens, completion_tokens: j.usage.completion_tokens } : null;
+  if (!actions.length) console.error(`seat ${seat} raw: ${JSON.stringify(msg).slice(0,180)} finish: ${j.choices[0].finish_reason}`);
   return { actions, usage, text: (msg && msg.content) || '', latency };
 }
 

@@ -7775,7 +7775,21 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 					rest := cmds[a+len("\"replyText\":"):]
 					if q := sindex(rest, "\""); q >= 0 {
 						rest = rest[q+1:]
-						if qe := sindex(rest, "\""); qe >= 0 {
+						// the closing quote: the first one an escape (\") does not hide
+						qe := -1
+						i := 0
+						for i < len(rest) {
+							if rest[i] == '\\' && i+1 < len(rest) {
+								i += 2
+								continue
+							}
+							if rest[i] == '"' {
+								qe = i
+								break
+							}
+							i += 1
+						}
+						if qe >= 0 {
 							g.seats[si].reply_text = rest[:qe]
 						}
 					}
