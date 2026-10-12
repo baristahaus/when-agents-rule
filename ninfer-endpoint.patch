@@ -1,0 +1,25 @@
+--- a/js/openai-ai.js	2026-10-11 23:43:02.624626014 -0400
++++ b/js/openai-ai.js	2026-10-11 23:43:02.616715373 -0400
+@@ -1367,6 +1367,13 @@
+         if ((u.pathname && u.pathname !== '/') || u.search || u.hash) return null;
+         return OpenAIAIManager.stripSlash(endpoint) + '/v1';
+     }
++    // A pasted LIST path is not an endpoint: ".../v1/models" or ".../chat/completions"
++    // make the models test ask for "/v1/models/models" and read a healthy server
++    // as a 404 (found against a Ninfer endpoint, 2026-10-11). Strip the suffix
++    // once; only KNOWN suffixes are stripped, a real custom path stays as typed.
++    static stripListedPath(endpoint) {
++        return OpenAIAIManager.stripSlash(endpoint).replace(/\/(?:v1\/)?(?:models|chat\/completions)$/i, '') || endpoint;
++    }
+     static ollamaRoot(endpoint) {
+         return OpenAIAIManager.stripSlash(OpenAIAIManager.stripSlash(endpoint).replace(/\/(v1|api)$/i, ''));
+     }
+@@ -2421,7 +2428,7 @@
+     }
+ 
+     static async testConnection(endpoint, auth, provider = 'auto', timeoutMs = 9000) {
+-        endpoint = OpenAIAIManager.normalizeLocalEndpoint(endpoint);
++        endpoint = OpenAIAIManager.stripListedPath(OpenAIAIManager.normalizeLocalEndpoint(endpoint));
+         if (!endpoint) return { ok: false, errorCode: 'noEndpoint', error: 'No endpoint URL set.' };
+         const prov = provider === 'auto' ? OpenAIAIManager.detectProvider(endpoint) : provider;
+         let headers;
