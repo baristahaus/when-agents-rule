@@ -1353,6 +1353,7 @@ seat :: struct {
 	model_name: string, // the model playing this seat ("" = the rule brain)
 	reply_usage: string, // the client's usage block this turn, verbatim JSON
 	reply_text: string, // the client's reply text this turn
+	prompt_version: string, // the prompt the client plays under (b1089: recorded in the trace)
 	sock: net.TCP_Socket,
 	has_sock: bool,
 	// P1 traces: the decisions taken since this seat's last turn record, one
@@ -7192,6 +7193,11 @@ trace_line :: proc(g: ^game_state, si: int, turn: int) {
 	} else {
 		j_null(j)
 	}
+	// the prompt version, only when the seat declared one (b1089)
+	if g.seats[si].prompt_version != "" {
+		j_key(j, "promptVersion")
+		j_str(j, g.seats[si].prompt_version)
+	}
 	j_key(j, "decisions")
 	if g.seats[si].dec_n == 0 {
 		j_raw(j, "[]")
@@ -7779,7 +7785,22 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 					}
 				}
 			}
+			// the prompt version the client plays under (b1089's discipline: the
+			// corpus records WHICH prompt played, not just which model)
+			if a := sindex(hello, "\"promptVersion\""); a >= 0 {
+				rest := hello[a+len("\"promptVersion\":"):]
+				if q := sindex(rest, "\""); q >= 0 {
+					rest = rest[q+1:]
+					if qe := sindex(rest, "\""); qe >= 0 {
+						g.seats[si].prompt_version = rest[:qe]
+					}
+				}
+			}
 		}
+		// the match conditions the seat's prompt needs: the terrain brief is
+		// difficulty-keyed in the reference, and the client cannot know it otherwise
+		ack := fmt.aprintf("{{\"type\":\"hello\",\"difficulty\":\"{}\",\"mapSize\":800,\"seats\":{}}}\n", diff, n_seats)
+		_ = serve_send(cl, ack)
 		fmt.eprintln("serve: seat", si, "attached from", src, "model:", g.seats[si].model_name)
 	}
 

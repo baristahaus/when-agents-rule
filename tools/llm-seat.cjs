@@ -23,6 +23,70 @@
 // ---------------------------------------------------------------------------
 const net = require('net');
 const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// ---- the system prompt: the parent's v108, loaded from THIS tree -----------
+// The seat serves the same default prompt the browser harness serves — not a
+// paraphrase of it. js/openai-ai.js is the single source (defaultSystemPrompt),
+// its sha256 is checked against tests/prompt-version.json (the b1089 pin: a
+// prompt text change without a version bump fails here before a match wastes),
+// and the four placeholders are filled from the state record the same way
+// buildSystemPrompt fills them: the civilization id, the bonus in the model's
+// language (the i18n table), the player count, the map size, the terrain brief.
+const ROOT = path.join(__dirname, '..');
+let PROMPT_VERSION = null;
+let systemPromptFor = null;   // (state) -> string, filled lazily
+try {
+    const shim = {
+        window: {}, self: {}, console,
+        document: { getElementById: () => null, addEventListener: () => {} },
+        localStorage: { getItem: () => null, setItem: () => {} },
+        t: (k) => k,
+    };
+    shim.window = shim; shim.self = shim;
+    const vm = require('vm');
+    const ctx = vm.createContext(shim);
+    for (const f of ['js/openai-ai.js', 'js/civilizations.js', 'js/i18n.js']) {
+        vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+    }
+    vm.runInContext('this.M = OpenAIAIManager;', ctx);
+    const M = ctx.M;
+    const template = M.defaultSystemPrompt();
+    const pin = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/prompt-version.json'), 'utf8'));
+    const sha = crypto.createHash('sha256').update(template).digest('hex');
+    if (sha !== pin.sha256) {
+        console.error(`seat prompt pin MISMATCH: ${sha} != ${pin.sha256} (${pin.version})`);
+        process.exit(1);
+    }
+    PROMPT_VERSION = pin.version;
+    const difficultyBrief = {
+        easy: 'The playing field is a summer valley: food and wood are both abundant.',
+        medium: 'The playing field is a winter valley: food is scarce; wood and stone are normal.',
+        hard: 'The playing field is a desert valley: food and wood are both extremely scarce, and stone is half as common.',
+    };
+    systemPromptFor = (state, match) => {
+        const civId = (state && state.player && state.player.civilization) || 'egyptian';
+        const civ = ctx.getCivilization ? ctx.getCivilization(civId) : null;
+        const desc = civ && civ.bonus ? civ.bonus.description : null;
+        const bonus = (desc && ctx.tgIn) ? ctx.tgIn('en', desc) : (desc || 'None');
+        const players = ((state && state.gameStats && Array.isArray(state.gameStats.opponents))
+            ? state.gameStats.opponents.length : 3) + 1;
+        const mapSize = (match && match.mapSize) || (state && state.map && state.map.size) || 800;
+        const terrain = difficultyBrief[(match && match.difficulty)] || difficultyBrief.medium;
+        return template
+            .replace(/\{\{civilization\}\}/g, civId)
+            .replace(/\{\{bonus\}\}/g, String(bonus))
+            .replace(/\{\{players\}\}/g, String(players))
+            .replace(/\{\{mapSize\}\}/g, String(mapSize))
+            .replace(/\{\{terrain\}\}/g, terrain);
+    };
+    console.log(`seat prompt: ${PROMPT_VERSION} (pin verified)`);
+} catch (e) {
+    // no tree, no pin: the one-line prompt keeps the client usable standalone
+    console.error(`seat prompt: default template unavailable (${e.message}); using the one-line prompt`);
+    systemPromptFor = () => 'You command one seat of a real-time strategy match. Call the provided tools to act. Choose a few actions per turn.';
+}
 
 const seat = Number(process.argv[2] || 0);
 const port = Number(process.argv[3] || 7777);
@@ -66,7 +130,7 @@ async function askModel(state) {
   const body = {
     model,
     messages: [
-      { role: 'system', content: 'You command one seat of a real-time strategy match. Call the provided tools to act. Choose a few actions per turn.' },
+      { role: 'system', content: systemPromptFor(state, match) },
       { role: 'user', content: JSON.stringify(state) },
     ],
     tools,
@@ -94,9 +158,10 @@ async function askModel(state) {
 }
 
 let buf = '';
+let match = { difficulty: 'medium', mapSize: 800 };
 const sock = net.connect(port, '127.0.0.1', () => {
-  sock.write(JSON.stringify({ model }) + '\n');
-  console.log(`seat ${seat}: attached as ${model}`);
+  sock.write(JSON.stringify({ model, promptVersion: PROMPT_VERSION || undefined }) + '\n');
+  console.log(`seat ${seat}: attached as ${model}${PROMPT_VERSION ? ' prompt ' + PROMPT_VERSION : ''}`);
 });
 sock.on('data', d => {
   buf += d.toString();
@@ -106,6 +171,7 @@ sock.on('data', d => {
     if (!line) continue;
     let rec; try { rec = JSON.parse(line); } catch (e) { continue; }
     if (rec.type === 'results') { console.log(`seat ${seat}: match over`); process.exit(0); }
+    if (rec.type === 'hello') { match = rec; continue; }
     if (rec.turn === undefined) continue;
     const respond = answer => sock.write(JSON.stringify(answer) + '\n');
     if (endpoint) {
