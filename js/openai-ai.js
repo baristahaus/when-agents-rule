@@ -1367,6 +1367,18 @@ class OpenAIAIManager {
         if ((u.pathname && u.pathname !== '/') || u.search || u.hash) return null;
         return OpenAIAIManager.stripSlash(endpoint) + '/v1';
     }
+    // A pasted LIST path is not an endpoint: "…/v1/models" or "…/models" or even
+    // "…/v1/chat/completions" make the models test ask for "/v1/models/models"
+    // and read a healthy server as nonexistent — found against a Ninfer endpoint
+    // (2026-10-11) whose /v1/models answered 200 while the arena said 404. The
+    // bare-host case was already covered by the /v1 fallback; the pasted-suffix
+    // case was not. The suffix is stripped here, once, before anything builds a
+    // URL on top — and the verified base is what comes back, so a seat plays the
+    // address that actually answers. Only the KNOWN suffixes are stripped: a real
+    // custom path ("…/api/openai") stays the user's choice, as everywhere else.
+    static stripListedPath(endpoint) {
+        return OpenAIAIManager.stripSlash(endpoint).replace(/\/(?:v1\/)?(?:models|chat\/completions)$/i, '') || endpoint;
+    }
     static ollamaRoot(endpoint) {
         return OpenAIAIManager.stripSlash(OpenAIAIManager.stripSlash(endpoint).replace(/\/(v1|api)$/i, ''));
     }
@@ -2458,7 +2470,7 @@ class OpenAIAIManager {
     }
 
     static async testConnection(endpoint, auth, provider = 'auto', timeoutMs = 9000) {
-        endpoint = OpenAIAIManager.normalizeLocalEndpoint(endpoint);
+        endpoint = OpenAIAIManager.stripListedPath(OpenAIAIManager.normalizeLocalEndpoint(endpoint));
         if (!endpoint) return { ok: false, errorCode: 'noEndpoint', error: 'No endpoint URL set.' };
         const prov = provider === 'auto' ? OpenAIAIManager.detectProvider(endpoint) : provider;
         let headers;
