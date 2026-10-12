@@ -3999,6 +3999,13 @@ class Game {
         // page, so this carried over from the last match, and a Rematch scanned the map
         // on a different beat than the match it repeats. (Think clocks are per seat.)
         if (this.aiManager) this.aiManager.discoveryTimer = 0;
+        // ...and the auto-defense beat and the contact scan's rotation, for the same reason
+        // (b1083). The defense reflex runs every 600 ms on a game-level timer; a second
+        // match in the same page started it part-way through the last match's beat, so its
+        // rallies fell on different steps than a fresh page, which a re-simulation is. A
+        // match played after another one stopped replaying at its first fight.
+        this._autoDefTimer = 0;
+        this._contactTurnIdx = 0;
         this._lockstep = null;          // a match that wants lockstep sets it after this
         this._standingOrders = null;
         this._timeline = { t0: Date.now(), samples: [], ages: [], exhausted: [], wonders: [] };
@@ -5104,6 +5111,9 @@ class Game {
                     // to exactly the players nobody is measuring. Doing it here covers
                     // every owner, and leaves that one as a backstop for its other case:
                     // a scout that never arrives at all.
+                    // ...unless it is on a route, which goes on to its next tile (b1084). Arriving
+                    // anywhere else -- a build site, a node, a move -- ends the route.
+                    if (unit._route && this.continueRoute(unit)) { this.renderer.updateUnitPosition(unit); return; }
                     if (unit.task === 'scouting') unit.task = null;
                     this.renderer.updateUnitPosition(unit);
                 }
@@ -5575,10 +5585,32 @@ class Game {
                     // member for the rest of its life, with no group left that could
                     // ever release it again.
                     if(!unit._standingOrder)unit.marchSpeed = null;
+                    if (unit._route) this.continueRoute(unit);   // a scouting route's next tile (b1084)
                     this.renderer.updateUnitPosition(unit);
                 }
             }
         });
+    }
+
+    // A scouting route (explore with "then", b1084): on arriving at the point its explore
+    // aimed at, the unit takes the next tile, aimed NOW at the darkest part of it for its
+    // owner -- the same aim a fresh explore of that tile would get. Runs in the step, so a
+    // replay walks the same route. Arriving anywhere else means a later order sent it
+    // there, and the route is over. Returns true when the unit set off again.
+    continueRoute(unit) {
+        const r = unit._route;
+        if (!r) return false;
+        unit._route = null;
+        if (!r.stops.length || unit.targetX !== r.aimX || unit.targetZ !== r.aimZ) return false;
+        const owner = this.getOwner(unit), mgr = this.openAIAIManager;
+        if (!owner || !mgr || !mgr.pointInTile) return false;
+        const [next, ...rest] = r.stops;
+        const p = mgr.pointInTile(this, next.row, next.col, this.unitVision(unit), owner);
+        unit.targetX = p.x; unit.targetZ = p.z;
+        unit.isMoving = true;
+        if (unit.type === 'worker') unit.task = 'scouting';
+        unit._route = { stops: rest, aimX: p.x, aimZ: p.z };
+        return true;
     }
     
     updateProduction(deltaTime) {

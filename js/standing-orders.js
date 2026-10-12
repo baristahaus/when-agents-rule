@@ -49,6 +49,21 @@ class StandingOrders {
         return g.owner.id==='player'?!!this.game.fogOfWar?.isPositionVisible(e.x,e.z)
             : !!this.game.aiManager?.isVisibleTo(g.owner,e.x,e.z);
     }
+    // Which of the group's threats THIS member answers (b1085, asp67). A tower is answered
+    // by every member inside its firing range -- the same test the tower shoots by -- and
+    // by nobody else while a mobile attacker of the group is within chase reach: a column
+    // whose head stood in a tower's range used to be bound to the tower whole, so its rear,
+    // forty units off, walked on into the tower while archers shot it down unanswered.
+    // Outside the range a member answers the first mobile threat in the queue (the queue
+    // keeps alternating hits from pulling it to and fro); with none, it joins the group's
+    // target list again, which puts it on the tower.
+    threatFor(g,u,ok=()=>true) {
+        const threats=(g.threats||[]).filter(e=>e&&e.health>0&&ok(e));
+        const tower=threats.find(e=>e.type==='tower');
+        if(tower&&WarMath.hypot(u.x-tower.x,u.z-tower.z)<=(tower.range||6))return tower;
+        const mobile=threats.find(e=>e.type!=='tower'&&WarMath.hypot(u.x-e.x,u.z-e.z)<=StandingOrders.CHASE_RADIUS);
+        return mobile||tower||threats[0]||null;
+    }
     retaliate(victim,attacker) {
         const g=victim?._standingOrder;
         if(!g||!this.groups.has(g)||victim._orderToken!==g.token
@@ -62,9 +77,12 @@ class StandingOrders {
             if(attacker.type==='tower'&&g.threats[0]?.type!=='tower')g.threats.unshift(attacker);
             else g.threats.push(attacker);
         }
-        const focus=g.threats[0],units=this.members(g);
+        // A hit starts the decision for EVERY member, each from where it stands.
+        const units=this.members(g);
         for(const u of units){
             if(u.unitType==='support'||u.type==='worker'||!(u.attack>0))continue;
+            const focus=this.threatFor(g,u);
+            if(!focus)continue;
             // Another hit on an ally is not evidence that THIS soldier can now
             // catch the attacker. Keep failed-chase protection until the normal
             // retry scan sees a closer/in-range opportunity. Towers still win.
@@ -110,7 +128,23 @@ class StandingOrders {
         }
         return true;
     }
-    placeSlots(units,to,offsets) {
+    // Where the owner's OTHER groups already stand (b1086): their slots, for the members
+    // still on them. A unit sent to a rally point on its own got the point itself as its
+    // slot, and so did the next one, and the next: twenty single-unit orders to one spot
+    // owned one spot, and friendly separation and the walk back to it shoved the crowd
+    // about for as long as it stood there.
+    reservedSlots(g) {
+        const taken=[];
+        if(!g)return taken;
+        for(const o of this.groups){
+            if(o===g||o.owner!==g.owner)continue;
+            for(const [u,s] of o.slots)if(u.health>0&&u._standingOrder===o)taken.push(s);
+        }
+        return taken;
+    }
+    placeSlots(units,to,offsets,g=null) {
+        const taken=this.reservedSlots(g);
+        const free=p=>taken.every(s=>WarMath.hypot(p.x-s.x,p.z-s.z)>=1.8);
         // Reserve distinct resting places. Sending an unformed army to one point
         // makes the mover fight friendly separation forever. Keep its free pace,
         // but give it a compact footprint with support in the ranged ranks.
@@ -130,7 +164,7 @@ class StandingOrders {
             for(let k=0;k<count;k++){
                 const angle=k*Math.PI*2/count,dx=WarMath.cos(angle)*ring*3,dz=WarMath.sin(angle)*ring*3;
                 const slots=desired.map(p=>({x:p.x+dx,z:p.z+dz}));
-                if(slots.every(legal))return new Map(units.map((u,i)=>[u,slots[i]]));
+                if(slots.every(p=>legal(p)&&free(p)))return new Map(units.map((u,i)=>[u,slots[i]]));
             }
         }
         // A cramped village may have no room for the whole shape. Allocate nearby
@@ -141,7 +175,7 @@ class StandingOrders {
             for(let i=0;i<1024;i++){
                 const radius=2*Math.sqrt(i),angle=i*2.399963229728653;
                 const q={x:p.x+WarMath.cos(angle)*radius,z:p.z+WarMath.sin(angle)*radius};
-                if(legal(q)&&placed.every(s=>WarMath.hypot(q.x-s.x,q.z-s.z)>=1.8)){chosen=q;break;}
+                if(legal(q)&&free(q)&&placed.every(s=>WarMath.hypot(q.x-s.x,q.z-s.z)>=1.8)){chosen=q;break;}
             }
             placed.push(chosen||this.game.clampSlot(p.x,p.z));
         }
@@ -151,7 +185,7 @@ class StandingOrders {
         const units=this.members(g);if(!units.length)return;
         const form=this.manager.applyFormation(this.game,units,to.x,to.z,g.shape);
         this.manager.applyMatchSpeed(units,g.pace||(form.applied?'slowestUnit':''));
-        g.slots=this.placeSlots(units,to,form.offsets);g.leg={...to};
+        g.slots=this.placeSlots(units,to,form.offsets,g);g.leg={...to};
         g.holdSlots=null;
         g.supportSlots=null;g.supportAnchor=null;
         g.settled=false;
@@ -291,8 +325,9 @@ class StandingOrders {
                 const t=Math.max(0,Math.min(1,((e.x-g.from.x)*dx+(e.z-g.from.z)*dz)/(dx*dx+dz*dz||1)));
                 return WarMath.hypot(e.x-g.from.x-t*dx,e.z-g.from.z-t*dz);
             };
+            const threat=e=>!!(e&&g.threats?.includes(e));
             const valid=e=>e&&e.health>0&&visible(e)&&
-                (e===focus||e===g.target||g.targets!=='military'||(e.type!=='worker'&&e.unitType!=='support'&&e.attack>0));
+                (threat(e)||e===g.target||g.targets!=='military'||(e.type!=='worker'&&e.unitType!=='support'&&e.attack>0));
             const withinLeash=(e,retaining=false)=>{
                 const radius=retaining?StandingOrders.CHASE_RADIUS:StandingOrders.ACQUIRE_RADIUS;
                 const route=retaining?StandingOrders.ROUTE_CHASE_RADIUS:StandingOrders.ROUTE_ACQUIRE_RADIUS;
@@ -307,7 +342,7 @@ class StandingOrders {
             const eligible=(u,e)=>{
                 if(!valid(e))return false;
                 if(holding&&u&&!holds(u,e))return false;
-                if(e===focus)return e.type==='tower'||!g.blocked.get(u)?.has(e);
+                if(threat(e))return e.type==='tower'||!g.blocked.get(u)?.has(e);
                 if(e===g.target)return true;
                 if(wonderRun)return false;
                 return !g.blocked.get(u)?.has(e)&&withinLeash(e);
@@ -349,8 +384,10 @@ class StandingOrders {
                 if(wonderRun&&target&&target!==g.target&&!g.threats?.includes(target)){
                     u.attackTarget=null;u.isAttacking=false;this.game.clearRetaliation(u);g.chases.delete(u);target=null;
                 }
-                if(focus&&valid(focus)&&eligible(u,focus)&&(target===focus
-                    ||WarMath.hypot(u.x-focus.x,u.z-focus.z)<=StandingOrders.CHASE_RADIUS))target=focus;
+                // Each member's own answer (threatFor), not one focus for the whole group.
+                const mine=focus?this.threatFor(g,u,e=>valid(e)&&eligible(u,e)):null;
+                if(mine&&(target===mine
+                    ||WarMath.hypot(u.x-mine.x,u.z-mine.z)<=StandingOrders.CHASE_RADIUS))target=mine;
                 if(target){
                     const distance=WarMath.hypot(u.x-target.x,u.z-target.z);
                     let chase=g.chases.get(u);
@@ -370,14 +407,14 @@ class StandingOrders {
                     // escaped, walked back toward the group, was shot, turned, and was told
                     // again -- 17 times in 150 s of a live Platform match (29 Sep 2026).
                     // Still leashed: a retreating attacker cannot lure it across the map.
-                    const own=target===focus,fromDist=WarMath.hypot(target.x-chase.from.x,target.z-chase.from.z);
+                    const own=threat(target),fromDist=WarMath.hypot(target.x-chase.from.x,target.z-chase.from.z);
                     if(own?fromDist<=StandingOrders.CHASE_RADIUS:withinLeash(target,true))chase.outsideAt=null;
                     else if(chase.outsideAt==null)chase.outsideAt=this.time;
                     const escaped=chase.outsideAt!=null&&this.time-chase.outsideAt>=StandingOrders.BOUNDARY_GRACE_MS;
                     const tooFar=(own?fromDist:WarMath.hypot(target.x-anchor.x,target.z-anchor.z))>StandingOrders.CHASE_RADIUS*1.5;
                     const stalled=!inRange&&this.time-chase.at>=StandingOrders.STALL_MS;
-                    const bounded=target===focus?target.type!=='tower':target!==g.target;
-                    const defendingInRange=target===focus&&distance<=this.game.attackRangeAgainst(u,target);
+                    const bounded=own?target.type!=='tower':target!==g.target;
+                    const defendingInRange=own&&distance<=this.game.attackRangeAgainst(u,target);
                     const leftHold=holding&&!holds(u,target);
                     if(!valid(target)||leftHold||(bounded&&!defendingInRange&&(escaped||tooFar||stalled))){this.releaseTarget(g,u,target);target=null;}
                 }
@@ -389,7 +426,7 @@ class StandingOrders {
                     // picked it again. Beyond the reach it marches on and joins on arrival.
                     let best=engaging?Infinity:Math.max(36,(u.range||1)+24);
                     for(const e of candidates){
-                        if(g.mode==='scout'&&e!==focus)continue;
+                        if(g.mode==='scout'&&!threat(e))continue;
                         const d=WarMath.hypot(e.x-u.x,e.z-u.z);
                         if(engaging&&e!==g.target&&d>StandingOrders.CHASE_RADIUS*1.5)continue;
                         if(d<best&&eligible(u,e)){best=d;target=e;}
@@ -403,7 +440,9 @@ class StandingOrders {
             // If no member can productively pursue the mobile threat, it has been
             // driven off. Keep individual retry protection, but release the shared
             // emergency so the original assignment can resume.
-            if(focus&&focus.type!=='tower'&&!units.some(u=>u.attackTarget===focus))g.threats.shift();
+            // Any mobile threat in the queue -- not only its head, now that members answer
+            // different ones -- that no member still pursues.
+            if(g.threats)g.threats=g.threats.filter(e=>e.type==='tower'||units.some(u=>u.attackTarget===e));
             if(fighting){
                 if(!g.fighting){g.anchor=center;g.fighting=true;}
                 // Non-engaging members wait nearby; priests still heal in range.

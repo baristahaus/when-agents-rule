@@ -39,6 +39,143 @@ tree's own work is the Odin core, held to these rules by the byte-exact golden c
 record of that effort is `docs/REBUILD-EFFORT.md`, the design is `docs/DESIGN_SPEC.md` §14
 and `docs/REBUILD_PROPOSAL.md`.
 
+## Build 1089: prompt version v108, and the prompt pinned to its version (10 October 2026)
+
+**No rules change; the prompt version.** asp67's arena of 10 October 18:08 ran on the old system prompt, with `agents-rule-v107` recorded.
+
+The system prompt's command list is generated from the tool definitions. Since b1084 its explore line reads `explore: tile, then?, unitType?, unitIds?`. The version was not bumped with that change. A saved arena prompt is replaced by the default only when the version changes, so saved prompts kept the old line, `explore: tile, unitType?, unitIds?`. Those were the only seven characters that differed. The models still had `then` in their tool definitions and used it, but the prompt's own list did not show it.
+
+**Now:**
+- `UIManager.ARENA_PROMPT_VERSION` is **agents-rule-v108**. A saved prompt, and any slot prompt that was a plain copy of it, is replaced by the current default on the next load. Real edits are kept, as before.
+- `tests/prompt-version.test.cjs` pins the default prompt's sha256 to the version (`tests/prompt-version.json`). Any change to the prompt text fails it until the version is bumped and both are recorded, including one that arrives through a tool parameter, as this one did.
+
+## Build 1088: a chin and a smile (10 October 2026)
+
+**No rules change; the unit faces.** asp67: the clean-shaven faces' chins were as wide as the whole head.
+
+**The chin.** The Romans and the Maya had a jaw two thirds the width of the head, a shelf across the lower face. It is now a small rounded chin under the mouth, inside the head's outline.
+
+**The mouth**, on every civilization:
+- It was a flat dark slit the width of the lips, set in a raised skin lip, and read as a frown or a pout. It is now a short line with its two corners turned up.
+- The lip surround is smaller, and drawn only where there is a beard, where it keeps the mouth legible against dark hair.
+
+Checked in close-up and at play distance, clean-shaven (Maya, Romans) and bearded (Greek, Viking, Persian).
+
+## Build 1087: the Viking hof's upper storey sits on its roof (10 October 2026)
+
+**No rules change; a model fix.** asp67 saw the upper part of the Viking temple hovering. Its upper storey was a box whose walls ended at height 3.9. The lower roof slopes away from its ridge, and under those walls it stands at only 3.5, which left a gap along both long sides. The box now reaches down to 3.4, into the slope, and keeps its top at 4.9 under the upper roof.
+
+## Build 1086: a rally point fills up instead of churning (10 October 2026)
+
+**Rules change: where a standing order's units stand.** asp67 saw troops sent to a rally point one after the other, with no formation, shove each other about in a moving blob.
+
+**The cause.** Each `move_units` order lays out slots for its own units. One unit's slot is the target point itself. So twelve single-unit orders to one spot all owned the same spot, and friendly separation pushed them off it while their orders walked them back. Measured on a board: twenty single-unit orders to one point still had about twelve units moving at any moment ninety seconds later. A single order for all twenty settled in two seconds.
+
+**Now** a new order's slots avoid the places the same owner's other groups already hold (`StandingOrders.reservedSlots`): the slots of their members still on that order, kept 1.8 apart as slots within one order already were. A whole shape is moved onto open ground when it can be, and otherwise each unit takes the nearest free place. The rally point fills up as a cluster around the point and stands still.
+
+Only the owner's own groups are counted. A unit that has been given a new order no longer holds its old slot.
+
+**Tests.** `tests/rally-point.test.cjs`: twelve single-unit orders to one point. They must move less than 0.05 in ten seconds after arriving, hold distinct places, and stand within 8 of the point. On the old rule they moved 16.8 in those ten seconds.
+
+## Build 1085: towers first only for those the tower can hit (10 October 2026)
+
+**Rules change: retaliation under a standing order.** asp67 watched it happen. An army was sent at a tower. The head of the column walked into the tower's range and was shot, and from then on the whole group answered the tower: a tower always took the front of the group's shared threat queue. The rear, still forty units out, was shot by enemy archers. It walked on toward the tower without answering and was picked off before it arrived.
+
+**Now a hit starts the decision for every member of the group, each from where it stands** (`StandingOrders.threatFor`):
+- **Inside a tower's firing range:** the member stays on the tower. That is the same test the tower shoots by: `tower.range`, or 6 when it has none.
+- **Outside it:** the member answers a mobile attacker of the group within chase reach (64). It takes the first one in the queue, so alternating hits still do not pull it to and fro.
+- **Neither:** with no mobile attacker in reach, it joins the group's target list again, which is the tower.
+
+The periodic scan asks the same question, so a member keeps its own answer instead of being pulled back to one shared focus. Every live threat counts as the group's own fight for leash and release purposes, not only the head of the queue. A mobile threat no member still pursues is dropped from the queue, wherever it stands in it.
+
+Reproduced in the real rules (two militia at the tower, three archers 40 out under archer fire):
+- **Before:** the archers died walking on, without a shot; the enemy archers lost nothing.
+- **Now:** the militia stay on the tower and the archers turn on their attackers within one scan.
+
+**Tests.**
+- `tests/standing-orders.test.cjs` gains the head/tail case: the head stays on the tower, the tail answers the raider and then rejoins the tower. It fails on the old rule.
+- The existing siege test now gives its stub tower a real range (18), which its units stand inside.
+
+**Prompt.** Unchanged. "prioritizing towers until destroyed" still holds for the members a tower can hit.
+
+## Build 1084: a scout takes a route of up to three tiles (10 October 2026)
+
+**Command change: `explore` takes `"then"`.** Besides `"tile"`, a model may name up to two more tiles, visited in order: `{"tile":"C5","then":["D5","E6"]}`.
+
+**Why.** On the large map a scout reached its tile and then stood still until its seat's next turn, often 15 to 60 seconds later. Each tile also cost a command slot.
+
+**How a route runs.**
+- Any unit may take a route, a worker too. asp67's ruling: the model decides; a worker sent on a three-tile loop goes.
+- Each next tile is aimed when the unit reaches the one before it, at the darkest part of that tile for its owner. That is the same aim a fresh explore of the tile gets, so it heads for what is still unseen *then*.
+- This runs in the simulation step (`Game.continueRoute`, called where workers and other units arrive), so Playback walks the same route.
+- The last arrival ends exactly as a plain explore does: the unit stops there, and a worker is no longer counted as scouting.
+
+**How a route ends early.** A route is held against the point its order aimed at. If the unit arrives anywhere else (a new order, a build it was pulled to, a node), the route is over. A new explore always replaces an old route.
+
+**What the model is told.**
+- The reply names the route: "…to scout tile C5 (~12s to arrive), then D5, then E6."
+- `ordersInProgress` carries `{"order":"explore","unitIds":[…],"to":[x,z],"route":["D5","E6"],"secondsRemaining":…}` while tiles remain after the leg in progress. The last leg is a plain explore and is not listed.
+- `game-state-schema.json` declares `route` and widens the `unitIds` and `order` wording.
+
+**Refusals.** Nothing is sent when either applies:
+- more than three tiles in all: new outcome code `exploreRouteTooLong`, classed *reference*;
+- a bad label in `"then"`: `exploreBadTile`.
+
+A list written as one string ("D5, E6") is read as the same list.
+
+**Prompt.** The system prompt is unchanged. The tool definitions grow by about 35 tokens to about 2,630, so the tool-schema tripwire in `tests/prompt-budget.json` is raised from 2,600 to 2,660, recorded there.
+
+**Tests.** `tests/explore-route.test.cjs`:
+- a worker walks three tiles in order and ends as a plain explore does;
+- a later order ends the route;
+- too many tiles or a bad tile sends nothing;
+- a soldier walks a route too.
+
+## Build 1083: a second match plays like the first, and Playback (10 October 2026)
+
+**No rules change; a determinism fix.** The transcript of the match played at 00:24 on 10 October stopped in the analyzer at step 34,137 (input 409): "diverged". So did the one from 11:35. The match before them, played first after a page load, replayed to the end.
+
+**The cause.** Two game-level clocks were never reset between matches:
+- the auto-defense reflex runs every 600 ms on `game._autoDefTimer`;
+- the contact scan takes the seats in turn by `game._contactTurnIdx`.
+
+A second match in the same page started both part-way through the last match's beat. A re-simulation is always a fresh page and starts them at zero.
+
+In the 00:24 match the defense beat started 300 ms in. A Maya scout picked a fight with a Roman militia at the edge of the Roman base, and the Roman army answered it six steps earlier than the replay's did. Replayed with the beat started at 300 ms, the match passes the point where it stopped; every other phase stops there.
+
+**The fix.** `resetTimeline()` resets both, as it already did the brain's discovery beat for the same reason. Matches recorded before this build that were not the first in their page may still stop at their first fight.
+
+**Tests.** `tests/match-carryover.test.cjs` starts a match, plays an odd number of steps, then starts a second match in the same page. Every number the game, the brain and the harness keep must equal a fresh page's, and the two must play the same match. It names any field that carries over, not just these two.
+
+**Playback.** The analyzer's "Re-simulate" is now **Playback** (Wiedergabe, Reproducción, 回放), in its chip, its mode label and its "unavailable" message.
+
+**Tool.** `tools/bench/transcript-replay.cjs` passes the transcript's map size to the rebuilt match. It rebuilt every large-map transcript at 800 and diverged at step 0.
+
+## Build 1082: the whole late-game map in a third of the frame (10 October 2026)
+
+**No rules change; drawing only.** A late game on the large map, with most of it explored and the camera pulled back to show all of it, stuttered. Measured on the same scene: 65 % of the map explored along scout trails, 416 units, 76 buildings, four towns. Before, a frame was about 17,600 draw calls and 27 ms. Now it is about 4,200 draw calls and 7 ms. The fog, its texture and the minimap together cost under 4 ms twice a second, so they were not the cause.
+
+**Resource nodes are drawn in chunks.**
+- Every node in a 64-unit square is merged into one mesh per material.
+- A tree was five draw calls: shadow, trunk, two branches and crown. The explored forests alone came to about 8,000 draw calls.
+- A chunk is built the first time it has something to show.
+- A node that is depleted, or still under fog, is not rebuilt out. Its vertices are collapsed to a point in place and restored when it shows again, so felling a tree costs one small buffer write.
+
+**A unit seen from far away is one still mesh per material.**
+- Past zoom 150 (the shadows are gone by 160), a unit's bone-groups are merged at their rest pose.
+- Its small plain textures (skin, hair, leather, iron, feathers) are merged too, each painted its texture's average colour from a 64×1 palette.
+- The seat colour, the badge and the shadow keep their own draws.
+- About 4 draw calls a unit instead of 11 to 17. At that zoom a unit is two or three pixels tall.
+- A unit still turns, bobs, flashes and fades. A death ghost snapshots whichever model was drawn.
+
+**The draw loop sets only what changed** from the draw before: texture, tint, alpha, material and the rest.
+
+Covered by `tests/resource-chunks.test.cjs`:
+- the merge matches the existing one;
+- a forest is a few draws;
+- a felled or fogged tree collapses in place and comes back;
+- a far unit keeps every vertex in at most five meshes.
+
 ## Build 1081: the patrol's start declared, and five tests from a contributor (8 October 2026)
 
 **No rules change; a contract fix and tests.** From pull request #3 by baristahaus, written against build 1054 and brought onto this build by hand: the parts that still apply, with two tests adjusted to later decisions.

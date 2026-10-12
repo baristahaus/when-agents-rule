@@ -53,3 +53,5 @@ spike/bin/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+# Local agent skill mirror (private production procedure — never publish)
+.agents/
