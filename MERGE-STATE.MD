@@ -4,7 +4,16 @@ One page that is always true about where this fork stands against the parent, wr
 that whoever picks it up next (including a future me with no memory) can rebuild the whole
 picture from measurements instead of trust. Update it **as you work**, not at the end.
 
-Last updated: 8 October 2026, at HEAD on `rebuild/v2`, after the b1081 merge — the
+Last updated: 11 October 2026, at HEAD on `rebuild/v2`, after the b1089 merge — the
+parent's ten more builds (b1082–b1089), absorbed with two conflicts (`.gitignore` and
+`docs/RULES-CHANGES.md`, both additive), and the golden corpus measured UNCHANGED by the
+merge: all 16 Odin gates green after it, gate 8 the byte-check (the Odin match folder's
+transcript still IS the pinned `golden/stream-1m.jsonl`), and 725 v1 tests pass. One fork
+bug the merge caught: upstream's b1083 carryover test failed on `_stepStamp`, the fork's
+own field, leaking across matches exactly the way their `_autoDefTimer` did — reset with
+them. explore's route (b1084) and the rally fill (b1086) did not move the recorded match,
+but the b1084 state-shape change (route legs in `ordersInProgress`) is porting work — see
+the bead.
 parent's twenty-seven more builds (b1055–b1081), absorbed with five conflicts, and the
 golden corpus re-recorded at the merged rules the same day (see below).
 parent's fifteen builds, absorbed with our divergences on top.

@@ -4006,6 +4006,10 @@ class Game {
         // match played after another one stopped replaying at its first fight.
         this._autoDefTimer = 0;
         this._contactTurnIdx = 0;
+        // ...and the step stamp, the fork's own addition (D-divergence bookkeeping reads it
+        // to stamp orders by step): the same page-level leak the b1083 fields had, so the
+        // fork's resetTimeline resets it with them.
+        this._stepStamp = 0;
         this._lockstep = null;          // a match that wants lockstep sets it after this
         this._standingOrders = null;
         this._timeline = { t0: Date.now(), samples: [], ages: [], exhausted: [], wonders: [] };
