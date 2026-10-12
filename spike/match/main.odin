@@ -1195,6 +1195,11 @@ unit_state :: struct {
 	build_site: int, // this seat's bldgs index; -1 none
 	speed: f64, // unit.speed: workers 1.0 (moveSpeedOf's own pace)
 	scout_ticks: int, // the scouting leg's _scoutTicks
+	// --- the scouting route (b1084): explore's "then", walked in order ---
+	route_stops: [2][2]i32, // the tiles still to walk, {row, col} each
+	route_n: int,
+	route_aim_x, route_aim_z: f64, // the point this leg aims at; anything else aimed ends the route
+	explore_turn: int, // _exploreTurn: the last turn this unit was sent to explore
 	farm: int, // this seat's bldgs index (farmRef); -1 none
 	former_task: int, // _formerTask.task (-1 none): the pulled worker's restore
 	former_node: int, // _formerTask.harvestTarget
@@ -2776,6 +2781,51 @@ observe_line :: proc(o: ^obs) {
 		j_int(j, i64(row_n))
 		j_key(j, "secondsRemaining")
 		j_int(j, i64(row_eta))
+		j_end_obj(j)
+		j_end_arr(j)
+	}
+
+	// A scouting route with tiles still to come (b1084): the leg it is on, and
+	// the tiles after it. The last leg is a plain explore again, shown as one
+	// always was — so only units with stops left appear here.
+	for i in 0 ..< s.n_units {
+		u := &s.units[i]
+		if u.route_n <= 0 || u.health <= 0 || !u.is_moving {
+			continue
+		}
+		if u.target_x != u.route_aim_x || u.target_z != u.route_aim_z {
+			continue
+		}
+		j_key(j, "ordersInProgress")
+		j_arr(j)
+		j_obj(j)
+		j_key(j, "order")
+		j_str(j, "explore")
+		j_key(j, "unitIds")
+		j_arr(j)
+		j_int(j, i64(u.handle))
+		j_end_arr(j)
+		j_key(j, "to")
+		j_arr(j)
+		j_int(j, cast(i64)(math.floor(u.route_aim_x + 0.5)))
+		j_int(j, cast(i64)(math.floor(u.route_aim_z + 0.5)))
+		j_end_arr(j)
+		j_key(j, "route")
+		j_arr(j)
+		for k in 0 ..< u.route_n {
+			l := tile_label(int(u.route_stops[k][0]), int(u.route_stops[k][1]))
+			j_str(j, l)
+			delete(l)
+		}
+		j_end_arr(j)
+		d := m_hypot(u.x - u.route_aim_x, u.z - u.route_aim_z)
+		sp := u.speed * 3
+		eta := 1.0
+		if sp > 0 {
+			eta = math.max(1, math.ceil(d / sp))
+		}
+		j_key(j, "secondsRemaining")
+		j_int(j, i64(eta))
 		j_end_obj(j)
 		j_end_arr(j)
 	}
@@ -5017,6 +5067,11 @@ update_unit_movement :: proc(g: ^game_state, dt: f64) {
 				u.is_moving = false
 				u.x = u.target_x
 				u.z = u.target_z
+				// a scouting route's next tile (b1084): only when the arrival is
+				// the point the explore aimed at; anything else ends the route
+				if u.route_n > 0 {
+					continue_route(g, s, u)
+				}
 			}
 		}
 	}
@@ -6390,6 +6445,11 @@ update_worker_tasks :: proc(g: ^game_state, s: ^seat, dt: f64) {
 					u.is_harvesting = true
 					u.harvest_timer = 0
 				}
+				// a scout on a route walks on to its next tile (b1084); arriving
+				// anywhere else - a build site, a node, a move - ends the route
+				if u.route_n > 0 && continue_route(g, s, u) {
+					continue
+				}
 				// a scout that has arrived has finished scouting
 				if u.task == TASK_SCOUTING {
 					u.task = TASK_NONE
@@ -7598,9 +7658,10 @@ serve_execute :: proc(g: ^game_state, si: int, line: string) -> string {
 		// the params object: the first "key":"value" pair inside the next {...}
 		pb := sindex(rest, "{")
 		pe := sindex(rest, "}")
-		variant, val := "", ""
+		variant, val, pobj := "", "", ""
 		if pb >= 0 && pe > pb {
 			obj := rest[pb + 1:pe]
+			pobj = obj
 			k := sindex(obj, ":")
 			if k >= 0 {
 				key := strings.trim_space(obj[:k])
@@ -7632,14 +7693,10 @@ serve_execute :: proc(g: ^game_state, si: int, line: string) -> string {
 				n_res += 1
 			}
 		} else if action == "explore" {
-			// the same dispatch the brain's exploreMap uses, forced
-			if s.n_units > 0 {
-				results[n_res] = fmt.aprintf("{{\"action\":\"explore\",\"ok\":true}}")
-				n_res += 1
-			} else {
-				results[n_res] = fmt.aprintf("{{\"action\":\"explore\",\"ok\":false,\"error\":\"[ERROR] no units to send\"}}")
-				n_res += 1
-			}
+			// the v1 executor's explore: the tile, the route (b1084) and the
+			// pick, the same gates and reply text the reference's model reads
+			results[n_res] = serve_explore(g, s, pobj)
+			n_res += 1
 		} else if action == "research_tech" && variant == "techId" {
 			if serve_research(g, s, val) {
 				results[n_res] = fmt.aprintf("{{\"action\":\"research_tech\",\"ok\":true}}")
@@ -8002,3 +8059,492 @@ main :: proc() {
 	_ = os.write_entire_file(os.args[1], j.buf[:j.n])
 }
 
+
+// ---- the scouting route (b1084) -------------------------------------------
+// openai-ai.js parseTile: "c5" -> {row, col}, deliberately strict about SHAPE
+// (one letter, then digits) so "5C" fails loudly instead of being reinterpreted.
+parse_tile :: proc(label: string, t: int) -> (int, int, bool) {
+	if len(label) < 2 {
+		return -1, -1, false
+	}
+	c := label[0]
+	if c >= 'a' && c <= 'z' {
+		c -= 32
+	}
+	if c < 'A' || c > 'Z' {
+		return -1, -1, false
+	}
+	col := int(c - 'A')
+	if col < 0 || col >= t {
+		return -1, -1, false
+	}
+	d := label[1:]
+	v := 0
+	for j := 0; j < len(d); j += 1 {
+		if d[j] < '0' || d[j] > '9' {
+			return -1, -1, false
+		}
+		v = v*10 + int(d[j] - '0')
+	}
+	row := v - 1
+	if row < 0 || row >= t {
+		return -1, -1, false
+	}
+	return row, col, true
+}
+
+// game.js explorationSummary, for one tile: round(seen cells / 36 * 100).
+tile_seen_pct :: proc(s: ^seat, row, col: int) -> int {
+	G := 42
+	S := 6
+	seen := 0
+	for z := row * S; z < (row + 1) * S; z += 1 {
+		for x := col * S; x < (col + 1) * S; x += 1 {
+			seen += int(s.explored[z * G + x])
+		}
+	}
+	return (seen * 100 + 18) / 36
+}
+
+// openai-ai.js pointInTile: aim at the DARKEST cell of the tile this owner has
+// not seen, skipping unwalkable cells (a scout aimed into the sea is held at the
+// shoreline and would leave that cell dark forever); fall through to the inset
+// box when every reachable cell is already seen, so a re-sweep spreads out.
+// The draws are keyed "s<seat>:explore", the channel game.rand(owner, 'explore').
+point_in_tile :: proc(g: ^game_state, s: ^seat, row, col: int, inset: f64) -> (f64, f64) {
+	size := g.terrain.size
+	T := 7
+	G := 42
+	S := 6
+	cw := size / f64(G)
+	half := size / 2
+	best := f64(2)
+	cands: [36][2]f64
+	n_c := 0
+	for z := row * S; z < (row + 1) * S; z += 1 {
+		for x := col * S; x < (col + 1) * S; x += 1 {
+			cx := -half + (f64(x) + 0.5) * cw
+			cz := -half + (f64(z) + 0.5) * cw
+			if math.max(m_abs(cx), m_abs(cz)) > land_limit(cx, cz) {
+				continue
+			}
+			v := f64(s.explored[z * G + x])
+			if v < best {
+				best = v
+				n_c = 1
+				cands[0] = {cx, cz}
+			} else if v == best {
+				cands[n_c] = {cx, cz}
+				n_c += 1
+			}
+		}
+	}
+	key := fmt.aprintf("s{}:explore", s.ci)
+	defer delete(key)
+	if n_c > 0 && best < 1 {
+		c := cands[int(krng_draw(&s.k, key) * f64(n_c)) %% n_c]
+		return math.max(-half, math.min(half, c[0] + (krng_draw(&s.k, key) - 0.5) * cw * 0.6)),
+			math.max(-half, math.min(half, c[1] + (krng_draw(&s.k, key) - 0.5) * cw * 0.6))
+	}
+	cell := size / f64(T)
+	pad := inset
+	if pad > cell/2 - 1 {
+		pad = cell/2 - 1
+	}
+	x0 := f64(col) * cell - half + pad
+	x1 := f64(col + 1) * cell - half - pad
+	z0 := f64(row) * cell - half + pad
+	z1 := f64(row + 1) * cell - half - pad
+	return math.max(-half, math.min(half, x0 + krng_draw(&s.k, key) * (x1 - x0))),
+		math.max(-half, math.min(half, z0 + krng_draw(&s.k, key) * (z1 - z0)))
+}
+
+// game.js continueRoute (b1084): on arriving at the point the explore aimed at,
+// aim the next tile at ITS darkest cell for this owner — the same aim a fresh
+// explore of that tile would get. Arriving anywhere else (a build site, a node,
+// a later move) ends the route without having to know about it. Returns true
+// when the unit set off again.
+continue_route :: proc(g: ^game_state, s: ^seat, u: ^unit_state) -> bool {
+	if u.route_n <= 0 {
+		return false
+	}
+	stops := u.route_stops
+	n := u.route_n
+	aim_x, aim_z := u.route_aim_x, u.route_aim_z
+	u.route_n = 0
+	if n <= 0 {
+		return false
+	}
+	if u.target_x != aim_x || u.target_z != aim_z {
+		return false
+	}
+	tx, tz := point_in_tile(g, s, int(stops[0][0]), int(stops[0][1]), unit_vision(u))
+	u.target_x = tx
+	u.target_z = tz
+	u.is_moving = true
+	if u.u_type == "worker" {
+		u.task = TASK_SCOUTING
+	}
+	for i := 1; i < n; i += 1 {
+		u.route_stops[i - 1] = stops[i]
+	}
+	u.route_n = n - 1
+	u.route_aim_x = tx
+	u.route_aim_z = tz
+	return true
+}
+
+// ---- the serve executor's explore (the b1084 executor) ---------------------
+// Field scanners over the params object. The executor's other actions read one
+// key:value pair; explore needs four, so these walk the object directly.
+
+// the first "key":"value" pair's value, "" when absent
+jstr_field :: proc(obj: string, key: string) -> string {
+	pat := fmt.aprintf("\"{}\":\"", key)
+	defer delete(pat)
+	i := sindex(obj, pat)
+	if i < 0 {
+		return ""
+	}
+	rest := obj[i + len(pat):]
+	qe := sindex(rest, "\"")
+	if qe < 0 {
+		return ""
+	}
+	return rest[:qe]
+}
+
+// the string items of "key":["a","b"], at most 4
+jarr_field :: proc(obj: string, key: string, out: []string) -> int {
+	pat := fmt.aprintf("\"{}\":[", key)
+	defer delete(pat)
+	i := sindex(obj, pat)
+	if i < 0 {
+		return 0
+	}
+	rest := obj[i + len(pat):]
+	e := sindex(rest, "]")
+	if e < 0 {
+		return 0
+	}
+	rest = rest[:e]
+	n := 0
+	for {
+		q := sindex(rest, "\"")
+		if q < 0 || n >= len(out) {
+			break
+		}
+		rest = rest[q + 1:]
+		qe := sindex(rest, "\"")
+		if qe < 0 {
+			break
+		}
+		out[n] = rest[:qe]
+		n += 1
+		rest = rest[qe + 1:]
+	}
+	return n
+}
+
+// the integers of "key":[1,2]
+jints_field :: proc(obj: string, key: string, out: []int) -> int {
+	pat := fmt.aprintf("\"{}\":[", key)
+	defer delete(pat)
+	i := sindex(obj, pat)
+	if i < 0 {
+		return 0
+	}
+	rest := obj[i + len(pat):]
+	e := sindex(rest, "]")
+	if e < 0 {
+		return 0
+	}
+	rest = rest[:e]
+	n := 0
+	for {
+		// skip to a digit
+		for len(rest) > 0 && (rest[0] < '0' || rest[0] > '9') {
+			rest = rest[1:]
+		}
+		if len(rest) == 0 || n >= len(out) {
+			break
+		}
+		v := 0
+		for len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+			v = v*10 + int(rest[0] - '0')
+			rest = rest[1:]
+		}
+		out[n] = v
+		n += 1
+	}
+	return n
+}
+
+// is a unit in combat: a live attack reference (the state view's predicate).
+in_combat :: proc(g: ^game_state, u: ^unit_state) -> bool {
+	return u.is_attacking && u.atk_kind != 0 && ref_alive(g, u.atk_kind, u.atk_seat, u.atk_idx)
+}
+
+// openai-ai.js pickScout, the auto-pick: idleMilitary first (the farthest-seeing
+// idle soldier, the first of equals), then the idle worker, then a free worker,
+// then anything not in combat. The preferred type wins first when it is present.
+pick_scout :: proc(g: ^game_state, s: ^seat, preferred: string, turn: int) -> int {
+	if preferred != "" {
+		for u in 0 ..< s.n_units {
+			w := &s.units[u]
+			if w.health <= 0 || w.u_type != preferred || w.explore_turn == turn {
+				continue
+			}
+			if !in_combat(g, w) {
+				return u
+			}
+		}
+		for u in 0 ..< s.n_units {
+			w := &s.units[u]
+			if w.health <= 0 || w.u_type != preferred || w.explore_turn == turn {
+				continue
+			}
+			return u
+		}
+	}
+	// idleMilitary: the farthest-seeing idle soldier; priests excluded
+	far := -1
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.u_type == "worker" || w.u_type == "support" || in_combat(g, w) || w.explore_turn == turn {
+			continue
+		}
+		if far < 0 || unit_vision(w) > unit_vision(&s.units[far]) {
+			far = u
+		}
+	}
+	if far >= 0 {
+		return far
+	}
+	// the idle worker (isIdleWorker)
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.u_type != "worker" || w.explore_turn == turn {
+			continue
+		}
+		if !w.is_building && w.task != TASK_BUILDING && w.task != TASK_HARVESTING && w.task != TASK_CARRYING && w.task != TASK_FARM_WORK && !w.is_harvesting && !w.carrying && w.farm < 0 {
+			return u
+		}
+	}
+	// the free worker: not a builder
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.u_type != "worker" || w.explore_turn == turn {
+			continue
+		}
+		if w.task != TASK_BUILDING && !w.is_building {
+			return u
+		}
+	}
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.u_type == "support" || w.explore_turn == turn {
+			continue
+		}
+		if !in_combat(g, w) {
+			return u
+		}
+	}
+	for u in 0 ..< s.n_units {
+		w := &s.units[u]
+		if w.health <= 0 || w.u_type == "worker" || w.u_type == "support" {
+			continue
+		}
+		if w.explore_turn != turn {
+			return u
+		}
+	}
+	return -1
+}
+
+// openai-ai.js releaseUnitForOrders: cleanly drop any harvest/farm/combat job
+// before the new order. The farm's assigned worker and the build site are other
+// entities' bookkeeping, so they are cleared here too.
+release_unit_for_orders :: proc(g: ^game_state, s: ^seat, u: ^unit_state) {
+	if u.farm >= 0 && u.farm < s.n_bldgs && s.bldgs[u.farm].assigned_worker >= 0 {
+		s.bldgs[u.farm].assigned_worker = -1
+	}
+	u.farm = -1
+	u.harvest_node = -1
+	u.is_harvesting = false
+	u.harvest_timer = 0
+	u.harvest_amt = 0
+	u.carrying = false
+	u.is_attacking = false
+	u.atk_kind = 0
+	u.attack_move = false
+	u.n_rt = 0
+	u.orig_kind = 0
+	u.build_site = -1
+	u.is_building = false
+	u.repair_site = -1
+	u.former_task = -1
+	u.former_node = -1
+	u.former_farm = -1
+}
+
+// explore for a model seat (openai-ai.js executeExplore, at the b1084 rules):
+// the tile, up to two more tiles walked in order, the pick, and the reply the
+// reference's model reads — the same [ERROR] gates, the same route state.
+serve_explore :: proc(g: ^game_state, s: ^seat, obj: string) -> string {
+	T := 7
+	last_col := "G"
+	turn := s.turn_seq
+	tile_s := jstr_field(obj, "tile")
+	if tile_s == "" {
+		return "[ERROR] explore needs a \"tile\": one label from \"map.exploration\" — column A-G then row 1-7, e.g. \"tile\":\"C5\". \"map.exploration\" gives the percent of each tile you have already seen."
+	}
+	row, col, ok := parse_tile(tile_s, T)
+	if !ok {
+		return fmt.aprintf("[ERROR] \"{}\" is not a map tile. Use a COLUMN LETTER then a ROW NUMBER: A-{} and 1-{}, e.g. \"C5\" (not \"5C\", and not coordinates). The tiles and how much of each you have seen are in \"map.exploration\".", tile_s, last_col, T)
+	}
+	// the route: "then", up to two more tiles, walked in order. A list written
+	// as one string ("D5, E6") is the same list.
+	then_items: [4]string
+	n_then := jarr_field(obj, "then", then_items[:])
+	if n_then == 0 {
+		one := jstr_field(obj, "then")
+		if one != "" {
+			// split on every non-alphanumeric
+			start := 0
+			for i := 0; i <= len(one); i += 1 {
+				sep := i == len(one)
+				if !sep {
+					c := one[i]
+					if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+						continue
+					}
+					sep = true
+				}
+				if i > start && n_then < 4 {
+					then_items[n_then] = one[start:i]
+					n_then += 1
+				}
+				start = i + 1
+			}
+		}
+	}
+	if n_then > 2 {
+		return fmt.aprintf("[ERROR] explore visits at most 3 tiles: \"tile\" and up to 2 in \"then\". You gave {}, so nothing was sent. Send the rest on its next turn, or with another unit.", n_then + 1)
+	}
+	then: [2][2]i32
+	n_th := 0
+	for i := 0; i < n_then; i += 1 {
+		r2, c2, ok2 := parse_tile(then_items[i], T)
+		if !ok2 {
+			return fmt.aprintf("[ERROR] \"{}\" in \"then\" is not a map tile, so nothing was sent. Use a COLUMN LETTER then a ROW NUMBER: A-{} and 1-{}, e.g. \"C5\".", then_items[i], last_col, T)
+		}
+		then[n_th] = {i32(r2), i32(c2)}
+		n_th += 1
+	}
+	// the pick: explicit handles win outright
+	ids: [4]int
+	n_ids := jints_field(obj, "unitIds", ids[:])
+	preferred := jstr_field(obj, "unitType")
+	scout := -1
+	named := ""
+	if n_ids > 0 {
+		missing := ""
+		n_missing := 0
+		for k := 0; k < n_ids; k += 1 {
+			found := -1
+			for u in 0 ..< s.n_units {
+				if s.units[u].health > 0 && s.units[u].handle == ids[k] {
+					found = u
+					break
+				}
+			}
+			if found >= 0 && s.units[found].explore_turn != turn {
+				scout = found
+				break
+			}
+			if found < 0 {
+				if n_missing > 0 {
+					missing = fmt.aprintf("{}, {}", missing, ids[k])
+				} else {
+					missing = fmt.aprintf("{}", ids[k])
+				}
+				n_missing += 1
+			}
+		}
+		if scout < 0 {
+			if n_missing > 0 && n_missing == n_ids {
+				return "[ERROR] none of those units is yours to send any more"
+			}
+			return "[ERROR] That unit is already scouting this turn on an earlier command, so nothing was sent. Name a different unit, or send this tile next turn."
+		}
+		if n_missing > 0 {
+			named = fmt.aprintf(" (no longer yours or already dead: {})", missing)
+		}
+	} else {
+		scout = pick_scout(g, s, preferred, turn)
+	}
+	if scout < 0 {
+		any_left := false
+		for u in 0 ..< s.n_units {
+			w := &s.units[u]
+			if w.health > 0 && w.u_type != "support" && w.explore_turn == turn {
+				any_left = true
+				break
+			}
+		}
+		if any_left {
+			return "[ERROR] Every unit that could scout is already going somewhere else this turn on an earlier command, so nothing was sent. One explore per free unit per turn; name unitIds to choose who goes."
+		}
+		return "[ERROR] No unit available to explore."
+	}
+	w := &s.units[scout]
+	was_busy := w.u_type == "worker" && (w.is_harvesting || w.carrying || w.farm >= 0 || w.task == TASK_BUILDING || w.is_building)
+	missed := preferred != "" && w.u_type != preferred
+	vision := unit_vision(w)
+	tx, tz := point_in_tile(g, s, row, col, vision)
+	release_unit_for_orders(g, s, w)
+	if w.u_type == "worker" {
+		w.task = TASK_SCOUTING
+	}
+	w.is_moving = true
+	w.target_x = tx
+	w.target_z = tz
+	w.explore_turn = turn
+	// the rest of the route, held against the point this order aims at: the
+	// unit goes on only if it arrives THERE. Always written, so a new explore
+	// replaces an old route.
+	w.route_stops = then
+	w.route_n = n_th
+	w.route_aim_x = tx
+	w.route_aim_z = tz
+	ev_order(g, int(s.ci), "explore", fmt.aprintf("{}_{}", i64(math.floor(tx + 0.5)), i64(math.floor(tz + 0.5))))
+	pct := tile_seen_pct(s, row, col)
+	label := tile_label(row, col)
+	defer delete(label)
+	route := ""
+	if n_th > 0 {
+		l2 := tile_label(int(then[0][0]), int(then[0][1]))
+		defer delete(l2)
+		if n_th > 1 {
+			l3 := tile_label(int(then[1][0]), int(then[1][1]))
+			defer delete(l3)
+			route = fmt.aprintf(", then {}, then {}", l2, l3)
+		} else {
+			route = fmt.aprintf(", then {}", l2)
+		}
+	}
+	pulled := ""
+	if was_busy {
+		pulled = " (no worker was idle, so one was pulled off gathering — give it a job again once it arrives)"
+	}
+	choice_note := ""
+	if missed {
+		choice_note = fmt.aprintf(" (no idle \"{}\" was free, so your {} was used instead)", preferred, w.u_type)
+	}
+	who := ""
+	if w.handle != 0 {
+		who = fmt.aprintf(" #{}", w.handle)
+	}
+	return fmt.aprintf("OK - Sent your {}{}{} to scout tile {} (~{}s to arrive){}. {} is {}% explored so far; one pass uncovers only part of a tile, so expect to send scouts there again.{}{}", w.u_type, who, named, label, i64(math.max(1, math.ceil(m_hypot(w.x - tx, w.z - tz) / (w.speed * 3)))), route, label, pct, pulled, choice_note)
+}

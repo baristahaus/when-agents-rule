@@ -34,7 +34,13 @@ const tools = [
   { type: 'function', function: { name: 'train_unit', description: 'Train a unit at the building that makes it.', parameters: { type: 'object', properties: { unitType: { type: 'string' } }, required: ['unitType'] } } },
   { type: 'function', function: { name: 'build_structure', description: 'Place a building site near your Town Center.', parameters: { type: 'object', properties: { buildingType: { type: 'string' } }, required: ['buildingType'] } } },
   { type: 'function', function: { name: 'research_tech', description: 'Research a tech from research.available.', parameters: { type: 'object', properties: { techId: { type: 'string' } }, required: ['techId'] } } },
-  { type: 'function', function: { name: 'explore', description: 'Send a spare unit to scout the least-explored tile.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'explore', description: 'Send a unit to scout a map tile, or up to three in a row.',
+    parameters: { type: 'object', properties: {
+      tile: { type: 'string', description: 'Tile label from map.exploration, e.g. "C5" - column letter, then row number.' },
+      then: { type: 'array', items: { type: 'string' }, maxItems: 2, description: 'Up to 2 more tiles, visited in order after "tile". Optional.' },
+      unitType: { type: 'string', description: 'Which unit type to send. Optional.' },
+      unitIds: { type: 'array', items: { type: 'integer' }, description: 'Exact unit ids to send. Optional.' },
+    }, required: ['tile'] } } },
 ];
 
 // The scripted opening: workers while there is room, a house near the cap,
