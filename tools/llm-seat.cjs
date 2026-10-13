@@ -147,11 +147,37 @@ async function askModel(state) {
   const j = await res.json();
   const latency = Date.now() - started;
   const msg = j.choices && j.choices[0] && j.choices[0].message;
-  const actions = (msg && msg.tool_calls ? msg.tool_calls : []).map(tc => {
+  let actions = (msg && msg.tool_calls ? msg.tool_calls : []).map(tc => {
     let params = {};
     try { params = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
     return { action: tc.function.name, params };
   });
+  // A model that answers with its chat template's markup as plain text —
+  // <function=name>\n<parameter=key>value</parameter>…</function> blocks in
+  // "content", finish "stop" (q38fn.ngb10 through this endpoint, measured
+  // 2026-10-11). OpenAI tool_calls absent, the calls are all there in the text.
+  // Parse them rather than let the turn pass: the same service the harness's
+  // toolFallback performs for inline JSON, one format over.
+  if (!actions.length && msg && typeof msg.content === 'string' && msg.content.includes('<function=')) {
+    const re = /<function=([a-z_]+)>\n?([\s\S]*?)<\/function>/g;
+    let m2;
+    while ((m2 = re.exec(msg.content)) !== null) {
+      const params = {};
+      const pre = /<parameter=([a-zA-Z_]+)>\n?([\s\S]*?)<\/parameter>/g;
+      let p2;
+      while ((p2 = pre.exec(m2[2])) !== null) {
+        let v = p2[2].trim();
+        if ((v.startsWith('{') && v.endsWith('}')) || (v.startsWith('[') && v.endsWith(']'))) {
+          try { v = JSON.parse(v); } catch (e) { /* keep the string */ }
+        }
+        if (params[p2[1]] === undefined) params[p2[1]] = v;   // first wins, tool_calls semantics
+      }
+      actions.push({ action: m2[1], params });
+    }
+    if (actions.length) {
+      console.error(`seat ${seat}: ${actions.length} call(s) from the text markup`);
+    }
+  }
   const usage = j.usage ? { prompt_tokens: j.usage.prompt_tokens, completion_tokens: j.usage.completion_tokens } : null;
   if (!actions.length) console.error(`seat ${seat} raw: ${JSON.stringify(msg).slice(0,180)} finish: ${j.choices[0].finish_reason}`);
   return { actions, usage, text: (msg && msg.content) || '', latency };
