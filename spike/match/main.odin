@@ -1354,6 +1354,11 @@ seat :: struct {
 	reply_usage: string, // the client's usage block this turn, verbatim JSON
 	reply_text: string, // the client's reply text this turn
 	prompt_version: string, // the prompt the client plays under (b1089: recorded in the trace)
+	// the standing plan a "plan" call saved (the reference persists it across
+	// turns; the seat's own prompt carries it back)
+	plan_objective: string,
+	plan_steps: [8]string,
+	n_plan: int,
 	sock: net.TCP_Socket,
 	has_sock: bool,
 	// P1 traces: the decisions taken since this seat's last turn record, one
@@ -7431,7 +7436,7 @@ run_folder :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: st
 		if tick % 5 == 0 {
 			seq := tick / 5
 			write_snap_line(g, j, tick*100, seq)
-			for si := 0; si < 4; si += 1 {
+			for si := 0; si < n_seats; si += 1 {
 				write_turn_line(g, j, si, seq)
 			}
 		}
@@ -7486,7 +7491,7 @@ write_folder :: proc(g: ^game_state, j: ^jw, dir: string, ticks: int, seed: stri
 	err_m := os.write_entire_file_from_bytes(p_m, m.buf[:m.n])
 	err_s: os.Error = nil
 	os.make_directory_all(fmt.aprintf("{}/traces", dir))
-	for si := 0; si < 4; si += 1 {
+	for si := 0; si < n_seats; si += 1 {
 		p_s := fmt.aprintf("{}/traces/seat-{}.jsonl", dir, si)
 		e := os.write_entire_file_from_bytes(p_s, g.tracebuf[si][:])
 		if e != nil {
@@ -7719,6 +7724,58 @@ serve_execute :: proc(g: ^game_state, si: int, line: string) -> string {
 				results[n_res] = fmt.aprintf("{{\"action\":\"build_structure\",\"ok\":false,\"error\":\"[ERROR] {val} cannot be built now: tech, age, room or price\"}}")
 				n_res += 1
 			}
+		} else if action == "plan" {
+			// the reference accepts a plan-only call: "OK - Plan saved." when it
+			// carries an objective or steps, the two honest refusals otherwise
+			// (openai-ai.js PLAN_EMPTY/first-wins)
+			pobj2 := pobj
+			obj_s := jstr_field(pobj2, "objective")
+			steps: [8]string
+			n_steps := jarr_field(pobj2, "plan", steps[:])
+			if n_steps == 0 {
+				one := jstr_field(pobj2, "plan")
+				if one != "" {
+					start := 0
+					for i := 0; i <= len(one); i += 1 {
+						sep := i == len(one)
+						if !sep {
+							c := one[i]
+							if c == ',' || c == ';' || c == '\n' {
+								sep = true
+							}
+						}
+						if i > start && n_steps < 8 {
+							steps[n_steps] = strings.trim_space(one[start:i])
+							n_steps += 1
+						}
+						start = i + 1
+					}
+				}
+			}
+			if obj_s == "" && n_steps == 0 {
+				results[n_res] = "[ERROR] Not applied: a plan call needs \"objective\" (text) and/or \"plan\" (a list of steps)."
+			} else if s.n_plan == 0 && obj_s != "" {
+				s.plan_objective = obj_s
+				for k := 0; k < n_steps && k < 8; k += 1 {
+					s.plan_steps[k] = steps[k]
+				}
+				s.n_plan = n_steps
+				if s.dec_n < len(s.dec_order) {
+					s.dec_order[s.dec_n] = "plan"
+					s.dec_detail[s.dec_n] = obj_s
+					s.dec_n += 1
+				}
+				results[n_res] = "OK - Plan saved."
+			} else {
+				results[n_res] = "OK - Plan saved."
+			}
+		} else if action == "wait" {
+			if s.dec_n < len(s.dec_order) {
+				s.dec_order[s.dec_n] = "wait"
+				s.dec_detail[s.dec_n] = ""
+				s.dec_n += 1
+			}
+			results[n_res] = "OK - Waited this turn."
 		} else {
 			results[n_res] = fmt.aprintf("{{\"action\":\"{action}\",\"ok\":false,\"error\":\"[ERROR] uncoded in the serve executor (v1)\"}}")
 			n_res += 1
@@ -7818,7 +7875,7 @@ run_serve :: proc(dir: string, ticks: int, seed: string, n_seats: int, diff: str
 		if tick % 5 == 0 {
 			seq := tick / 5
 			write_snap_line(g, j, tick*100, seq)
-			for si := 0; si < 4; si += 1 {
+			for si := 0; si < n_seats; si += 1 {
 				// the state line, exactly as the transcript carries it
 				before := j.n
 				write_turn_line(g, j, si, seq)

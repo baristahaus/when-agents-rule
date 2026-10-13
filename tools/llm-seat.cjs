@@ -65,6 +65,7 @@ try {
         medium: 'The playing field is a winter valley: food is scarce; wood and stone are normal.',
         hard: 'The playing field is a desert valley: food and wood are both extremely scarce, and stone is half as common.',
     };
+    let standing = null;   // the plan this seat saved, echoed back as the reference does
     systemPromptFor = (state, match) => {
         const civId = (state && state.player && state.player.civilization) || 'egyptian';
         const civ = ctx.getCivilization ? ctx.getCivilization(civId) : null;
@@ -74,12 +75,17 @@ try {
             ? state.gameStats.opponents.length : 3) + 1;
         const mapSize = (match && match.mapSize) || (state && state.map && state.map.size) || 800;
         const terrain = difficultyBrief[(match && match.difficulty)] || difficultyBrief.medium;
-        return template
+        const base = template
             .replace(/\{\{civilization\}\}/g, civId)
             .replace(/\{\{bonus\}\}/g, String(bonus))
             .replace(/\{\{players\}\}/g, String(players))
             .replace(/\{\{mapSize\}\}/g, String(mapSize))
             .replace(/\{\{terrain\}\}/g, terrain);
+        if (standing) {
+            return base + '\n\nYOUR STANDING OBJECTIVE (you set this; it persists until you change it with a "plan" call — update it as your plan evolves):\n' + standing.objective
+                + (standing.steps && standing.steps.length ? '\nYour plan:\n' + standing.steps.map((s, i) => (i + 1) + '. ' + s).join('\n') : '');
+        }
+        return base;
     };
     console.log(`seat prompt: ${PROMPT_VERSION} (pin verified)`);
 } catch (e) {
@@ -205,7 +211,15 @@ sock.on('data', d => {
         actions: r.actions,
         usage: r.usage ? { prompt_tokens: r.usage.prompt_tokens, completion_tokens: r.usage.completion_tokens, latencyMs: r.latency } : null,
         replyText: r.text || '',
-      })).catch(e => { console.log(`seat ${seat}: model error ${e.message}; passing`); respond({ actions: [] }); });
+      })).then(r => {
+        // a plan the host accepted is the seat's standing objective from now on
+        const planCall = (r.actions || []).find(a => a.action === 'plan');
+        if (planCall && r.replyText && r.replyText.startsWith('OK - Plan saved')) {
+          const p = planCall.params || {};
+          standing = { objective: typeof p.objective === 'string' ? p.objective : (standing && standing.objective) || '',
+                       steps: Array.isArray(p.plan) ? p.plan : (standing && standing.steps) || [] };
+        }
+      }).catch(e => { console.log(`seat ${seat}: model error ${e.message}; passing`); respond({ actions: [] }); });
     } else {
       respond({ actions: fakePolicy(rec.state, rec.turn), usage: null, replyText: '' });
     }
