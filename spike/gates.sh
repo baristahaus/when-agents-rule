@@ -344,6 +344,27 @@ else
 	fi
 fi
 
+# Gate 14 - the analyzer (P3 the eyes): the report reads a folder and says what
+# happened; the A/B view of two same-seed scripted runs diffs to zero (the tool
+# agrees with the record's own determinism); the kill chain names the blows and
+# the order that sent them.
+if ! command -v node >/dev/null 2>&1; then
+	say "gate 14  the analyzer: report, A/B, chain" "SKIP - no node"
+else
+	if node tools/analyze.cjs report /tmp/gate-llm-a > /tmp/gate-an-a.txt 2>&1 \
+	   && node tools/analyze.cjs report /tmp/gate-llm-a > /tmp/gate-an-a2.txt 2>&1 \
+	   && cmp -s /tmp/gate-an-a.txt /tmp/gate-an-a2.txt \
+	   && node tools/analyze.cjs ab /tmp/gate-llm-a /tmp/gate-llm-b > /tmp/gate-an-ab.txt 2>&1 \
+	   && grep -q "conditions MATCH" /tmp/gate-an-ab.txt \
+	   && ! grep -E "decisions" /tmp/gate-an-ab.txt | grep -vE "decisions ([0-9]+) → \1" \
+	   && grep -qE "orders .*3→3" /tmp/gate-an-ab.txt; then
+		say "gate 14  the analyzer: report, A/B, chain" "ok - the report is deterministic, the A/B of two same-seed runs diffs to zero"
+	else
+		say "gate 14  the analyzer: report, A/B, chain" "FAIL"
+		fails=$((fails + 1))
+	fi
+fi
+
 if [ "$fails" -eq 0 ]; then
 	printf '\nall gates green — the transcription matches the reference and the compiler is honest\n'
 else
